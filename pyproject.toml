@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pysparkplug-pde"
+version = "0.1.0"
+description = "PDE/ODE-constrained Bayesian inverse problems for pysparkplug (a pysp.ppl plugin)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Grant Boquet", email = "grant.boquet@gmail.com" }]
+keywords = ["pde", "inverse problems", "bayesian", "pysparkplug"]
+# Depends on pysparkplug (the import package is `pysp`); the solvers are numpy/scipy.
+dependencies = [
+    "pysp-learn",
+    "numpy",
+    "scipy",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "pytest-xdist"]
+lint = ["ruff==0.15.17"]
+
+[project.urls]
+Homepage = "https://github.com/gmboquet/pysparkplug-pde"
+Repository = "https://github.com/gmboquet/pysparkplug-pde"
+
+[tool.setuptools.packages.find]
+include = ["pysparkplug_pde*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["*_test.py"]
+python_classes = ["*Test", "*TestCase"]
+python_functions = ["test_*"]
+addopts = "-ra --strict-markers -n auto"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501", "E741", "E731", "E402", "F841", "B008", "UP031", "B905", "B904", "B007"]
