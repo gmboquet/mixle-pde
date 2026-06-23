@@ -39,6 +39,13 @@ from pysparkplug_pde.multiphysics import CoupledPDESystem, solve_poisson
 from pysparkplug_pde.shape import level_set_material, shape_optimize
 from pysparkplug_pde.wave import WaveEquation2D
 
+# Register the sparse-solve detector so pysp.ppl.field can guard how='laplace' on a sparse PDE forward
+# (its dense double-backward Hessian would be silently wrong). pysp has no PDE dependency; this plugs in.
+from pysp.ppl.field import register_sparse_solve_detector as _register_sparse_solve_detector
+from pysparkplug_pde.pde_solve import sparse_used_since as _sparse_used_since
+
+_register_sparse_solve_detector(_sparse_used_since)
+
 
 def PDE(operator: Any, *, name: str | None = None) -> RandomVariable:
     """PDE-constrained latent-field model for spatiotemporal data.
