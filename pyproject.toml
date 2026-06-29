@@ -10,10 +10,10 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [{ name = "Grant Boquet", email = "grant.boquet@gmail.com" }]
-keywords = ["pde", "inverse problems", "bayesian", "pysparkplug"]
-# Depends on pysparkplug (the import package is `pysp`); the solvers are numpy/scipy.
+keywords = ["pde", "inverse problems", "bayesian", "mixle"]
+# Depends on mixle (the import package is `mixle`); the solvers are numpy/scipy.
 dependencies = [
-    "pysp-learn",
+    "mixle",
     "numpy",
     "scipy",
 ]
@@ -23,8 +23,8 @@ test = ["pytest>=8", "pytest-xdist"]
 lint = ["ruff==0.15.17"]
 
 [project.urls]
-Homepage = "https://github.com/gmboquet/pysparkplug-pde"
-Repository = "https://github.com/gmboquet/pysparkplug-pde"
+Homepage = "https://github.com/gmboquet/mixle-pde"
+Repository = "https://github.com/gmboquet/mixle-pde"
 
 [tool.setuptools.packages.find]
 include = ["mixle_pde*"]
