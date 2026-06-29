@@ -17,11 +17,13 @@ if HAS_TORCH:
         cross_gradient,
         dc_resistivity,
         depth_weighting,
+        eikonal_traveltime,
         gravity_point_sensitivity,
         magnetic_dipole_sensitivity,
         regularized_gauss_newton,
         roughness_operator,
         straight_ray_operator,
+        traveltime_tomography,
     )
 
 
@@ -195,6 +197,39 @@ class PotentialFieldTestCase(unittest.TestCase):
         cells = np.array([[0.0, 0.0, -100.0]])
         G = magnetic_dipole_sensitivity(obs, cells, 1.0e6, inclination=-60.0, declination=3.0)
         self.assertTrue(np.isfinite(G).all())
+
+
+@unittest.skipUnless(HAS_TORCH, "requires PyTorch")
+class EikonalTestCase(unittest.TestCase):
+    def test_homogeneous_traveltime(self):
+        # in a uniform-slowness medium the eikonal traveltime equals slowness * straight-line distance
+        nx, nz, h, s = 31, 31, 1.0, 0.2
+        T = eikonal_traveltime(np.full(nx * nz, s), (nx, nz), 0, spacing=h, n_cycles=4).reshape(nx, nz)
+        corner = T[nx - 1, nz - 1]
+        exact = s * np.hypot((nx - 1) * h, (nz - 1) * h)
+        self.assertLess(abs(corner - exact) / exact, 0.05)   # FSM is accurate to a few %
+
+    def test_crosshole_tomography_recovers_layer(self):
+        # plant a fast horizontal layer between two boreholes, forward, invert -> recover the layer
+        nx, nz, h = 11, 21, 1.0
+        N = nx * nz
+        s_true = np.full((nx, nz), 0.2)
+        s_true[:, 8:12] = 0.14                                # fast (low-slowness) layer
+        s_true = s_true.ravel()
+        src = np.array([0 * nz + j for j in range(1, nz - 1, 2)])
+        rcv = np.array([(nx - 1) * nz + j for j in range(1, nz - 1, 2)])
+        si, ri = np.meshgrid(src, rcv, indexing="ij")
+        si, ri = si.ravel(), ri.ravel()
+        times = np.array([eikonal_traveltime(s_true, (nx, nz), int(s), spacing=h, n_cycles=4)[int(r)]
+                          for s, r in zip(si, ri)])
+        rng = np.random.RandomState(0)
+        times = times + 0.01 * times.std() * rng.randn(len(times))
+        s_inv, vel, _ = traveltime_tomography(times, si, ri, (nx, nz), spacing=h, slowness0=0.2,
+                                              noise=0.01 * times.std() + 1e-6, beta=5.0, n_iter=6,
+                                              bounds=(0.08, 0.3))
+        # the recovered slowness is lower (faster) in the planted layer than outside it
+        s3 = s_inv.reshape(nx, nz)
+        self.assertLess(s3[:, 8:12].mean(), s3[:, 2:6].mean())
 
 
 if __name__ == "__main__":

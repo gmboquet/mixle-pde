@@ -37,6 +37,8 @@ import scipy.sparse as sp
 __all__ = [
     "dc_resistivity",
     "straight_ray_operator",
+    "eikonal_traveltime",
+    "traveltime_tomography",
     "magnetic_dipole_sensitivity",
     "gravity_point_sensitivity",
     "depth_weighting",
@@ -244,6 +246,188 @@ def straight_ray_operator(shape, sources, receivers, *, spacing=1.0, n_seg=64, p
         cols.extend(nz.tolist())
         data.extend((binc[nz] * seg_len).tolist())
     return sp.csr_matrix((data, (rows, cols)), shape=(len(pairs), int(np.prod(shape))))
+
+
+def _fsm_2d(s, T, si, sj, h, n_cycles):
+    """Fast-sweeping eikonal solve |grad T| = s on a 2-D grid (Godunov upwind, alternating sweeps)."""
+    nx, nz = s.shape
+    for _ in range(n_cycles):
+        for di in range(2):
+            for dj in range(2):
+                for ii in range(nx):
+                    i = ii if di == 0 else nx - 1 - ii
+                    for jj in range(nz):
+                        j = jj if dj == 0 else nz - 1 - jj
+                        if i == si and j == sj:
+                            continue
+                        if i == 0:
+                            a = T[1, j]
+                        elif i == nx - 1:
+                            a = T[nx - 2, j]
+                        else:
+                            a = min(T[i - 1, j], T[i + 1, j])
+                        if j == 0:
+                            b = T[i, 1]
+                        elif j == nz - 1:
+                            b = T[i, nz - 2]
+                        else:
+                            b = min(T[i, j - 1], T[i, j + 1])
+                        f = s[i, j] * h
+                        if abs(a - b) >= f:
+                            tn = min(a, b) + f
+                        else:
+                            tn = 0.5 * (a + b + np.sqrt(2.0 * f * f - (a - b) ** 2))
+                        if tn < T[i, j]:
+                            T[i, j] = tn
+    return T
+
+
+try:
+    from numba import njit as _njit
+
+    _fsm_2d_fast = _njit(cache=True, fastmath=True)(_fsm_2d)
+except Exception:  # pragma: no cover - numba optional
+    _fsm_2d_fast = _fsm_2d
+
+
+def eikonal_traveltime(slowness, shape, source, *, spacing=1.0, n_cycles=3):
+    """First-arrival traveltimes from one source by the **fast-sweeping eikonal** solver (the non-trivial,
+    ray-bending forward): solves ``|grad T| = slowness`` on a 2-D grid with ``T=0`` at the source node.
+
+    Args:
+        slowness: (n_cells,) per-cell slowness (1/velocity), grid flattened C-order over ``shape``.
+        shape: ``(nx, nz)`` grid shape.
+        source: flat index of the source node.
+        spacing: grid spacing (scalar).
+        n_cycles: fast-sweeping cycles (each = 4 directional sweeps); 2-4 suffice.
+
+    Returns:
+        (n_cells,) traveltime field, flattened.
+    """
+    nx, nz = (int(shape[0]), int(shape[1]))
+    s = np.ascontiguousarray(np.asarray(slowness, float).reshape(nx, nz))
+    T = np.full((nx, nz), 1.0e9)
+    si, sj = int(source) // nz, int(source) % nz
+    T[si, sj] = 0.0
+    T = _fsm_2d_fast(s, T, si, sj, float(spacing), int(n_cycles))
+    return T.ravel()
+
+
+def _backtrace_ray(Tfield, shape, h, recv, src, n_cells, max_steps=4000):
+    """Ray path receiver->source as cell path-lengths, following the descent of the traveltime field
+    (the Fréchet kernel ``dt/ds_cell = path length in cell``)."""
+    nx, nz = shape
+    T = Tfield.reshape(nx, nz)
+    pos = np.array([recv // nz, recv % nz], float)
+    tgt = np.array([src // nz, src % nz], float)
+    row = np.zeros(n_cells)
+    step = 0.4
+    for _ in range(max_steps):
+        i, j = int(round(pos[0])), int(round(pos[1]))
+        i = min(max(i, 0), nx - 1); j = min(max(j, 0), nz - 1)
+        gi = (T[min(i + 1, nx - 1), j] - T[max(i - 1, 0), j]) / 2.0
+        gj = (T[i, min(j + 1, nz - 1)] - T[i, max(j - 1, 0)]) / 2.0
+        g = np.hypot(gi, gj)
+        if g < 1e-12:
+            break
+        pos = pos - step * np.array([gi, gj]) / g
+        row[i * nz + j] += step * h
+        if np.hypot(pos[0] - tgt[0], pos[1] - tgt[1]) < 1.0:
+            break
+    return row
+
+
+def traveltime_tomography(times, sources, receivers, shape, *, spacing=1.0, slowness0=None,
+                          noise=1.0, beta=1.0, n_iter=8, line_search=20, n_cycles=3, bounds=None, verbose=False):
+    r"""Crosshole/surface first-arrival **traveltime tomography** with the bending-ray eikonal forward.
+
+    Inverts observed traveltimes for a 2-D slowness (1/velocity) field by regularized Gauss-Newton: each
+    iteration solves the eikonal once per source (``eikonal_traveltime``), predicts the traveltimes, builds the
+    ray-path Jacobian by back-tracing the traveltime gradient (``_backtrace_ray``), and takes a smoothness-
+    regularized step. Because the rays *bend* with the updated model, this is genuinely nonlinear -- the
+    non-trivial forward, unlike straight-ray tomography.
+
+    Args:
+        times: (n_rays,) observed first-arrival traveltimes.
+        sources, receivers: (n_rays,) flat grid indices of each ray's source and receiver node.
+        shape: ``(nx, nz)`` grid.
+        spacing: grid spacing.
+        slowness0: initial slowness (scalar or (n_cells,)); default = median apparent slowness.
+        noise: per-datum traveltime std (scalar or array).
+        beta: smoothness weight.
+        n_iter: Gauss-Newton iterations.
+        bounds: optional ``(lo, hi)`` slowness bounds.
+        verbose: print misfit per iteration.
+
+    Returns:
+        ``(slowness, velocity, predicted_times)`` -- the inverted slowness (n_cells,), its reciprocal, and the
+        final predicted traveltimes.
+    """
+    nx, nz = int(shape[0]), int(shape[1])
+    N = nx * nz
+    times = np.asarray(times, float)
+    sources = np.asarray(sources, int)
+    receivers = np.asarray(receivers, int)
+    w = np.broadcast_to(1.0 / np.asarray(noise, float), times.shape).astype(float)
+    if slowness0 is None:
+        slowness0 = np.median(times / np.maximum(1e-6, np.abs(
+            np.array([np.hypot((sources[k] // nz - receivers[k] // nz),
+                               (sources[k] % nz - receivers[k] % nz)) * spacing for k in range(len(times))]))))
+    s = np.full(N, float(slowness0)) if np.isscalar(slowness0) else np.asarray(slowness0, float).copy()
+    R = roughness_operator(shape, spacing=spacing)
+    RtR = np.asarray((R.T @ R).todense())
+    uniq = np.unique(sources)
+
+    def forward_and_jac(sv):
+        tpred = np.zeros(len(times))
+        G = np.zeros((len(times), N))
+        for src in uniq:
+            T = eikonal_traveltime(sv, shape, int(src), spacing=spacing, n_cycles=n_cycles)
+            idx = np.where(sources == src)[0]
+            for k in idx:
+                tpred[k] = T[receivers[k]]
+                G[k] = _backtrace_ray(T, (nx, nz), spacing, int(receivers[k]), int(src), N)
+        return tpred, G
+
+    def misfit(sv):
+        tp = np.zeros(len(times))
+        for src in uniq:
+            T = eikonal_traveltime(sv, shape, int(src), spacing=spacing, n_cycles=n_cycles)
+            idx = np.where(sources == src)[0]
+            tp[idx] = T[receivers[idx]]
+        r = (tp - times) * w
+        reg = R @ sv
+        return 0.5 * float(r @ r) + 0.5 * beta * float(reg @ reg), tp
+
+    f_prev, _ = misfit(s)
+    for it in range(n_iter):
+        tpred, G = forward_and_jac(s)
+        Gw = G * w[:, None]
+        H = Gw.T @ Gw + beta * RtR
+        g = Gw.T @ ((tpred - times) * w) + beta * (RtR @ s)
+        try:
+            ds = np.linalg.solve(H, -g)
+        except np.linalg.LinAlgError:
+            ds = np.linalg.lstsq(H, -g, rcond=None)[0]
+        step = 1.0
+        improved = False
+        for _ in range(line_search):
+            cand = s + step * ds
+            if bounds is not None:
+                cand = np.clip(cand, bounds[0], bounds[1])
+            f_new, _ = misfit(cand)
+            if f_new < f_prev:
+                s = cand
+                f_prev = f_new
+                improved = True
+                break
+            step *= 0.5
+        if verbose:
+            print(f"  tomography iter {it:2d}  misfit {f_prev:.4e}  step {step:.3g}")
+        if not improved:
+            break
+    tpred, _ = forward_and_jac(s)
+    return s, 1.0 / s, tpred
 
 
 def roughness_operator(shape, *, spacing=1.0):
