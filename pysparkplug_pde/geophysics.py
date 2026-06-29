@@ -53,7 +53,7 @@ def _torch():
 # --------------------------------------------------------------------------------------------------
 # Forward operators
 # --------------------------------------------------------------------------------------------------
-def dc_resistivity(log_sigma, shape, schedule, *, spacing=1.0, sigma_ref=1.0, log_data=True):
+def dc_resistivity(log_sigma, shape, schedule, *, spacing=1.0, sigma_ref=1.0, log_data=True, clamp=12.0):
     """DC-resistivity (ERT) forward: transfer resistances for a quadrupole measurement schedule.
 
     Solves the steady current-flow equation ``-div(sigma grad phi) = I`` (Poisson) on the structured grid,
@@ -70,6 +70,9 @@ def dc_resistivity(log_sigma, shape, schedule, *, spacing=1.0, sigma_ref=1.0, lo
         spacing: grid spacing (scalar or per-axis).
         sigma_ref: reference conductivity multiplying ``exp(log_sigma)``.
         log_data: if True (default) return ``log|R|`` (the stable, well-scaled data for inversion); else ``R``.
+        clamp: bound ``|log_sigma|`` before exponentiating, so an extreme iterate during a Gauss-Newton line
+            search cannot produce an infinite/zero conductivity and a singular factor. Gradients still flow on
+            the unclamped interior; set to ``None`` to disable.
 
     Returns:
         torch tensor of length ``len(schedule)`` -- the (log) transfer resistances ``R = (phi_m - phi_n)/I``.
@@ -80,6 +83,8 @@ def dc_resistivity(log_sigma, shape, schedule, *, spacing=1.0, sigma_ref=1.0, lo
     shape = tuple(int(s) for s in shape)
     n = int(np.prod(shape))
     cell = float(np.prod(np.atleast_1d(spacing)))
+    if clamp is not None:
+        log_sigma = torch.clamp(log_sigma, -float(clamp), float(clamp))
     sigma = sigma_ref * torch.exp(log_sigma)
     rows, cols, vals, nn = divergence_form(sigma, shape, spacing=spacing)
     # group measurements by current injection so we factorize/solve once per unique (a, b)
@@ -325,6 +330,7 @@ def joint_inversion(
     cross_gradient_weight: float = 0.0,
     bounds: tuple | None = None,
     n_iter: int = 10,
+    jac_every: int = 1,
     line_search: int = 25,
     verbose: bool = False,
 ):
@@ -372,6 +378,8 @@ def joint_inversion(
         return tot + xg_pen(xlist)
 
     f_prev = objective(xs)
+    Hcache = [None] * P
+    Jwcache = [None] * P
     for it in range(n_iter):
         # per-model Gauss-Newton block (data + smoothness), with the cross-gradient handled by a gradient step
         new = []
@@ -389,10 +397,12 @@ def joint_inversion(
         for i in range(P):
             x0d = xs[i].detach()
             pred = forwards[i](x0d)
-            J = torch.autograd.functional.jacobian(forwards[i], x0d, vectorize=False).detach().cpu().numpy()
-            Jw = J * ws[i][:, None]
+            if Jwcache[i] is None or it % jac_every == 0:
+                J = torch.autograd.functional.jacobian(forwards[i], x0d, vectorize=False).detach().cpu().numpy()
+                Jwcache[i] = J * ws[i][:, None]
+                Hcache[i] = Jwcache[i].T @ Jwcache[i] + betas[i] * RtR + lam * np.eye(n) * 1e-6
+            Jw, H = Jwcache[i], Hcache[i]
             rw = ((pred - datas_t[i]) * torch.as_tensor(ws[i])).detach().cpu().numpy()
-            H = Jw.T @ Jw + betas[i] * RtR + lam * np.eye(n) * 1e-6
             g = Jw.T @ rw + betas[i] * (RtR @ x0d.cpu().numpy()) + xg_grads[i]
             try:
                 dx = np.linalg.solve(H, -g)
