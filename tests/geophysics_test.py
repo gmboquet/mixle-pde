@@ -16,6 +16,9 @@ if HAS_TORCH:
     from pysparkplug_pde.geophysics import (
         cross_gradient,
         dc_resistivity,
+        depth_weighting,
+        gravity_point_sensitivity,
+        magnetic_dipole_sensitivity,
         regularized_gauss_newton,
         roughness_operator,
         straight_ray_operator,
@@ -143,6 +146,55 @@ class DCResistivityTestCase(unittest.TestCase):
         # the conductor is located (positive correlation) and recovered as more conductive than background
         self.assertGreater(np.corrcoef(m_est, m_true)[0, 1], 0.15)
         self.assertGreater(m_est[blk].mean(), m_est[~blk].mean())
+
+
+@unittest.skipUnless(HAS_TORCH, "requires PyTorch")
+class PotentialFieldTestCase(unittest.TestCase):
+    def test_depth_weighting_monotone(self):
+        z = np.linspace(0.0, -1000.0, 11)            # surface down
+        w = depth_weighting(z, 50.0, nu=2.0)
+        self.assertAlmostEqual(w.max(), 1.0)
+        self.assertTrue(np.all(np.diff(w) < 0))      # decreases with depth
+
+    def test_gravity_sign_and_linearity(self):
+        obs = np.array([[0.0, 0.0, 0.0]])
+        cells = np.array([[0.0, 0.0, -100.0]])       # mass directly below
+        G = gravity_point_sensitivity(obs, cells, 1.0e6)
+        self.assertGreater(G[0, 0], 0.0)             # positive density below -> positive g_z
+        self.assertAlmostEqual(float(gravity_point_sensitivity(obs, cells, 2.0e6)[0, 0]), 2 * float(G[0, 0]))
+
+    def test_gravity_inversion_recovers_blob(self):
+        # forward a compact density blob through the point-mass operator, invert with depth weighting, recover it
+        nx, ny, nz, h = 11, 11, 7, 200.0
+        gx = (np.arange(nx) - nx // 2) * h
+        gz = -np.arange(1, nz + 1) * h
+        CX, CY, CZ = np.meshgrid(gx, gx, gz, indexing="ij")
+        cells = np.column_stack([CX.ravel(), CY.ravel(), CZ.ravel()])
+        N = len(cells)
+        ox = (np.arange(nx) - nx // 2) * h
+        OX, OY = np.meshgrid(ox, ox, indexing="ij")
+        obs = np.column_stack([OX.ravel(), OY.ravel(), np.full(OX.size, 50.0)])
+        truth = np.zeros(N)
+        truth[np.linalg.norm(cells - np.array([0.0, 0.0, -700.0]), axis=1) < 350.0] = -300.0
+        G = gravity_point_sensitivity(obs, cells, h**3)
+        rng = np.random.RandomState(0)
+        d = G @ truth
+        d = d + 0.02 * np.abs(d).std() * rng.randn(len(d))
+        w = depth_weighting(cells[:, 2], 50.0, nu=2.0)
+        Gw = torch.as_tensor(G / w[None, :])
+        R = roughness_operator((nx, ny, nz))
+        s, _ = regularized_gauss_newton(lambda u: Gw @ u, d, np.zeros(N), noise=0.02 * np.abs(d).std() + 1e-3,
+                                        beta=1e-2, roughness=R, n_iter=3, jac_every=99)
+        rho = s / w
+        # recovered low-density region overlaps the truth (location resolved)
+        self.assertLess(cells[np.argmin(rho), 2], -200.0)            # minimum is below the surface
+        self.assertGreater(np.corrcoef(rho, truth)[0, 1], 0.3)       # positive structural correlation
+
+    def test_magnetic_finite(self):
+        obs = np.array([[0.0, 0.0, 0.0]])
+        cells = np.array([[0.0, 0.0, -100.0]])
+        G = magnetic_dipole_sensitivity(obs, cells, 1.0e6, inclination=-60.0, declination=3.0)
+        self.assertTrue(np.isfinite(G).all())
 
 
 if __name__ == "__main__":

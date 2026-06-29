@@ -37,6 +37,9 @@ import scipy.sparse as sp
 __all__ = [
     "dc_resistivity",
     "straight_ray_operator",
+    "magnetic_dipole_sensitivity",
+    "gravity_point_sensitivity",
+    "depth_weighting",
     "roughness_operator",
     "regularized_gauss_newton",
     "cross_gradient",
@@ -48,6 +51,93 @@ def _torch():
     import torch
 
     return torch
+
+
+def field_direction(inclination_deg, declination_deg):
+    """Unit vector of the geomagnetic field in an (east, north, up) frame from inclination/declination
+    (degrees; inclination positive *down*, declination clockwise from north)."""
+    inc, dec = np.radians(inclination_deg), np.radians(declination_deg)
+    return np.array([np.cos(inc) * np.sin(dec), np.cos(inc) * np.cos(dec), -np.sin(inc)])
+
+
+def magnetic_dipole_sensitivity(obs, cells, volumes, *, inclination, declination, field_nt=50000.0):
+    r"""Linear sensitivity matrix ``G`` (n_obs x n_cells) of the magnetic **total-field anomaly** to cell
+    susceptibility, under the induced-magnetization dipole approximation (each cell a point dipole along the
+    ambient field). With susceptibility ``kappa`` (SI, dimensionless), ``d = G @ kappa`` gives the anomaly in nT.
+
+    For a cell of volume ``V`` at displacement ``r`` from an observation point, with field unit vector ``b``
+    and strength ``T0``: ``dT = (T0 V / 4pi) (3 (b.r_hat)^2 - 1) / |r|^3 * kappa`` -- the standard dipole
+    total-field kernel. This is the cheap, robust approximation good for coarse meshes and observations above
+    the cells; the exact rectangular-prism formula (Bhattacharyya 1964) is the rigorous alternative.
+
+    Args:
+        obs: (n_obs, 3) observation coordinates (east, north, up), metres.
+        cells: (n_cells, 3) cell-centre coordinates, metres.
+        volumes: (n_cells,) cell volumes, m^3 (scalar broadcast allowed).
+        inclination, declination: geomagnetic field inclination/declination, degrees.
+        field_nt: ambient field strength T0, nT.
+
+    Returns:
+        ``G`` (n_obs, n_cells) such that ``G @ kappa`` is the total-field anomaly (nT).
+    """
+    b = field_direction(inclination, declination)
+    obs = np.asarray(obs, float)
+    cells = np.asarray(cells, float)
+    V = np.broadcast_to(np.asarray(volumes, float), (len(cells),))
+    d = obs[:, None, :] - cells[None, :, :]          # (n_obs, n_cells, 3) displacement obs<-cell
+    r = np.maximum(np.linalg.norm(d, axis=2), 1e-6)
+    bdotr = (d / r[:, :, None]) @ b                   # (n_obs, n_cells)
+    return (field_nt / (4.0 * np.pi)) * V[None, :] * (3.0 * bdotr**2 - 1.0) / r**3
+
+
+def gravity_point_sensitivity(obs, cells, volumes):
+    r"""Linear sensitivity matrix ``G`` (n_obs x n_cells) of the **vertical gravity anomaly** to cell density
+    contrast, under the point-mass approximation (each cell a point mass at its centre). With density contrast
+    ``rho`` (kg/m^3), ``d = G @ rho`` gives the anomaly in **mGal**.
+
+    For a cell of volume ``V`` at displacement ``r`` from an observation point (vertical offset ``dz``, with
+    ``z`` up so the cell is below): ``g_z = 1e5 * G_grav * V * dz / |r|^3 * rho`` (the ``1e5`` converts
+    m/s^2 to mGal). Linear in ``rho``. The exact rectangular-prism formula (Nagy 1966 / Plouff 1976) is the
+    rigorous alternative for coarse meshes near observations.
+
+    Args:
+        obs: (n_obs, 3) observation coordinates (east, north, up), metres.
+        cells: (n_cells, 3) cell-centre coordinates, metres.
+        volumes: (n_cells,) cell volumes, m^3 (scalar broadcast allowed).
+
+    Returns:
+        ``G`` (n_obs, n_cells) such that ``G @ rho`` is the vertical gravity anomaly (mGal).
+    """
+    G_GRAV = 6.674e-11
+    obs = np.asarray(obs, float)
+    cells = np.asarray(cells, float)
+    V = np.broadcast_to(np.asarray(volumes, float), (len(cells),))
+    d = obs[:, None, :] - cells[None, :, :]
+    r = np.maximum(np.linalg.norm(d, axis=2), 1e-6)
+    return 1.0e5 * G_GRAV * V[None, :] * d[:, :, 2] / r**3
+
+
+def depth_weighting(cell_z, z0, *, nu=3.0, eps=None):
+    r"""Li & Oldenburg (1996, 1998) depth weighting ``w(z) = (|z - z0| + eps)^{-nu/2}``, normalized by its
+    maximum. Potential-field kernels decay with depth, so an unweighted inversion piles all structure at the
+    surface; folding ``w`` into the model regularization compensates. Use ``nu=3`` for magnetics, ``nu=2`` for
+    gravity (the Li & Oldenburg / SimPEG values).
+
+    Args:
+        cell_z: (n_cells,) vertical coordinate of each cell centre (same sign convention as ``z0``).
+        z0: reference level (e.g. the observation height).
+        nu: exponent (3 magnetics, 2 gravity).
+        eps: offset preventing a singularity at ``z = z0``; defaults to half the smallest cell spacing.
+
+    Returns:
+        (n_cells,) weights in (0, 1], largest at depth.
+    """
+    z = np.asarray(cell_z, float)
+    if eps is None:
+        dz = np.abs(np.diff(np.unique(np.round(z, 6))))
+        eps = 0.5 * (dz.min() if len(dz) else 1.0)
+    w = (np.abs(z - z0) + eps) ** (-nu / 2.0)
+    return w / w.max()
 
 
 # --------------------------------------------------------------------------------------------------

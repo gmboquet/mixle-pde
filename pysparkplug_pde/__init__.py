@@ -35,6 +35,9 @@ from pysparkplug_pde.dynamics import (
 )
 from pysparkplug_pde.flow import NavierStokes2D
 from pysparkplug_pde.geophysics import (
+    gravity_point_sensitivity,
+    magnetic_dipole_sensitivity,
+    depth_weighting,
     cross_gradient,
     dc_resistivity,
     joint_inversion,
