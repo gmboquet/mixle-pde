@@ -34,6 +34,14 @@ from pysparkplug_pde.dynamics import (
     register_dynamics_operator,
 )
 from pysparkplug_pde.flow import NavierStokes2D
+from pysparkplug_pde.geophysics import (
+    cross_gradient,
+    dc_resistivity,
+    joint_inversion,
+    regularized_gauss_newton,
+    roughness_operator,
+    straight_ray_operator,
+)
 from pysparkplug_pde.inverse import Differential
 from pysparkplug_pde.multiphysics import CoupledPDESystem, solve_poisson
 from pysparkplug_pde.shape import level_set_material, shape_optimize
