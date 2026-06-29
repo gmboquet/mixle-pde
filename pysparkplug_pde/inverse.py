@@ -35,7 +35,7 @@ from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
-from pysp.ppl.field import Proxy, _ParamSpec
+from mixle.ppl.field import Proxy, _ParamSpec
 
 from pysparkplug_pde._operator import ForwardModel, ObserveFn, RhsFn
 from pysparkplug_pde.ops import _Params, make_ops
@@ -77,7 +77,7 @@ class _DifferentialProxy(Proxy):
         self.over_name = over_name
         self.family = family
         self.prefix = prefix
-        from pysp.ppl.core import _is_free
+        from mixle.ppl.core import _is_free
 
         if family == "gaussian" and _is_free(scale):
             self._scale_name = f"{prefix}.scale"
@@ -163,7 +163,7 @@ def Differential(
     if rhs is not None and (y0 is None or t_grid is None):
         raise ValueError("an initial-value rhs needs y0 and t_grid.")
 
-    from pysp.ppl.field import GaussianField
+    from mixle.ppl.field import GaussianField
 
     field = None
     over_name = None

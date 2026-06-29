@@ -7,7 +7,7 @@ for a perfectly-matched layer). Built on the checkpointed time integrator (Phase
 the velocity field -- the full-waveform-inversion sensitivity -- is available at feasible memory.
 
 The inverse problem -- recover the velocity field ``c(x)`` (or a localized perturbation) from waveforms
-recorded at a few receivers -- is a :class:`~pysp.ppl.Differential` observation that integrates this stepper
+recorded at a few receivers -- is a :class:`~mixle.ppl.Differential` observation that integrates this stepper
 and records the displacement at the receivers; fit it with ``how='gauss_newton'``.
 """
 

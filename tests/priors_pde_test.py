@@ -1,6 +1,6 @@
 """Edge-preserving priors over a PDE/ODE Differential forward: complex-valued data and multistart.
 
-The Gaussian-forward TotalVariation/Potts tests stay in pysp (priors_test.py); these use the
+The Gaussian-forward TotalVariation/Potts tests stay in mixle (priors_test.py); these use the
 ``Differential`` forward operator from pysparkplug-pde.
 """
 
@@ -16,7 +16,7 @@ except ImportError:
     HAS_TORCH = False
 
 if HAS_TORCH:
-    from pysp.ppl import GP, RandomWalk, free, joint, multistart
+    from mixle.ppl import GP, RandomWalk, free, joint, multistart
 
     from pysparkplug_pde import Differential
 

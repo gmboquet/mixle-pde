@@ -1,14 +1,14 @@
 """Typed contracts for the PDE/ODE forward-model machinery.
 
 The PDE-inverse stack does not model a forward operator as a per-operator *object* with
-``apply``/``adjoint``/``assemble`` methods (the way :class:`pysp.ppl.dynamics.DynamicsOperator` is a
+``apply``/``adjoint``/``assemble`` methods (the way :class:`mixle.ppl.dynamics.DynamicsOperator` is a
 formal ABC for the method-of-lines spatial operator). Instead the forward map is expressed as a pair of
 user **callbacks** handed two namespaces:
 
 * a ``p`` namespace -- the latent drivers exposed by name (``p.k``, ``p.field``); see
-  :class:`pysp.ppl.ops._Params`;
+  :class:`mixle.ppl.ops._Params`;
 * an ``ops`` namespace -- a backend-agnostic facade of curated math, structured-grid assembly, the
-  adjoint sparse solve, and the ODE integrators; see :class:`pysp.ppl.ops._Ops`.
+  adjoint sparse solve, and the ODE integrators; see :class:`mixle.ppl.ops._Ops`.
 
 This module formalizes those two de-facto interfaces as ``@runtime_checkable`` Protocols so they can be
 named in type annotations and documented in one place:
@@ -21,7 +21,7 @@ named in type annotations and documented in one place:
   ``forward(p, ops)`` / ``observe(solution, p, ops)`` / ``rhs(u, t, p, ops)`` callbacks.
 
 These are typing/documentation-level: they capture the existing contract without restructuring the free
-functions in :mod:`pysp.ppl.pde_solve` or changing any numerics.
+functions in :mod:`mixle.ppl.pde_solve` or changing any numerics.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ class ForwardOperator(Protocol):
     ODE integrators let the callback compose physics without importing a tensor backend.
 
     Only the structurally load-bearing methods are declared here (the ones the PDE/wave/flow/shape forward
-    models actually call); the concrete :class:`pysp.ppl.ops._Ops` provides additional convenience helpers
+    models actually call); the concrete :class:`mixle.ppl.ops._Ops` provides additional convenience helpers
     (``log``, ``sin``, ``stack``, ``grad``, ...). The protocol is ``@runtime_checkable`` so an ``ops``
     argument can be validated with ``isinstance(ops, ForwardOperator)``.
     """

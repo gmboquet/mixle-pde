@@ -1,6 +1,6 @@
 """The math namespace handed to differential forward models, so user callbacks never import a backend.
 
-A forward model for a PDE/ODE inverse problem is the one part that cannot be written as `pysp.ppl`
+A forward model for a PDE/ODE inverse problem is the one part that cannot be written as `mixle.ppl`
 distribution algebra -- the physics is a function. To keep that escape hatch consistent with the rest of
 the library, the callback is handed an ``ops`` namespace (curated math + grid assembly + solves) and a
 ``p`` namespace (the latent drivers by name), instead of a raw tensor library and a parameter dict:
@@ -31,10 +31,10 @@ class _Params:
 
 class _Ops:
     """A backend-agnostic math namespace: elementwise functions, reductions, an ODE integrator, and the
-    differentiable grid operators / sparse solve from :mod:`pysp.ppl.pde_solve`.
+    differentiable grid operators / sparse solve from :mod:`mixle.ppl.pde_solve`.
 
     This is the concrete forward-operator facade of the PDE-inverse stack; it satisfies the
-    :class:`pysp.ppl._operator.ForwardOperator` protocol (assemble + adjoint solve + integrate), which
+    :class:`mixle.ppl._operator.ForwardOperator` protocol (assemble + adjoint solve + integrate), which
     formalizes the structural method surface that forward-model callbacks rely on.
     """
 

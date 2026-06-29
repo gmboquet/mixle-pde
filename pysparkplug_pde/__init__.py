@@ -1,10 +1,10 @@
-"""pysparkplug-pde — PDE/ODE-constrained Bayesian inverse problems, a pysp.ppl plugin.
+"""pysparkplug-pde — PDE/ODE-constrained Bayesian inverse problems, a mixle.ppl plugin.
 
-Importing this package wires the PDE stack into pysparkplug's PPL surface through pysp's extension
-hooks (it does not patch pysp): importing :mod:`pysparkplug_pde.pde` fires its
+Importing this package wires the PDE stack into pysparkplug's PPL surface through mixle's extension
+hooks (it does not patch mixle): importing :mod:`pysparkplug_pde.pde` fires its
 ``register_composite("PDEStateSpace", ..., fit_fn=pde_fit)`` so ``PDE(operator).fit(data)`` works, and
-the dynamics operators register through ``register_dynamics_operator``. pysp core stays PDE-free; this
-package depends on pysp, never the reverse.
+the dynamics operators register through ``register_dynamics_operator``. mixle core stays PDE-free; this
+package depends on mixle, never the reverse.
 
     import pysparkplug_pde as pde
     from pysparkplug_pde import PDE, DiffusionOperator
@@ -20,9 +20,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from pysp.ppl.core import RandomVariable
+from mixle.ppl.core import RandomVariable
 
-# Importing `pde` fires register_composite("PDEStateSpace", ..., fit_fn=pde_fit) into pysp's registry.
+# Importing `pde` fires register_composite("PDEStateSpace", ..., fit_fn=pde_fit) into mixle's registry.
 from pysparkplug_pde import pde  # noqa: F401
 from pysparkplug_pde.dynamics import (
     AdvectionDiffusionOperator,
@@ -47,9 +47,9 @@ from pysparkplug_pde.multiphysics import CoupledPDESystem, solve_poisson
 from pysparkplug_pde.shape import level_set_material, shape_optimize
 from pysparkplug_pde.wave import WaveEquation2D
 
-# Register the sparse-solve detector so pysp.ppl.field can guard how='laplace' on a sparse PDE forward
-# (its dense double-backward Hessian would be silently wrong). pysp has no PDE dependency; this plugs in.
-from pysp.ppl.field import register_sparse_solve_detector as _register_sparse_solve_detector
+# Register the sparse-solve detector so mixle.ppl.field can guard how='laplace' on a sparse PDE forward
+# (its dense double-backward Hessian would be silently wrong). mixle has no PDE dependency; this plugs in.
+from mixle.ppl.field import register_sparse_solve_detector as _register_sparse_solve_detector
 from pysparkplug_pde.pde_solve import sparse_used_since as _sparse_used_since
 
 _register_sparse_solve_detector(_sparse_used_since)

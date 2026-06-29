@@ -13,13 +13,13 @@ grid: the variable-coefficient divergence form ``-div(kappa grad u)`` (diffusion
 seismic slowness) and the Helmholtz operator ``-lap u - (omega^2 / c(x)^2) u`` (radar / sonar / acoustic
 scattering). Each returns ``(rows, cols, vals)`` with fixed integer patterns and ``vals`` a torch tensor
 that carries gradients back to the field, so the whole forward map is differentiable end to end and plugs
-into :class:`pysp.ppl.inverse.DifferentialProxy` via ``solver='sparse'``.
+into :class:`mixle.ppl.inverse.DifferentialProxy` via ``solver='sparse'``.
 """
 
 from __future__ import annotations
 
 import numpy as np
-from pysp.ppl._grid import _grid_faces
+from mixle.ppl._grid import _grid_faces
 
 __all__ = ["sparse_solve", "divergence_form", "helmholtz_operator", "laplacian"]
 

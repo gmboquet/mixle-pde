@@ -42,7 +42,7 @@ def shape_optimize(
     ``objective`` builds the design cost from ``phi`` using the ``ops`` namespace (``ops.level_set``,
     ``ops.sparse_solve``, ``ops.matvec``, ...), so its gradient flows through the PDE adjoint.
     ``prior_precision`` (n x n), if given, adds a smoothness prior ``0.5 phi^T P phi`` (e.g. a
-    :class:`~pysp.ppl.RandomWalk` precision) that regularizes the boundary. Returns the optimized ``phi``.
+    :class:`~mixle.ppl.RandomWalk` precision) that regularizes the boundary. Returns the optimized ``phi``.
     """
     import torch
 

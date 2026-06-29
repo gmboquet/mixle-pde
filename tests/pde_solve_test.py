@@ -12,7 +12,7 @@ except ImportError:
     HAS_TORCH = False
 
 if HAS_TORCH:
-    from pysp.ppl import GP, RBF, GaussianField, RandomWalk, joint
+    from mixle.ppl import GP, RBF, GaussianField, RandomWalk, joint
     from pysparkplug_pde import Differential
     from pysparkplug_pde.pde_solve import divergence_form, helmholtz_operator, laplacian, sparse_solve
 

@@ -12,7 +12,7 @@ except ImportError:
     HAS_TORCH = False
 
 if HAS_TORCH:
-    from pysp.ppl import GP, Gaussian, GaussianField, RandomWalk, TotalVariation, joint
+    from mixle.ppl import GP, Gaussian, GaussianField, RandomWalk, TotalVariation, joint
     from pysparkplug_pde import Differential
 
 

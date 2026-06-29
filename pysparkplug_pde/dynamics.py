@@ -5,7 +5,7 @@ spatial derivatives on a 1-D grid (the *method of lines*): ``du/dt = G u`` where
 discretized spatial operator (a Laplacian for diffusion, an upwind difference for advection,
 ...). Integrating one time step ``dt`` gives a linear state transition ``u_{t+1} = A u_t`` with
 ``A = transition_matrix(dt)`` -- exactly the transition of a multivariate linear-Gaussian state
-space (see :mod:`pysp.ppl.pde`), so the existing Kalman/RTS/EM machinery applies unchanged.
+space (see :mod:`mixle.ppl.pde`), so the existing Kalman/RTS/EM machinery applies unchanged.
 
 Operators are pluggable via :func:`register_dynamics_operator` -- the same "register, don't
 branch" pattern the compute engines and encoded-data backends use -- so a new PDE plugs in by

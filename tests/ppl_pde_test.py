@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-import pysp.ppl as ppl
+import mixle.ppl as ppl
 from pysparkplug_pde.dynamics import (
     DiffusionOperator,
     available_dynamics_operators,

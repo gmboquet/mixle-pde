@@ -1,7 +1,7 @@
 """Near-surface geophysical forward operators and a regularized inversion engine.
 
 The adjoint sparse stack (:mod:`pysparkplug_pde.pde_solve`) gives differentiable PDE *forwards*, and
-:class:`pysparkplug_pde.inverse.Differential` wraps a forward as a likelihood for ``pysp.ppl``'s
+:class:`pysparkplug_pde.inverse.Differential` wraps a forward as a likelihood for ``mixle.ppl``'s
 Gaussian-field MAP/Gauss-Newton. That pairing is excellent for mildly ill-posed problems (radar/sonar/seismic
 full-waveform, where the data strongly constrain the field), but it struggles on the *severely* ill-posed
 potential-field problems of exploration geophysics -- DC resistivity (ERT) above all, where the sensitivity
@@ -24,7 +24,7 @@ This module adds the machinery those problems actually need:
   property models that share boundaries but not a petrophysical law, and the joint inverter that uses it.
 
 Everything is torch-differentiable and uses the package's existing ``divergence_form`` / ``sparse_solve``;
-nothing here patches pysp.
+nothing here patches mixle.
 """
 
 from __future__ import annotations
@@ -163,7 +163,7 @@ def roughness_operator(shape, *, spacing=1.0):
     Returns:
         scipy.sparse.csr_matrix of shape ``(n_faces, prod(shape))``.
     """
-    from pysp.ppl._grid import _grid_faces
+    from mixle.ppl._grid import _grid_faces
 
     shape = tuple(int(s) for s in shape)
     g = _grid_faces(shape, spacing)

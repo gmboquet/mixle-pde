@@ -1,4 +1,4 @@
-"""Tests for pysp.ppl differential-equation inverse problems (ODE/PDE forward models, posteriors over drivers)."""
+"""Tests for mixle.ppl differential-equation inverse problems (ODE/PDE forward models, posteriors over drivers)."""
 
 import unittest
 
@@ -12,7 +12,7 @@ except ImportError:
     HAS_TORCH = False
 
 if HAS_TORCH:
-    from pysp.ppl import GaussianField, RandomWalk, free, joint
+    from mixle.ppl import GaussianField, RandomWalk, free, joint
     from pysparkplug_pde import Differential
     from pysparkplug_pde.ops import make_ops
 

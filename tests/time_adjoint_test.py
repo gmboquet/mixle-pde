@@ -12,7 +12,7 @@ except ImportError:
     HAS_TORCH = False
 
 if HAS_TORCH:
-    from pysp.ppl import free, joint
+    from mixle.ppl import free, joint
     from pysparkplug_pde import Differential
     from pysparkplug_pde.ops import make_ops
     from pysparkplug_pde.pde_solve import laplacian

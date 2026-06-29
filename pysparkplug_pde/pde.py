@@ -1,14 +1,14 @@
-"""PDE-constrained state-space models for pysp.ppl (multivariate Kalman/RTS + EM).
+"""PDE-constrained state-space models for mixle.ppl (multivariate Kalman/RTS + EM).
 
 A latent spatial field ``u_t in R^n`` evolves by a PDE discretized via the method of lines
-(see :mod:`pysp.ppl.dynamics`), giving a linear transition ``u_t = A u_{t-1} + w_t`` with
+(see :mod:`mixle.ppl.dynamics`), giving a linear transition ``u_t = A u_{t-1} + w_t`` with
 ``A`` fixed by the physics and process noise ``w ~ N(0, q I)``. Noisy observations
 ``y_t = H u_t + v_t`` (``v ~ N(0, r I)``; ``H`` an optional sensor/sampling operator, identity
 by default) are assimilated by a multivariate Kalman filter + RTS smoother. Fitting is EM: the
 E-step is the smoother, the M-step updates the scalar noise levels ``q`` and ``r`` while the
 PDE-determined transition ``A`` is held fixed (the "PDE constraint").
 
-This is the multivariate generalization of :mod:`pysp.ppl.statespace`; it reuses the same
+This is the multivariate generalization of :mod:`mixle.ppl.statespace`; it reuses the same
 filter/smoother/EM structure with vector states and a physics-derived transition matrix.
 """
 
@@ -17,7 +17,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
-from pysp.ppl.core import RandomVariable, register_composite
+from mixle.ppl.core import RandomVariable, register_composite
 
 from pysparkplug_pde.dynamics import DynamicsOperator
 
@@ -178,7 +178,7 @@ def pde_fit(
     """Fit a ``PDE(operator)`` random variable to spatiotemporal ``data`` (T x m observations)."""
     (operator,) = rv._args
     if not isinstance(operator, DynamicsOperator):
-        raise TypeError("PDE() requires a DynamicsOperator (see pysp.ppl.dynamics).")
+        raise TypeError("PDE() requires a DynamicsOperator (see mixle.ppl.dynamics).")
     result = kalman_rts_em(np.asarray(data, dtype=float), operator, dt=dt, H=H, max_its=max_its, tol=tol)
     return RandomVariable._bound(None, name=rv._name, result=result)
 
@@ -200,7 +200,7 @@ def fit_diffusivity(
     levels), this estimates the **PDE parameter** itself. The latent field evolves by the
     discretized heat equation ``u_t = A(D) u_{t-1}`` with ``A(D)`` the method-of-lines transition for
     diffusivity ``D`` (the same ``explicit`` / ``implicit`` / ``exact`` schemes as
-    :class:`~pysp.ppl.dynamics.DiffusionOperator`). ``D`` (and the observation noise) are fit by
+    :class:`~mixle.ppl.dynamics.DiffusionOperator`). ``D`` (and the observation noise) are fit by
     maximizing the one-step predictive Gaussian likelihood
     ``sum_t log N(y_t; A(D) y_{t-1}, sigma^2 I)``; gradients flow by reverse-mode autodiff through the
     differentiable transition (``torch.matrix_exp`` / linear solve) -- i.e. the discrete **adjoint**
@@ -215,7 +215,7 @@ def fit_diffusivity(
         dict with the fitted ``diffusivity``, ``obs_sd``, and the maximized ``loglik``.
     """
     import torch
-    from pysp.inference.objectives import optimize_torch_objective
+    from mixle.inference.objectives import optimize_torch_objective
 
     from pysparkplug_pde.dynamics import laplacian_matrix
 
@@ -276,7 +276,7 @@ def fit_pde_parameters(
     Returns a dict of the fitted parameters plus ``obs_sd`` and the maximized ``loglik``.
     """
     import torch
-    from pysp.inference.objectives import optimize_torch_objective
+    from mixle.inference.objectives import optimize_torch_objective
 
     y = np.asarray(observations, dtype=float)
     if y.ndim != 2 or y.shape[0] < 2:
@@ -346,6 +346,6 @@ def _pde_err(*a, **k):
 
 # Self-register the PDE-constrained state-space composite with its bespoke fitter (the fit_fn hook),
 # so core dispatches to pde_fit without a per-family branch. This module is imported by the package
-# init (in pysp: pysp.ppl.physics; once relocated: the pysparkplug-pde plugin), which fires the
+# init (in mixle: mixle.ppl.physics; once relocated: the pysparkplug-pde plugin), which fires the
 # registration; the PDE(operator) constructor builds RandomVariables of this family.
 register_composite("PDEStateSpace", _pde_err, _pde_err, fit_fn=pde_fit)
