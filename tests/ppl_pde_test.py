@@ -4,8 +4,8 @@ import unittest
 
 import numpy as np
 
-import mixle.ppl as ppl
-from pysparkplug_pde.dynamics import (
+import mixle_pde as ppl  # the PDE() latent-field constructor is exported by the plugin package
+from mixle_pde.dynamics import (
     DiffusionOperator,
     available_dynamics_operators,
     laplacian_matrix,
@@ -13,7 +13,7 @@ from pysparkplug_pde.dynamics import (
     register_dynamics_operator,
     upwind_gradient_matrix,
 )
-from pysparkplug_pde.pde import kalman_rts_em
+from mixle_pde.pde import kalman_rts_em
 
 
 class OperatorMatrixTestCase(unittest.TestCase):
@@ -67,7 +67,7 @@ class OperatorRegistryTestCase(unittest.TestCase):
             op = make_operator("diffusion_alias_test", diffusivity=0.1, n=6)
             self.assertIsInstance(op, DiffusionOperator)
         finally:
-            from pysparkplug_pde.dynamics import _DYNAMICS_OPERATORS
+            from mixle_pde.dynamics import _DYNAMICS_OPERATORS
 
             _DYNAMICS_OPERATORS.pop("diffusion_alias_test", None)
 

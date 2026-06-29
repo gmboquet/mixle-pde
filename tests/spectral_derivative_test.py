@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from pysparkplug_pde.dynamics import spectral_derivative
+from mixle_pde.dynamics import spectral_derivative
 
 
 class SpectralDerivativeTest(unittest.TestCase):

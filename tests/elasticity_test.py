@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from pysparkplug_pde.multiphysics import solve_elasticity
+from mixle_pde.multiphysics import solve_elasticity
 
 
 class ElasticityTest(unittest.TestCase):

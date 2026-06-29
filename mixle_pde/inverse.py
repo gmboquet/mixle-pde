@@ -37,8 +37,8 @@ from typing import Any
 import numpy as np
 from mixle.ppl.field import Proxy, _ParamSpec
 
-from pysparkplug_pde._operator import ForwardModel, ObserveFn, RhsFn
-from pysparkplug_pde.ops import _Params, make_ops
+from mixle_pde._operator import ForwardModel, ObserveFn, RhsFn
+from mixle_pde.ops import _Params, make_ops
 
 __all__ = ["Differential"]
 

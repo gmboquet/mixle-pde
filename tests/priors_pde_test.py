@@ -18,7 +18,7 @@ except ImportError:
 if HAS_TORCH:
     from mixle.ppl import GP, RandomWalk, free, joint, multistart
 
-    from pysparkplug_pde import Differential
+    from mixle_pde import Differential
 
 
 @unittest.skipUnless(HAS_TORCH, "requires PyTorch")

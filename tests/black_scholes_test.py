@@ -5,7 +5,7 @@ import unittest
 import numpy as np
 from scipy.stats import norm
 
-from pysparkplug_pde.dynamics import black_scholes_rhs, integrate_adaptive
+from mixle_pde.dynamics import black_scholes_rhs, integrate_adaptive
 
 
 def _bs_call(s, k, r, sig, t):

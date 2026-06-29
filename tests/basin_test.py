@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from pysparkplug_pde.basin import easy_ro, easy_ro_profile, geotherm, EASYRO_WEIGHTS
+from mixle_pde.basin import easy_ro, easy_ro_profile, geotherm, EASYRO_WEIGHTS
 
 
 def test_geotherm_linear_without_heat_production():

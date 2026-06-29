@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from pysparkplug_pde.gas_dynamics import _star_region, exact_riemann_solution, solve_euler_1d
+from mixle_pde.gas_dynamics import _star_region, exact_riemann_solution, solve_euler_1d
 
 
 class GasDynamicsTest(unittest.TestCase):

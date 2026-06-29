@@ -5,7 +5,7 @@ import unittest
 import numpy as np
 from scipy.spatial import Delaunay
 
-from pysparkplug_pde.fem import boundary_nodes, fem_poisson
+from mixle_pde.fem import boundary_nodes, fem_poisson
 
 
 def _mesh_square(n):

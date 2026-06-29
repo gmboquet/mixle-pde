@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from pysparkplug_pde.pde_solve import laplacian
+from mixle_pde.pde_solve import laplacian
 
 
 class NavierStokes2D:

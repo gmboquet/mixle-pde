@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from pysparkplug_pde.dynamics import integrate_dae, integrate_stiff
+from mixle_pde.dynamics import integrate_dae, integrate_stiff
 
 
 class DAETest(unittest.TestCase):

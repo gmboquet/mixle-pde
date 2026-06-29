@@ -13,8 +13,8 @@ except ImportError:
 
 if HAS_TORCH:
     from mixle.ppl import free, joint
-    from pysparkplug_pde import Differential, WaveEquation2D
-    from pysparkplug_pde.ops import make_ops
+    from mixle_pde import Differential, WaveEquation2D
+    from mixle_pde.ops import make_ops
 
 
 @unittest.skipUnless(HAS_TORCH, "requires PyTorch")

@@ -13,12 +13,13 @@ except ImportError:
 
 if HAS_TORCH:
     torch.set_default_dtype(torch.float64)
-    from pysparkplug_pde.geophysics import (
+    from mixle_pde.geophysics import (
         cross_gradient,
         dc_resistivity,
         depth_weighting,
         eikonal_traveltime,
         gravity_point_sensitivity,
+        joint_inversion,
         magnetic_dipole_sensitivity,
         regularized_gauss_newton,
         roughness_operator,
@@ -234,3 +235,34 @@ class EikonalTestCase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(HAS_TORCH, "requires PyTorch")
+class JointInversionBoundsTestCase(unittest.TestCase):
+    """joint_inversion accepts per-model bounds, so models on different scales each stay in their own range."""
+
+    def test_per_model_bounds(self):
+        nx, nz = 8, 6
+        N = nx * nz
+        shape = (nx, nz)
+        A = torch.eye(N)
+
+        def f1(x):
+            return A @ x
+
+        def f2(x):
+            return A @ x
+
+        d1 = np.full(N, 5.0)        # wants ~5 but is bounded to [0, 1]
+        d2 = np.full(N, 1.0)        # wants ~1 but is bounded to [1e-4, 3e-4]
+        m1, m2 = joint_inversion(
+            [f1, f2], [d1, d2], [np.zeros(N), np.full(N, 2e-4)], shape,
+            bounds=[(0.0, 1.0), (1e-4, 3e-4)], n_iter=6,
+        )
+        self.assertLessEqual(m1.max(), 1.0 + 1e-9)
+        self.assertGreaterEqual(m1.min(), -1e-9)
+        self.assertLessEqual(m2.max(), 3e-4 + 1e-12)
+        self.assertGreaterEqual(m2.min(), 1e-4 - 1e-12)
+        # a single (lo, hi) still applies to every model (back-compatible)
+        n1, n2 = joint_inversion([f1, f2], [d1, d2], [np.zeros(N), np.zeros(N)], shape, bounds=(0.0, 1.0), n_iter=4)
+        self.assertLessEqual(max(n1.max(), n2.max()), 1.0 + 1e-9)

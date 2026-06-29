@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from pysparkplug_pde.dynamics import integrate_adaptive, kdv_rhs
+from mixle_pde.dynamics import integrate_adaptive, kdv_rhs
 
 
 class KdVTest(unittest.TestCase):

@@ -6,7 +6,7 @@ import numpy as np
 from scipy.integrate import solve_ivp
 from scipy.linalg import expm
 
-from pysparkplug_pde.dynamics import integrate_stiff
+from mixle_pde.dynamics import integrate_stiff
 
 
 class StiffODETest(unittest.TestCase):

@@ -5,8 +5,8 @@ import unittest
 
 import numpy as np
 
-from pysparkplug_pde.dynamics import laplacian_matrix
-from pysparkplug_pde.pde import fit_pde_parameters, fit_reaction_diffusion
+from mixle_pde.dynamics import laplacian_matrix
+from mixle_pde.pde import fit_pde_parameters, fit_reaction_diffusion
 
 HAS_TORCH = importlib.util.find_spec("torch") is not None
 

@@ -1,7 +1,7 @@
 """Near-surface geophysical forward operators and a regularized inversion engine.
 
-The adjoint sparse stack (:mod:`pysparkplug_pde.pde_solve`) gives differentiable PDE *forwards*, and
-:class:`pysparkplug_pde.inverse.Differential` wraps a forward as a likelihood for ``mixle.ppl``'s
+The adjoint sparse stack (:mod:`mixle_pde.pde_solve`) gives differentiable PDE *forwards*, and
+:class:`mixle_pde.inverse.Differential` wraps a forward as a likelihood for ``mixle.ppl``'s
 Gaussian-field MAP/Gauss-Newton. That pairing is excellent for mildly ill-posed problems (radar/sonar/seismic
 full-waveform, where the data strongly constrain the field), but it struggles on the *severely* ill-posed
 potential-field problems of exploration geophysics -- DC resistivity (ERT) above all, where the sensitivity
@@ -169,7 +169,7 @@ def dc_resistivity(log_sigma, shape, schedule, *, spacing=1.0, sigma_ref=1.0, lo
     Returns:
         torch tensor of length ``len(schedule)`` -- the (log) transfer resistances ``R = (phi_m - phi_n)/I``.
     """
-    from pysparkplug_pde.pde_solve import divergence_form, sparse_solve
+    from mixle_pde.pde_solve import divergence_form, sparse_solve
 
     torch = _torch()
     shape = tuple(int(s) for s in shape)
@@ -572,7 +572,7 @@ def cross_gradient(m1, m2, shape, *, spacing=1.0):
     Gallardo & Meju (2003): it vanishes where the two property models have parallel (or zero) gradients, so
     penalizing ``||t||^2`` forces them to share boundaries without assuming any petrophysical relation
     between their values. Returns the stacked components (one in 2-D, three in 3-D)."""
-    from pysparkplug_pde.ops import make_ops
+    from mixle_pde.ops import make_ops
 
     ops = make_ops()
     shape = tuple(int(s) for s in shape)
@@ -616,6 +616,10 @@ def joint_inversion(
     models are driven to share boundaries while each keeps its own value scale (no petrophysical law assumed).
     A block Gauss-Newton step over the stacked model updates all of them together.
 
+    ``bounds`` is ``None``, a single ``(lo, hi)`` applied to every model, or a length-P sequence of per-model
+    ``(lo, hi)`` tuples -- use the per-model form when the models live on different scales (e.g. ERT
+    log-conductivity vs seismic slowness), so each is clamped to its own physical range.
+
     Returns:
         list of inverted models (numpy arrays), one per forward.
     """
@@ -631,7 +635,14 @@ def joint_inversion(
     R = sp.eye(n, format="csr") if roughness is None else roughness.tocsr()
     RtR = np.asarray((R.T @ R).todense())
     lam = float(cross_gradient_weight)
-    lo, hi = (bounds if bounds is not None else (None, None))
+    # bounds: None, a single (lo, hi) applied to every model, or a length-P sequence of per-model (lo, hi)
+    # tuples -- the latter is needed when the models live on different scales (e.g. log-conductivity vs slowness).
+    if bounds is None:
+        bnds = [(None, None)] * P
+    elif len(bounds) == P and all(isinstance(b, (tuple, list)) for b in bounds):
+        bnds = [tuple(b) for b in bounds]
+    else:
+        bnds = [tuple(bounds)] * P
 
     def xg_pen(xlist):
         if lam <= 0:
@@ -689,8 +700,9 @@ def joint_inversion(
             cand = []
             for i in range(P):
                 xc = xs[i].detach() + step * torch.as_tensor(new[i])
-                if lo is not None or hi is not None:
-                    xc = torch.clamp(xc, lo, hi)
+                lo_i, hi_i = bnds[i]
+                if lo_i is not None or hi_i is not None:
+                    xc = torch.clamp(xc, lo_i, hi_i)
                 cand.append(xc)
             if objective(cand) < f_prev:
                 xs = cand

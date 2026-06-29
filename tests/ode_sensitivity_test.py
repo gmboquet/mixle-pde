@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from pysparkplug_pde.dynamics import integrate_adaptive, integrate_sensitivity
+from mixle_pde.dynamics import integrate_adaptive, integrate_sensitivity
 
 
 class ODESensitivityTest(unittest.TestCase):

@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from pysparkplug_pde.dynamics import conservation_law_rhs, integrate_adaptive
+from mixle_pde.dynamics import conservation_law_rhs, integrate_adaptive
 
 
 class ConservationLawTest(unittest.TestCase):

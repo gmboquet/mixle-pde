@@ -13,9 +13,9 @@ except ImportError:
 
 if HAS_TORCH:
     from mixle.ppl import free, joint
-    from pysparkplug_pde import Differential
-    from pysparkplug_pde.ops import make_ops
-    from pysparkplug_pde.pde_solve import laplacian
+    from mixle_pde import Differential
+    from mixle_pde.ops import make_ops
+    from mixle_pde.pde_solve import laplacian
 
 
 @unittest.skipUnless(HAS_TORCH, "requires PyTorch")

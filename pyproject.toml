@@ -3,9 +3,9 @@ requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pysparkplug-pde"
+name = "mixle-pde"
 version = "0.1.0"
-description = "PDE/ODE-constrained Bayesian inverse problems for pysparkplug (a pysp.ppl plugin)."
+description = "PDE/ODE-constrained Bayesian inverse problems for mixle (a mixle.ppl plugin)."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -27,7 +27,7 @@ Homepage = "https://github.com/gmboquet/pysparkplug-pde"
 Repository = "https://github.com/gmboquet/pysparkplug-pde"
 
 [tool.setuptools.packages.find]
-include = ["pysparkplug_pde*"]
+include = ["mixle_pde*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

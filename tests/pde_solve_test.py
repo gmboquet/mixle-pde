@@ -13,8 +13,8 @@ except ImportError:
 
 if HAS_TORCH:
     from mixle.ppl import GP, RBF, GaussianField, RandomWalk, joint
-    from pysparkplug_pde import Differential
-    from pysparkplug_pde.pde_solve import divergence_form, helmholtz_operator, laplacian, sparse_solve
+    from mixle_pde import Differential
+    from mixle_pde.pde_solve import divergence_form, helmholtz_operator, laplacian, sparse_solve
 
 
 @unittest.skipUnless(HAS_TORCH, "requires PyTorch")

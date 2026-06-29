@@ -19,7 +19,7 @@ import math
 import numpy as np
 from mixle.ppl.core import RandomVariable, register_composite
 
-from pysparkplug_pde.dynamics import DynamicsOperator
+from mixle_pde.dynamics import DynamicsOperator
 
 
 class PDEStateSpaceResult:
@@ -217,7 +217,7 @@ def fit_diffusivity(
     import torch
     from mixle.inference.objectives import optimize_torch_objective
 
-    from pysparkplug_pde.dynamics import laplacian_matrix
+    from mixle_pde.dynamics import laplacian_matrix
 
     y = np.asarray(observations, dtype=float)
     if y.ndim != 2 or y.shape[0] < 2:
@@ -323,7 +323,7 @@ def fit_reaction_diffusion(
     """
     import torch
 
-    from pysparkplug_pde.dynamics import laplacian_matrix
+    from mixle_pde.dynamics import laplacian_matrix
 
     y = np.asarray(observations, dtype=float)
     n = y.shape[1]

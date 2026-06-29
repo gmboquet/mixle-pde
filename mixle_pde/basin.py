@@ -4,7 +4,7 @@ Basin thermal modelling asks the highest-stakes question in frontier exploration
 the oil window, and when, relative to trap formation?* — and answers it from two ingredients: the temperature a
 rock has experienced through its burial history, and a kinetic model that converts that temperature history
 into a measurable maturity (vitrinite reflectance, %Ro). This module supplies both as differentiable forwards
-that pair with the package's inverse machinery (:func:`pysparkplug_pde.geophysics.regularized_gauss_newton`,
+that pair with the package's inverse machinery (:func:`mixle_pde.geophysics.regularized_gauss_newton`,
 or ``mixle.ppl`` for a Bayesian posterior) so that *measured* present-day temperatures and %Ro can be inverted
 for the unknown — typically the basal heat-flow history — with calibrated uncertainty.
 

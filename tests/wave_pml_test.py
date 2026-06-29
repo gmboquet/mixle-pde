@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from pysparkplug_pde.wave_pml import solve_wave_pml
+from mixle_pde.wave_pml import solve_wave_pml
 
 
 class WavePMLTest(unittest.TestCase):

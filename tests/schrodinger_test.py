@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from pysparkplug_pde.schrodinger import norm, probability_density, schrodinger_split_step
+from mixle_pde.schrodinger import norm, probability_density, schrodinger_split_step
 
 
 class SchrodingerTest(unittest.TestCase):

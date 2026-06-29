@@ -9,8 +9,8 @@ import unittest
 
 import numpy as np
 
-from pysparkplug_pde.dynamics import DiffusionOperator
-from pysparkplug_pde.pde import fit_diffusivity
+from mixle_pde.dynamics import DiffusionOperator
+from mixle_pde.pde import fit_diffusivity
 
 HAS_TORCH = importlib.util.find_spec("torch") is not None
 

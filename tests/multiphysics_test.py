@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from pysparkplug_pde.multiphysics import CoupledPDESystem, _diffusion_blocks, solve_poisson
+from mixle_pde.multiphysics import CoupledPDESystem, _diffusion_blocks, solve_poisson
 
 
 def _manufactured(d, n=21):

@@ -13,7 +13,7 @@ except ImportError:
 
 if HAS_TORCH:
     from mixle.ppl import GP, RandomWalk, joint
-    from pysparkplug_pde import Differential, level_set_material, shape_optimize
+    from mixle_pde import Differential, level_set_material, shape_optimize
 
 
 @unittest.skipUnless(HAS_TORCH, "requires PyTorch")
@@ -35,7 +35,7 @@ class ShapeOptimizeTestCase(unittest.TestCase):
         self.assertGreater(acc, 0.95)
 
     def test_smoothed_heaviside_is_monotone_and_bounded(self):
-        from pysparkplug_pde.ops import make_ops
+        from mixle_pde.ops import make_ops
 
         ops = make_ops()
         phi = torch.linspace(-2, 2, 50)

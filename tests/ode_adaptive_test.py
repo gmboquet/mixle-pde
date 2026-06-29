@@ -5,7 +5,7 @@ import unittest
 import numpy as np
 from scipy.integrate import solve_ivp
 
-from pysparkplug_pde.dynamics import integrate_adaptive
+from mixle_pde.dynamics import integrate_adaptive
 
 
 class AdaptiveODETest(unittest.TestCase):
