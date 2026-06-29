@@ -33,6 +33,7 @@ from pysparkplug_pde.dynamics import (
     make_operator,
     register_dynamics_operator,
 )
+from pysparkplug_pde.basin import easy_ro, easy_ro_profile, geotherm
 from pysparkplug_pde.flow import NavierStokes2D
 from pysparkplug_pde.geophysics import (
     gravity_point_sensitivity,
@@ -86,4 +87,7 @@ __all__ = [
     "solve_poisson",
     "shape_optimize",
     "level_set_material",
+    "geotherm",
+    "easy_ro",
+    "easy_ro_profile",
 ]
