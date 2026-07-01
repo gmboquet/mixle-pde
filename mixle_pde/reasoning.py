@@ -22,8 +22,17 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
-from mixle.reason import CrossModalStore, Evidence, GaussianBelief, ReasonedAnswer, reason
+from mixle.reason import (
+    CrossModalStore,
+    Evidence,
+    GaussianBelief,
+    Latent,
+    ReasonedAnswer,
+    block_selector,
+    reason,
+)
 
+from mixle_pde.dynamics import DynamicsOperator
 from mixle_pde.geophysics import gravity_point_sensitivity, magnetic_dipole_sensitivity
 
 
@@ -187,3 +196,67 @@ class SpatialFieldStore:
     def nearest_cell(self, location: Any) -> int:
         """Index of the cell nearest ``location`` (the target of a location-anchored query)."""
         return int(np.argmin(np.linalg.norm(self.cells - np.asarray(location, dtype=float), axis=1)))
+
+
+class MechanisticFieldReasoner:
+    """Reconstruct a spatiotemporal PDE field from sparse sensors, with the PDE itself as the prior.
+
+    A field ``u(x, t)`` on an ``n``-cell grid follows a linear PDE (diffusion / advection / ...). Its
+    discretized one-step transition ``A = operator.transition_matrix(dt)`` drives a mechanistic
+    trajectory prior (:meth:`mixle.reason.Latent.mechanistic`) over the whole space-time state
+    ``u_0 .. u_{T-1}``. Sparse sensor readings at arbitrary ``(cell, step)`` are fused via
+    :func:`mixle.reason.reason` -- exact Kalman smoothing -- so the entire field is reconstructed
+    from a few sensors, the physics fills the gaps, and every cell/time carries honest uncertainty.
+
+    Application layer: the PDE operators live in :mod:`mixle_pde.dynamics`; the trajectory prior,
+    fusion, and smoothing come from the domain-neutral core.
+
+    Args:
+        operator: a :class:`mixle_pde.dynamics.DynamicsOperator` (diffusion, advection, ...).
+        dt: time step between trajectory states.
+        steps: number of time steps ``T``.
+        x0_mean: prior mean of the initial field (default zeros, ``n``-vector).
+        x0_sd: prior std of the initial field.
+        process_sd: process-noise std per step (0 = deterministic dynamics).
+    """
+
+    def __init__(
+        self,
+        operator: DynamicsOperator,
+        *,
+        dt: float,
+        steps: int,
+        x0_mean: Any = None,
+        x0_sd: float = 1.0,
+        process_sd: float = 0.0,
+    ) -> None:
+        self.operator = operator
+        self.n = int(operator.n)
+        self.dt = float(dt)
+        self.steps = int(steps)
+        A = operator.transition_matrix(self.dt)
+        self.prior = Latent.mechanistic(
+            A,
+            self.steps,
+            x0_mean=None if x0_mean is None else np.asarray(x0_mean, dtype=float),
+            x0_cov=(float(x0_sd) ** 2) * np.eye(self.n),
+            process_cov=(float(process_sd) ** 2) * np.eye(self.n),
+        )
+
+    def sensor(self, *, cell: int, step: int, value: float, noise_sd: float, name: str = "") -> Evidence:
+        """A sensor reading of the field at one ``cell`` and one time ``step``."""
+        one_hot = np.eye(self.n)[[int(cell)]]  # (1, n) read a single cell
+        H = block_selector(int(step), self.steps, self.n, within=one_hot)
+        return Evidence(H, [float(value)], [[float(noise_sd) ** 2]], name or f"u[{cell}]@{step}")
+
+    def reason(self, sensors: Any) -> ReasonedAnswer:
+        """Fuse sensor readings into the smoothed posterior over the whole space-time field."""
+        return reason(self.prior, list(sensors))
+
+    def field(self, answer: ReasonedAnswer) -> np.ndarray:
+        """Posterior-mean field as a ``(steps, n)`` array ``u[t, x]``."""
+        return np.asarray(answer.mean).reshape(self.steps, self.n)
+
+    def uncertainty(self, answer: ReasonedAnswer) -> np.ndarray:
+        """Posterior std of the field as a ``(steps, n)`` array."""
+        return answer.belief.sd().reshape(self.steps, self.n)
