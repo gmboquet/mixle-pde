@@ -22,7 +22,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
-from mixle.reason import Evidence, GaussianBelief, ReasonedAnswer, reason
+from mixle.reason import CrossModalStore, Evidence, GaussianBelief, ReasonedAnswer, reason
 
 from mixle_pde.geophysics import gravity_point_sensitivity, magnetic_dipole_sensitivity
 
@@ -119,3 +119,71 @@ class JointPotentialField:
     def susceptibility(self, answer: ReasonedAnswer) -> ReasonedAnswer:
         """The marginal belief over the susceptibility field ``kappa`` from a joint answer."""
         return answer.marginal(self.kappa_index)
+
+
+class SpatialFieldStore:
+    """Cross-modal RAG over ONE spatially-indexed volume -- the seismic-block pattern.
+
+    A large property volume is too lossy to compress into a single embedding; instead it is tiled
+    into local sub-volumes indexed by their location. A location-anchored query ("what is the
+    property here?") retrieves the nearby tiles and conditions the field belief on their **raw**
+    per-cell measurements (a precise sub-volume observation), falling back to a cheap tile-average
+    ("embedding") only where that already suffices. So no lossy compression sits between the data
+    and the answer, and only the local neighborhood a query touches is ever conditioned on -- the
+    point of RAG-over-raw-data for terabyte volumes.
+
+    This is the application wrapper: it builds the tile index and the coarse/fine evidence, then
+    hands off to the domain-neutral :class:`mixle.reason.CrossModalStore`.
+
+    Args:
+        cells: ``(n, dim)`` cell-centre coordinates of the volume.
+        data: ``(n,)`` noisy per-cell measurement of the scalar property.
+        tile_radius: cells within this distance of a tile centre form the tile (the sub-volume).
+        coarse_sd: noise std of a tile's cheap average summary ("embedding" fidelity).
+        fine_sd: noise std of the raw per-cell readout ("raw" fidelity).
+    """
+
+    def __init__(
+        self,
+        cells: Any,
+        data: Any,
+        *,
+        tile_radius: float,
+        coarse_sd: float = 1.0,
+        fine_sd: float = 0.05,
+    ) -> None:
+        self.cells = np.asarray(cells, dtype=float)
+        self.data = np.asarray(data, dtype=float).reshape(-1)
+        self.n = len(self.cells)
+        if len(self.data) != self.n:
+            raise ValueError(f"{self.n} cells but {len(self.data)} data values")
+        self.coarse_sd = float(coarse_sd)
+        self.fine_sd = float(fine_sd)
+        # one tile per cell: its spatial neighborhood within tile_radius (the sub-volume).
+        self.centroids = self.cells.copy()
+        self.tiles: list[np.ndarray] = [
+            np.where(np.linalg.norm(self.cells - c, axis=1) <= tile_radius)[0] for c in self.cells
+        ]
+
+    def prior(self, sd: float = 1.0) -> GaussianBelief:
+        """An isotropic Gaussian prior ``N(0, sd^2 I)`` over the per-cell property field."""
+        return GaussianBelief(np.zeros(self.n), (float(sd) ** 2) * np.eye(self.n))
+
+    def _fine(self, members: np.ndarray) -> Evidence:
+        # raw sub-volume: read every cell in the tile individually (precise).
+        H = np.eye(self.n)[members]
+        return Evidence(H, self.data[members], self.fine_sd**2 * np.eye(len(members)), "raw")
+
+    def _coarse(self, members: np.ndarray) -> Evidence:
+        # lossy summary: one averaged readout over the tile (an "embedding" of the sub-volume).
+        H = np.zeros((1, self.n))
+        H[0, members] = 1.0 / len(members)
+        return Evidence(H, [float(self.data[members].mean())], [[self.coarse_sd**2]], "embedding")
+
+    def store(self) -> CrossModalStore:
+        """The :class:`mixle.reason.CrossModalStore` over this volume (keys = tile centroids)."""
+        return CrossModalStore(self.centroids, list(self.tiles), coarse=self._coarse, fine=self._fine)
+
+    def nearest_cell(self, location: Any) -> int:
+        """Index of the cell nearest ``location`` (the target of a location-anchored query)."""
+        return int(np.argmin(np.linalg.norm(self.cells - np.asarray(location, dtype=float), axis=1)))

@@ -50,7 +50,7 @@ from mixle_pde.inverse import Differential
 from mixle_pde.multiphysics import CoupledPDESystem, solve_poisson
 
 # cross-modal subsurface reasoning: geophysical forward models -> mixle.reason evidence (belief + UQ)
-from mixle_pde.reasoning import JointPotentialField
+from mixle_pde.reasoning import JointPotentialField, SpatialFieldStore
 from mixle_pde.shape import level_set_material, shape_optimize
 from mixle_pde.wave import WaveEquation2D
 
@@ -89,6 +89,7 @@ __all__ = [
     "CoupledPDESystem",
     "solve_poisson",
     "JointPotentialField",
+    "SpatialFieldStore",
     "shape_optimize",
     "level_set_material",
     "geotherm",
