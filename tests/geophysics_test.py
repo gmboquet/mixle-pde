@@ -91,8 +91,14 @@ class GaussNewtonTomographyTestCase(unittest.TestCase):
         y = y + 0.005 * y.std() * rng.randn(*y.shape)
         R = roughness_operator((nx, nz), spacing=h)
         s_est, std = regularized_gauss_newton(
-            lambda s: Lt @ s, y, np.full(N, 0.10), noise=0.005 * y.std(),
-            beta=2.0, roughness=R, n_iter=4, jac_every=99,
+            lambda s: Lt @ s,
+            y,
+            np.full(N, 0.10),
+            noise=0.005 * y.std(),
+            beta=2.0,
+            roughness=R,
+            n_iter=4,
+            jac_every=99,
         )
         self.assertGreater(np.corrcoef(s_est, s_true)[0, 1], 0.6)
         self.assertGreater(s_est[blob].mean(), s_est[~blob].mean())  # anomaly is faster-slowness
@@ -154,16 +160,16 @@ class DCResistivityTestCase(unittest.TestCase):
 @unittest.skipUnless(HAS_TORCH, "requires PyTorch")
 class PotentialFieldTestCase(unittest.TestCase):
     def test_depth_weighting_monotone(self):
-        z = np.linspace(0.0, -1000.0, 11)            # surface down
+        z = np.linspace(0.0, -1000.0, 11)  # surface down
         w = depth_weighting(z, 50.0, nu=2.0)
         self.assertAlmostEqual(w.max(), 1.0)
-        self.assertTrue(np.all(np.diff(w) < 0))      # decreases with depth
+        self.assertTrue(np.all(np.diff(w) < 0))  # decreases with depth
 
     def test_gravity_sign_and_linearity(self):
         obs = np.array([[0.0, 0.0, 0.0]])
-        cells = np.array([[0.0, 0.0, -100.0]])       # mass directly below
+        cells = np.array([[0.0, 0.0, -100.0]])  # mass directly below
         G = gravity_point_sensitivity(obs, cells, 1.0e6)
-        self.assertGreater(G[0, 0], 0.0)             # positive density below -> positive g_z
+        self.assertGreater(G[0, 0], 0.0)  # positive density below -> positive g_z
         self.assertAlmostEqual(float(gravity_point_sensitivity(obs, cells, 2.0e6)[0, 0]), 2 * float(G[0, 0]))
 
     def test_gravity_inversion_recovers_blob(self):
@@ -186,12 +192,20 @@ class PotentialFieldTestCase(unittest.TestCase):
         w = depth_weighting(cells[:, 2], 50.0, nu=2.0)
         Gw = torch.as_tensor(G / w[None, :])
         R = roughness_operator((nx, ny, nz))
-        s, _ = regularized_gauss_newton(lambda u: Gw @ u, d, np.zeros(N), noise=0.02 * np.abs(d).std() + 1e-3,
-                                        beta=1e-2, roughness=R, n_iter=3, jac_every=99)
+        s, _ = regularized_gauss_newton(
+            lambda u: Gw @ u,
+            d,
+            np.zeros(N),
+            noise=0.02 * np.abs(d).std() + 1e-3,
+            beta=1e-2,
+            roughness=R,
+            n_iter=3,
+            jac_every=99,
+        )
         rho = s / w
         # recovered low-density region overlaps the truth (location resolved)
-        self.assertLess(cells[np.argmin(rho), 2], -200.0)            # minimum is below the surface
-        self.assertGreater(np.corrcoef(rho, truth)[0, 1], 0.3)       # positive structural correlation
+        self.assertLess(cells[np.argmin(rho), 2], -200.0)  # minimum is below the surface
+        self.assertGreater(np.corrcoef(rho, truth)[0, 1], 0.3)  # positive structural correlation
 
     def test_magnetic_finite(self):
         obs = np.array([[0.0, 0.0, 0.0]])
@@ -208,26 +222,36 @@ class EikonalTestCase(unittest.TestCase):
         T = eikonal_traveltime(np.full(nx * nz, s), (nx, nz), 0, spacing=h, n_cycles=4).reshape(nx, nz)
         corner = T[nx - 1, nz - 1]
         exact = s * np.hypot((nx - 1) * h, (nz - 1) * h)
-        self.assertLess(abs(corner - exact) / exact, 0.05)   # FSM is accurate to a few %
+        self.assertLess(abs(corner - exact) / exact, 0.05)  # FSM is accurate to a few %
 
     def test_crosshole_tomography_recovers_layer(self):
         # plant a fast horizontal layer between two boreholes, forward, invert -> recover the layer
         nx, nz, h = 11, 21, 1.0
         N = nx * nz
         s_true = np.full((nx, nz), 0.2)
-        s_true[:, 8:12] = 0.14                                # fast (low-slowness) layer
+        s_true[:, 8:12] = 0.14  # fast (low-slowness) layer
         s_true = s_true.ravel()
         src = np.array([0 * nz + j for j in range(1, nz - 1, 2)])
         rcv = np.array([(nx - 1) * nz + j for j in range(1, nz - 1, 2)])
         si, ri = np.meshgrid(src, rcv, indexing="ij")
         si, ri = si.ravel(), ri.ravel()
-        times = np.array([eikonal_traveltime(s_true, (nx, nz), int(s), spacing=h, n_cycles=4)[int(r)]
-                          for s, r in zip(si, ri)])
+        times = np.array(
+            [eikonal_traveltime(s_true, (nx, nz), int(s), spacing=h, n_cycles=4)[int(r)] for s, r in zip(si, ri)]
+        )
         rng = np.random.RandomState(0)
         times = times + 0.01 * times.std() * rng.randn(len(times))
-        s_inv, vel, _ = traveltime_tomography(times, si, ri, (nx, nz), spacing=h, slowness0=0.2,
-                                              noise=0.01 * times.std() + 1e-6, beta=5.0, n_iter=6,
-                                              bounds=(0.08, 0.3))
+        s_inv, vel, _ = traveltime_tomography(
+            times,
+            si,
+            ri,
+            (nx, nz),
+            spacing=h,
+            slowness0=0.2,
+            noise=0.01 * times.std() + 1e-6,
+            beta=5.0,
+            n_iter=6,
+            bounds=(0.08, 0.3),
+        )
         # the recovered slowness is lower (faster) in the planted layer than outside it
         s3 = s_inv.reshape(nx, nz)
         self.assertLess(s3[:, 8:12].mean(), s3[:, 2:6].mean())
@@ -253,11 +277,15 @@ class JointInversionBoundsTestCase(unittest.TestCase):
         def f2(x):
             return A @ x
 
-        d1 = np.full(N, 5.0)        # wants ~5 but is bounded to [0, 1]
-        d2 = np.full(N, 1.0)        # wants ~1 but is bounded to [1e-4, 3e-4]
+        d1 = np.full(N, 5.0)  # wants ~5 but is bounded to [0, 1]
+        d2 = np.full(N, 1.0)  # wants ~1 but is bounded to [1e-4, 3e-4]
         m1, m2 = joint_inversion(
-            [f1, f2], [d1, d2], [np.zeros(N), np.full(N, 2e-4)], shape,
-            bounds=[(0.0, 1.0), (1e-4, 3e-4)], n_iter=6,
+            [f1, f2],
+            [d1, d2],
+            [np.zeros(N), np.full(N, 2e-4)],
+            shape,
+            bounds=[(0.0, 1.0), (1e-4, 3e-4)],
+            n_iter=6,
         )
         self.assertLessEqual(m1.max(), 1.0 + 1e-9)
         self.assertGreaterEqual(m1.min(), -1e-9)

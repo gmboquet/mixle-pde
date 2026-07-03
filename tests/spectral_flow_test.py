@@ -85,8 +85,9 @@ class BoussinesqTest(unittest.TestCase):
         n = 48
         x = np.linspace(0, 2 * np.pi, n, endpoint=False)
         xx, yy = np.meshgrid(x, x, indexing="ij")
-        (u, v), _t = bq((np.zeros((n, n)), np.zeros((n, n))), 0.1 * np.cos(xx) * np.sin(yy),
-                        0.05, 0.05, 1.0, 0.002, 100)
+        (u, v), _t = bq(
+            (np.zeros((n, n)), np.zeros((n, n))), 0.1 * np.cos(xx) * np.sin(yy), 0.05, 0.05, 1.0, 0.002, 100
+        )
         self.assertGreater(ke((u, v)), 0.0)  # potential -> kinetic energy
 
     def test_3d_passive_limit(self):

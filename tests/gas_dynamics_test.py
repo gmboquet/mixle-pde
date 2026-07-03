@@ -37,8 +37,9 @@ class GasDynamicsTest(unittest.TestCase):
         # density and pressure stay positive through the shock interaction
         n = 400
         x = np.linspace(0.0, 1.0, n)
-        r, u, p = solve_euler_1d(np.where(x < 0.5, 1.0, 0.125), np.zeros(n),
-                                 np.where(x < 0.5, 1.0, 0.1), x[1] - x[0], 0.2)
+        r, u, p = solve_euler_1d(
+            np.where(x < 0.5, 1.0, 0.125), np.zeros(n), np.where(x < 0.5, 1.0, 0.1), x[1] - x[0], 0.2
+        )
         self.assertTrue(np.all(r > 0.0))
         self.assertTrue(np.all(p > 0.0))
 

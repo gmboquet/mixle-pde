@@ -19,8 +19,13 @@ class BlackScholesTest(unittest.TestCase):
         self.s = np.linspace(0.0, 400.0, 401)
 
     def test_call_matches_closed_form(self):
-        v = integrate_adaptive(black_scholes_rhs(self.sig, self.r, self.s), np.maximum(self.s - self.k, 0.0),
-                               [self.t], rtol=1e-8, atol=1e-8)[-1]
+        v = integrate_adaptive(
+            black_scholes_rhs(self.sig, self.r, self.s),
+            np.maximum(self.s - self.k, 0.0),
+            [self.t],
+            rtol=1e-8,
+            atol=1e-8,
+        )[-1]
         for s0 in (80.0, 100.0, 120.0, 150.0):
             i = int(np.argmin(np.abs(self.s - s0)))
             with self.subTest(s0=s0):
@@ -28,10 +33,20 @@ class BlackScholesTest(unittest.TestCase):
 
     def test_put_call_parity(self):
         # the PDE put should satisfy P = C - S + K e^{-rT}
-        vc = integrate_adaptive(black_scholes_rhs(self.sig, self.r, self.s), np.maximum(self.s - self.k, 0.0),
-                                [self.t], rtol=1e-8, atol=1e-8)[-1]
-        vp = integrate_adaptive(black_scholes_rhs(self.sig, self.r, self.s), np.maximum(self.k - self.s, 0.0),
-                                [self.t], rtol=1e-8, atol=1e-8)[-1]
+        vc = integrate_adaptive(
+            black_scholes_rhs(self.sig, self.r, self.s),
+            np.maximum(self.s - self.k, 0.0),
+            [self.t],
+            rtol=1e-8,
+            atol=1e-8,
+        )[-1]
+        vp = integrate_adaptive(
+            black_scholes_rhs(self.sig, self.r, self.s),
+            np.maximum(self.k - self.s, 0.0),
+            [self.t],
+            rtol=1e-8,
+            atol=1e-8,
+        )[-1]
         for s0 in (90.0, 110.0):
             i = int(np.argmin(np.abs(self.s - s0)))
             parity = vc[i] - s0 + self.k * np.exp(-self.r * self.t)

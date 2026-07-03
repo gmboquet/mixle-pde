@@ -13,6 +13,7 @@ except ImportError:
 
 if HAS_TORCH:
     from mixle.ppl import free, joint
+
     from mixle_pde import Differential, NavierStokes2D
     from mixle_pde.ops import make_ops
 

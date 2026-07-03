@@ -13,6 +13,7 @@ except ImportError:
 
 if HAS_TORCH:
     from mixle.ppl import GaussianField, RandomWalk, free, joint
+
     from mixle_pde import Differential
     from mixle_pde.ops import make_ops
 

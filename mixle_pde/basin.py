@@ -44,12 +44,52 @@ EASYRO_FREQUENCY_FACTOR = 1.0e13  # Arrhenius pre-exponential A, s^-1
 GAS_CONSTANT_KCAL = 0.0019872041  # gas constant R, kcal / (mol K)
 # twenty parallel reactions: activation energies (kcal/mol) and their stoichiometric weights (sum = 0.85)
 EASYRO_ACTIVATION_ENERGIES = np.array(
-    [34.0, 36.0, 38.0, 40.0, 42.0, 44.0, 46.0, 48.0, 50.0, 52.0,
-     54.0, 56.0, 58.0, 60.0, 62.0, 64.0, 66.0, 68.0, 70.0, 72.0]
+    [
+        34.0,
+        36.0,
+        38.0,
+        40.0,
+        42.0,
+        44.0,
+        46.0,
+        48.0,
+        50.0,
+        52.0,
+        54.0,
+        56.0,
+        58.0,
+        60.0,
+        62.0,
+        64.0,
+        66.0,
+        68.0,
+        70.0,
+        72.0,
+    ]
 )
 EASYRO_WEIGHTS = np.array(
-    [0.03, 0.03, 0.04, 0.04, 0.05, 0.05, 0.06, 0.04, 0.04, 0.07,
-     0.06, 0.06, 0.06, 0.05, 0.05, 0.04, 0.03, 0.02, 0.02, 0.01]
+    [
+        0.03,
+        0.03,
+        0.04,
+        0.04,
+        0.05,
+        0.05,
+        0.06,
+        0.04,
+        0.04,
+        0.07,
+        0.06,
+        0.06,
+        0.06,
+        0.05,
+        0.05,
+        0.04,
+        0.03,
+        0.02,
+        0.02,
+        0.01,
+    ]
 )
 
 _SEC_PER_MYR = 1.0e6 * 365.25 * 24.0 * 3600.0
@@ -94,7 +134,8 @@ def geotherm(thickness, conductivity, *, surface_temp=10.0, surface_heat_flow=0.
         T = T + (q * dz[j] - 0.5 * H[j] * dz[j] ** 2) / k[j]
         q = q - H[j] * dz[j]
         z = z + dz[j]
-        depth.append(z); temp.append(T)
+        depth.append(z)
+        temp.append(T)
     return np.array(depth), np.array(temp)
 
 

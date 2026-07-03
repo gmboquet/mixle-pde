@@ -86,9 +86,9 @@ def magnetic_dipole_sensitivity(obs, cells, volumes, *, inclination, declination
     obs = np.asarray(obs, float)
     cells = np.asarray(cells, float)
     V = np.broadcast_to(np.asarray(volumes, float), (len(cells),))
-    d = obs[:, None, :] - cells[None, :, :]          # (n_obs, n_cells, 3) displacement obs<-cell
+    d = obs[:, None, :] - cells[None, :, :]  # (n_obs, n_cells, 3) displacement obs<-cell
     r = np.maximum(np.linalg.norm(d, axis=2), 1e-6)
-    bdotr = (d / r[:, :, None]) @ b                   # (n_obs, n_cells)
+    bdotr = (d / r[:, :, None]) @ b  # (n_obs, n_cells)
     return (field_nt / (4.0 * np.pi)) * V[None, :] * (3.0 * bdotr**2 - 1.0) / r**3
 
 
@@ -185,7 +185,7 @@ def dc_resistivity(log_sigma, shape, schedule, *, spacing=1.0, sigma_ref=1.0, lo
         a, b = q[0], q[1]
         inj_of.setdefault((a, b), None)
     pot = {}
-    for (a, b) in inj_of:
+    for a, b in inj_of:
         rhs = torch.zeros(n, dtype=sigma.dtype)
         rhs[a] = 1.0 / cell
         if b is not None:
@@ -229,7 +229,7 @@ def straight_ray_operator(shape, sources, receivers, *, spacing=1.0, n_seg=64, p
         sp_ = np.full(d, sp_[0])
     src = np.asarray(sources, float)
     rcv = np.asarray(receivers, float)
-    strides = np.array([int(np.prod(shape[k + 1:])) for k in range(d)])
+    strides = np.array([int(np.prod(shape[k + 1 :])) for k in range(d)])
     if pairs is None:
         pairs = [(i, j) for i in range(len(src)) for j in range(len(rcv))]
     t = np.linspace(0.0, 1.0, n_seg)[:, None]
@@ -324,7 +324,8 @@ def _backtrace_ray(Tfield, shape, h, recv, src, n_cells, max_steps=4000):
     step = 0.4
     for _ in range(max_steps):
         i, j = int(round(pos[0])), int(round(pos[1]))
-        i = min(max(i, 0), nx - 1); j = min(max(j, 0), nz - 1)
+        i = min(max(i, 0), nx - 1)
+        j = min(max(j, 0), nz - 1)
         gi = (T[min(i + 1, nx - 1), j] - T[max(i - 1, 0), j]) / 2.0
         gj = (T[i, min(j + 1, nz - 1)] - T[i, max(j - 1, 0)]) / 2.0
         g = np.hypot(gi, gj)
@@ -337,8 +338,22 @@ def _backtrace_ray(Tfield, shape, h, recv, src, n_cells, max_steps=4000):
     return row
 
 
-def traveltime_tomography(times, sources, receivers, shape, *, spacing=1.0, slowness0=None,
-                          noise=1.0, beta=1.0, n_iter=8, line_search=20, n_cycles=3, bounds=None, verbose=False):
+def traveltime_tomography(
+    times,
+    sources,
+    receivers,
+    shape,
+    *,
+    spacing=1.0,
+    slowness0=None,
+    noise=1.0,
+    beta=1.0,
+    n_iter=8,
+    line_search=20,
+    n_cycles=3,
+    bounds=None,
+    verbose=False,
+):
     r"""Crosshole/surface first-arrival **traveltime tomography** with the bending-ray eikonal forward.
 
     Inverts observed traveltimes for a 2-D slowness (1/velocity) field by regularized Gauss-Newton: each
@@ -370,9 +385,21 @@ def traveltime_tomography(times, sources, receivers, shape, *, spacing=1.0, slow
     receivers = np.asarray(receivers, int)
     w = np.broadcast_to(1.0 / np.asarray(noise, float), times.shape).astype(float)
     if slowness0 is None:
-        slowness0 = np.median(times / np.maximum(1e-6, np.abs(
-            np.array([np.hypot((sources[k] // nz - receivers[k] // nz),
-                               (sources[k] % nz - receivers[k] % nz)) * spacing for k in range(len(times))]))))
+        slowness0 = np.median(
+            times
+            / np.maximum(
+                1e-6,
+                np.abs(
+                    np.array(
+                        [
+                            np.hypot((sources[k] // nz - receivers[k] // nz), (sources[k] % nz - receivers[k] % nz))
+                            * spacing
+                            for k in range(len(times))
+                        ]
+                    )
+                ),
+            )
+        )
     s = np.full(N, float(slowness0)) if np.isscalar(slowness0) else np.asarray(slowness0, float).copy()
     R = roughness_operator(shape, spacing=spacing)
     RtR = np.asarray((R.T @ R).todense())

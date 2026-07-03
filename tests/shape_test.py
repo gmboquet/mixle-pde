@@ -13,6 +13,7 @@ except ImportError:
 
 if HAS_TORCH:
     from mixle.ppl import GP, RandomWalk, joint
+
     from mixle_pde import Differential, level_set_material, shape_optimize
 
 

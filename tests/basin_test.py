@@ -1,8 +1,9 @@
 """Validation of the basin thermal-history forwards against textbook physics and the EASY%Ro calibration."""
+
 import numpy as np
 import pytest
 
-from mixle_pde.basin import easy_ro, easy_ro_profile, geotherm, EASYRO_WEIGHTS
+from mixle_pde.basin import EASYRO_WEIGHTS, easy_ro, easy_ro_profile, geotherm
 
 
 def test_geotherm_linear_without_heat_production():
@@ -44,6 +45,7 @@ def test_easy_ro_oil_window_calibration():
         dur = (tmax - 10.0) / rate
         t = np.linspace(0.0, dur, max(int(dur), 50))
         return easy_ro(t, 10.0 + rate * t)
+
     for rate, expect in [(1.0, 99.0), (3.0, 105.0), (10.0, 114.0)]:
         tmaxes = np.arange(60.0, 200.0, 1.0)
         ros = np.array([ro_at(tm, rate) for tm in tmaxes])

@@ -31,8 +31,8 @@ class StiffODETest(unittest.TestCase):
         # lambda = -1e6: an L-stable method damps the fast mode to ~0 without blowing up at moderate steps
         big = np.array([[-1.0e6, 0.0], [0.0, -1.0]])
         y = integrate_stiff(lambda t, v: big @ v, [1.0, 1.0], [2.0], jac=lambda t, v: big)[0]
-        self.assertLess(abs(y[0]), 1e-6)                       # stiff mode damped
-        self.assertAlmostEqual(y[1], np.exp(-2.0), places=4)   # slow mode accurate
+        self.assertLess(abs(y[0]), 1e-6)  # stiff mode damped
+        self.assertAlmostEqual(y[1], np.exp(-2.0), places=4)  # slow mode accurate
 
 
 if __name__ == "__main__":

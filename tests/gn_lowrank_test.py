@@ -13,6 +13,7 @@ except ImportError:
 
 if HAS_TORCH:
     from mixle.ppl import GP, RBF, joint
+
     from mixle_pde import Differential
 
 

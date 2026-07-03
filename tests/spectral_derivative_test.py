@@ -32,7 +32,9 @@ class SpectralDerivativeTest(unittest.TestCase):
         L, n = 5.0, 100
         x = np.linspace(0.0, L, n, endpoint=False)
         u = np.cos(2 * np.pi * x / L)
-        self.assertTrue(np.allclose(spectral_derivative(u, L, 1), -(2 * np.pi / L) * np.sin(2 * np.pi * x / L), atol=1e-10))
+        self.assertTrue(
+            np.allclose(spectral_derivative(u, L, 1), -(2 * np.pi / L) * np.sin(2 * np.pi * x / L), atol=1e-10)
+        )
 
 
 if __name__ == "__main__":

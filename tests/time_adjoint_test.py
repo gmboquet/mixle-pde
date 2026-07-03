@@ -13,6 +13,7 @@ except ImportError:
 
 if HAS_TORCH:
     from mixle.ppl import free, joint
+
     from mixle_pde import Differential
     from mixle_pde.ops import make_ops
     from mixle_pde.pde_solve import laplacian

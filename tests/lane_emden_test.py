@@ -24,8 +24,9 @@ class LaneEmdenTest(unittest.TestCase):
         # n=1 surface (theta=0) is the first zero of sin(xi)/xi, i.e. xi_1 = pi
         xi0 = 1e-4
         xs = np.linspace(xi0, np.pi, 400)
-        sol = integrate_adaptive(lane_emden_rhs(1), np.array([1 - xi0**2 / 6, -xi0 / 3]), xs, t0=xi0,
-                                 rtol=1e-10, atol=1e-12)
+        sol = integrate_adaptive(
+            lane_emden_rhs(1), np.array([1 - xi0**2 / 6, -xi0 / 3]), xs, t0=xi0, rtol=1e-10, atol=1e-12
+        )
         self.assertAlmostEqual(sol[-1, 0], 0.0, delta=1e-4)
 
 

@@ -18,14 +18,14 @@ class ConservationLawTest(unittest.TestCase):
         sol = integrate_adaptive(rhs, u0, [t], rtol=1e-6, atol=1e-8)[-1]
         shock_x = x[np.argmin(np.abs(sol - 0.5))]
         self.assertAlmostEqual(shock_x, 8.0 + 0.5 * t, delta=0.2)  # Rankine-Hugoniot shock speed
-        self.assertLessEqual(sol.max(), 1.0 + 1e-6)                # no spurious overshoot
+        self.assertLessEqual(sol.max(), 1.0 + 1e-6)  # no spurious overshoot
         self.assertGreaterEqual(sol.min(), -1e-6)
 
     def test_linear_advection_transports(self):
         c = 1.5
         x = np.linspace(0.0, 20.0, 800)
         dx = x[1] - x[0]
-        u0 = np.exp(-((x - 5.0) / 0.7) ** 2)
+        u0 = np.exp(-(((x - 5.0) / 0.7) ** 2))
         rhs = conservation_law_rhs(lambda u: c * u, lambda u: np.full_like(u, abs(c)), dx, bc="outflow")
         sol = integrate_adaptive(rhs, u0, [3.0], rtol=1e-7, atol=1e-9)[-1]
         self.assertAlmostEqual(x[np.argmax(sol)], 5.0 + c * 3.0, delta=0.2)  # peak moved at speed c

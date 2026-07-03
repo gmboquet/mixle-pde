@@ -19,8 +19,8 @@ class KdVTest(unittest.TestCase):
 
         rhs = kdv_rhs(dx, nonlinearity=6.0, dispersion=1.0)
         sol = integrate_adaptive(rhs, soliton(0.0), [1.0], rtol=1e-6, atol=1e-8)[-1]
-        self.assertLess(np.sqrt(np.mean((sol - soliton(1.0)) ** 2)), 1e-2)   # tracks the moved soliton
-        self.assertAlmostEqual(np.max(sol), c / 2, delta=0.05)               # amplitude preserved
+        self.assertLess(np.sqrt(np.mean((sol - soliton(1.0)) ** 2)), 1e-2)  # tracks the moved soliton
+        self.assertAlmostEqual(np.max(sol), c / 2, delta=0.05)  # amplitude preserved
         self.assertGreater(np.sqrt(np.mean((sol - soliton(0.0)) ** 2)), 0.1)  # it actually moved
 
     def test_conserves_mass_and_momentum(self):
@@ -29,7 +29,7 @@ class KdVTest(unittest.TestCase):
         u0 = 2.0 / np.cosh(x - 20.0) ** 2
         rhs = kdv_rhs(dx)
         sol = integrate_adaptive(rhs, u0, [0.5], rtol=1e-7, atol=1e-9)[-1]
-        self.assertAlmostEqual(sol.sum() * dx, u0.sum() * dx, places=4)          # mass  int u
+        self.assertAlmostEqual(sol.sum() * dx, u0.sum() * dx, places=4)  # mass  int u
         self.assertAlmostEqual((sol**2).sum() * dx, (u0**2).sum() * dx, places=3)  # momentum int u^2
 
 
