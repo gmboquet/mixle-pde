@@ -54,6 +54,16 @@ def _driver_spec(handle):
     return name, getattr(spec, "support", "real"), int(getattr(spec, "dim", 1))
 
 
+def _resolve_misfit(misfit):
+    """Resolve the ``misfit`` argument to a callable ``(pred, obs) -> scalar`` (or ``None`` for plain L2)."""
+    if misfit is None or callable(misfit):
+        return misfit
+    from mixle_pde.misfit import misfit as _misfit_dispatch
+
+    kind = str(misfit)
+    return lambda pred, obs: _misfit_dispatch(pred, obs, kind=kind)
+
+
 class _DifferentialProxy(Proxy):
     """Internal proxy: solve a forward model from the drivers/field and score the observed output."""
 
@@ -67,6 +77,7 @@ class _DifferentialProxy(Proxy):
         over_name,
         scale,
         family,
+        misfit_fn=None,
         prefix="diff",
     ):
         self.complex = np.iscomplexobj(np.asarray(y))
@@ -76,7 +87,13 @@ class _DifferentialProxy(Proxy):
         self.drivers = drivers  # list of (name, support, dim)
         self.over_name = over_name
         self.family = family
+        self.misfit_fn = misfit_fn
         self.prefix = prefix
+        if misfit_fn is not None:
+            if family != "gaussian":
+                raise ValueError("misfit is only supported for family='gaussian'.")
+            if self.complex:
+                raise ValueError("misfit functionals are for real-valued wave traces, not complex data.")
         from mixle.ppl.core import _is_free
 
         if family == "gaussian" and _is_free(scale):
@@ -107,15 +124,30 @@ class _DifferentialProxy(Proxy):
             rate = torch.clamp(pred, min=1e-12)
             return torch.sum(y * torch.log(rate) - rate)
         scale = params[self._scale_name] if self._scale_name is not None else self._scale_fixed
-        resid = (y - pred) / scale
         log_scale = torch.log(scale) if torch.is_tensor(scale) else float(np.log(scale))
+        if self.misfit_fn is not None:  # replace the L2 data term with a cycle-skip-robust misfit
+            d = self._apply_misfit(pred, y, torch)
+            return -0.5 * d / (scale * scale) - y.numel() * (log_scale + 0.5 * np.log(2 * np.pi))
+        resid = (y - pred) / scale
         if self.complex:  # complex Gaussian (radar/sonar): misfit on |residual|^2
             sq = resid.real**2 + resid.imag**2
             return -0.5 * torch.sum(sq) - y.numel() * (2.0 * log_scale + np.log(np.pi))
         return -0.5 * torch.sum(resid * resid) - y.numel() * (log_scale + 0.5 * np.log(2 * np.pi))
 
+    def _apply_misfit(self, pred, y, torch):
+        """Sum the misfit functional over traces: the whole 1D trace, or each row of a 2D gather (axis 0)."""
+        if pred.dim() <= 1:
+            return self.misfit_fn(pred, y)
+        p2 = pred.reshape(pred.shape[0], -1)
+        y2 = y.reshape(y.shape[0], -1)
+        total = self.misfit_fn(p2[0], y2[0])
+        for i in range(1, p2.shape[0]):
+            total = total + self.misfit_fn(p2[i], y2[i])
+        return total
+
     def residual(self, field_t, params, torch):
-        if self.family != "gaussian":
+        # a custom misfit is a scalar functional, not a per-datum residual, so Gauss-Newton is unavailable for it
+        if self.family != "gaussian" or self.misfit_fn is not None:
             return None
         ops = make_ops()
         values = {name: params[name] for name, _, _ in self.drivers}
@@ -144,6 +176,7 @@ def Differential(
     over=None,
     scale: Any = 1.0,
     family: str = "gaussian",
+    misfit: Any = None,
 ) -> tuple:
     """An observation whose forward model is an ODE/PDE solve; recovers a posterior over the drivers.
 
@@ -155,6 +188,14 @@ def Differential(
     term, a spatially varying coefficient) exposed as ``p.field``. ``scale`` is the Gaussian noise level
     (fixed or ``free``); ``family`` is ``'gaussian'`` or ``'poisson'``. Returns the ``(field, proxy)`` pair
     consumed by :func:`joint`.
+
+    ``misfit`` replaces the default L2 data term with a cycle-skip-robust objective for wave-equation
+    inversion (FWI): a name from :mod:`mixle_pde.misfit` (``'envelope'``, ``'xcorr'``, ``'w1'``/``'w2'``),
+    or a callable ``(pred, obs) -> scalar``. It applies per trace (the whole 1D prediction, or each row of a
+    2D gather) and is only valid for real-valued ``family='gaussian'`` data. Because a misfit is a scalar
+    functional rather than a residual vector, ``how='gauss_newton'`` is unavailable with it; fit with
+    ``how='map'``, ``'laplace'``, or ``'vi'``. For a non-unit sample step pass a callable, e.g.
+    ``misfit=lambda p, o: xcorr_traveltime_misfit(p, o, dt=0.004)``.
     """
     if family not in ("gaussian", "poisson"):
         raise ValueError("family must be 'gaussian' or 'poisson'.")
@@ -162,6 +203,9 @@ def Differential(
         raise ValueError("provide forward(p, ops) or an initial-value problem via rhs/y0/t_grid.")
     if rhs is not None and (y0 is None or t_grid is None):
         raise ValueError("an initial-value rhs needs y0 and t_grid.")
+    if misfit is not None and family != "gaussian":
+        raise ValueError("misfit is only supported for family='gaussian'.")
+    misfit_fn = _resolve_misfit(misfit)
 
     from mixle.ppl.field import GaussianField
 
@@ -182,6 +226,13 @@ def Differential(
 
     drivers_spec = [_driver_spec(h) for h in drivers]
     proxy = _DifferentialProxy(
-        y, forward=forward, observe=observe, drivers=drivers_spec, over_name=over_name, scale=scale, family=family
+        y,
+        forward=forward,
+        observe=observe,
+        drivers=drivers_spec,
+        over_name=over_name,
+        scale=scale,
+        family=family,
+        misfit_fn=misfit_fn,
     )
     return field, proxy
