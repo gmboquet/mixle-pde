@@ -22,8 +22,14 @@ from typing import Any
 
 from mixle.ppl.core import RandomVariable
 
+# Register the sparse-solve detector so mixle.ppl.field can guard how='laplace' on a sparse PDE forward
+# (its dense double-backward Hessian would be silently wrong). mixle has no PDE dependency; this plugs in.
+from mixle.ppl.field import register_sparse_solve_detector as _register_sparse_solve_detector
+
 # Importing `pde` fires register_composite("PDEStateSpace", ..., fit_fn=pde_fit) into mixle's registry.
 from mixle_pde import pde  # noqa: F401
+from mixle_pde.basin import easy_ro, easy_ro_profile, geotherm
+from mixle_pde.beam import EulerBernoulliBeam
 from mixle_pde.dynamics import (
     AdvectionDiffusionOperator,
     AdvectionOperator,
@@ -33,31 +39,31 @@ from mixle_pde.dynamics import (
     make_operator,
     register_dynamics_operator,
 )
-from mixle_pde.basin import easy_ro, easy_ro_profile, geotherm
+from mixle_pde.elastic import ElasticWave3D
 from mixle_pde.flow import NavierStokes2D
+from mixle_pde.flow3d import NavierStokes3D
 from mixle_pde.geophysics import (
-    gravity_point_sensitivity,
-    magnetic_dipole_sensitivity,
-    depth_weighting,
     cross_gradient,
     dc_resistivity,
+    depth_weighting,
+    gravity_point_sensitivity,
     joint_inversion,
+    magnetic_dipole_sensitivity,
     regularized_gauss_newton,
     roughness_operator,
     straight_ray_operator,
 )
 from mixle_pde.inverse import Differential
+from mixle_pde.maxwell import Maxwell3D
 from mixle_pde.multiphysics import CoupledPDESystem, solve_poisson
+from mixle_pde.pde_solve import sparse_used_since as _sparse_used_since
+from mixle_pde.plate import KirchhoffPlate
 
 # cross-modal subsurface reasoning: geophysical forward models -> mixle.reason evidence (belief + UQ)
 from mixle_pde.reasoning import JointPotentialField, MechanisticFieldReasoner, SpatialFieldStore
 from mixle_pde.shape import level_set_material, shape_optimize
 from mixle_pde.wave import WaveEquation2D
-
-# Register the sparse-solve detector so mixle.ppl.field can guard how='laplace' on a sparse PDE forward
-# (its dense double-backward Hessian would be silently wrong). mixle has no PDE dependency; this plugs in.
-from mixle.ppl.field import register_sparse_solve_detector as _register_sparse_solve_detector
-from mixle_pde.pde_solve import sparse_used_since as _sparse_used_since
+from mixle_pde.wave3d import WaveEquation3D
 
 _register_sparse_solve_detector(_sparse_used_since)
 
@@ -85,9 +91,24 @@ __all__ = [
     "available_dynamics_operators",
     "NavierStokes2D",
     "WaveEquation2D",
+    "WaveEquation3D",
+    "NavierStokes3D",
+    "Maxwell3D",
+    "ElasticWave3D",
+    "EulerBernoulliBeam",
+    "KirchhoffPlate",
     "Differential",
     "CoupledPDESystem",
     "solve_poisson",
+    "gravity_point_sensitivity",
+    "magnetic_dipole_sensitivity",
+    "depth_weighting",
+    "cross_gradient",
+    "dc_resistivity",
+    "joint_inversion",
+    "regularized_gauss_newton",
+    "roughness_operator",
+    "straight_ray_operator",
     "JointPotentialField",
     "SpatialFieldStore",
     "MechanisticFieldReasoner",
