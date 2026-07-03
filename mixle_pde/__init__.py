@@ -86,7 +86,11 @@ from mixle_pde.potential_fields import (
 from mixle_pde.reasoning import JointPotentialField, MechanisticFieldReasoner, SpatialFieldStore
 from mixle_pde.rock_physics import fluid_substitute, gassmann_kdry, gassmann_ksat
 from mixle_pde.shape import level_set_material, shape_optimize
+
+# new inverse-PDE families (wave 3): Smoluchowski diffusion-limited on-rates, time-domain constant-Q viscoacoustic
+from mixle_pde.smoluchowski import smoluchowski_debye_factor, smoluchowski_rate_box, smoluchowski_rate_radial
 from mixle_pde.two_phase import TwoPhaseFlow2D
+from mixle_pde.viscoelastic import ViscoacousticWave1D, q_of_omega, tau_fit
 from mixle_pde.wave import WaveEquation2D
 from mixle_pde.wave3d import WaveEquation3D
 
@@ -178,4 +182,10 @@ __all__ = [
     "xcorr_traveltime_misfit",
     "wasserstein1d_misfit",
     "hilbert_envelope",
+    "smoluchowski_rate_radial",
+    "smoluchowski_rate_box",
+    "smoluchowski_debye_factor",
+    "ViscoacousticWave1D",
+    "tau_fit",
+    "q_of_omega",
 ]
