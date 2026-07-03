@@ -44,6 +44,10 @@ from mixle_pde.elastic import ElasticWave3D
 # new inverse-PDE families (wave 1): nonlinear-steady primitive, diffusive EM, transient heat, rock physics,
 # migration, anisotropic elasticity, guided waves, poroelasticity
 from mixle_pde.elastic_aniso import AnisotropicElasticWave3D, thomsen_to_cij
+
+# new inverse-PDE families (wave 2): Poisson-Boltzmann, Poisson-Nernst-Planck, induced polarization,
+# full-tensor potential fields, PML/complex-modulus Helmholtz, cycle-skip FWI misfits
+from mixle_pde.electrostatics import linearized_pbe, nonlinear_pbe, reaction_field_energy
 from mixle_pde.em_diffusion import layered_mt_impedance, mt_2d_te
 from mixle_pde.flow import NavierStokes2D
 from mixle_pde.flow3d import NavierStokes3D
@@ -60,14 +64,23 @@ from mixle_pde.geophysics import (
 )
 from mixle_pde.guided_wave import SAFEPlate, safe_dispersion
 from mixle_pde.heat import TransientHeat
+from mixle_pde.helmholtz_pml import helmholtz_pml_operator, solve_helmholtz_pml
+from mixle_pde.induced_polarization import apparent_conductivity, cole_cole_conductivity, sip_forward
 from mixle_pde.inverse import Differential
 from mixle_pde.maxwell import Maxwell3D
 from mixle_pde.migration import born_modeling, lsrtm_step, rtm_image
+from mixle_pde.misfit import envelope_misfit, hilbert_envelope, misfit, wasserstein1d_misfit, xcorr_traveltime_misfit
 from mixle_pde.multiphysics import CoupledPDESystem, solve_poisson
 from mixle_pde.nonlinear import nonlinear_solve, reaction_diffusion_residual
 from mixle_pde.pde_solve import sparse_used_since as _sparse_used_since
 from mixle_pde.plate import KirchhoffPlate
+from mixle_pde.pnp import debye_length, pnp_equilibrium
 from mixle_pde.poroelastic import BiotPoroelastic1D, biot_gassmann_velocity
+from mixle_pde.potential_fields import (
+    gravity_gradient_tensor,
+    magnetic_gradient_tensor,
+    magnetic_vector_sensitivity,
+)
 
 # cross-modal subsurface reasoning: geophysical forward models -> mixle.reason evidence (belief + UQ)
 from mixle_pde.reasoning import JointPotentialField, MechanisticFieldReasoner, SpatialFieldStore
@@ -147,4 +160,22 @@ __all__ = [
     "SAFEPlate",
     "BiotPoroelastic1D",
     "biot_gassmann_velocity",
+    "linearized_pbe",
+    "nonlinear_pbe",
+    "reaction_field_energy",
+    "pnp_equilibrium",
+    "debye_length",
+    "cole_cole_conductivity",
+    "sip_forward",
+    "apparent_conductivity",
+    "gravity_gradient_tensor",
+    "magnetic_vector_sensitivity",
+    "magnetic_gradient_tensor",
+    "helmholtz_pml_operator",
+    "solve_helmholtz_pml",
+    "misfit",
+    "envelope_misfit",
+    "xcorr_traveltime_misfit",
+    "wasserstein1d_misfit",
+    "hilbert_envelope",
 ]
