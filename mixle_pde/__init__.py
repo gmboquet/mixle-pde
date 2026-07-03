@@ -40,6 +40,11 @@ from mixle_pde.dynamics import (
     register_dynamics_operator,
 )
 from mixle_pde.elastic import ElasticWave3D
+
+# new inverse-PDE families (wave 1): nonlinear-steady primitive, diffusive EM, transient heat, rock physics,
+# migration, anisotropic elasticity, guided waves, poroelasticity
+from mixle_pde.elastic_aniso import AnisotropicElasticWave3D, thomsen_to_cij
+from mixle_pde.em_diffusion import layered_mt_impedance, mt_2d_te
 from mixle_pde.flow import NavierStokes2D
 from mixle_pde.flow3d import NavierStokes3D
 from mixle_pde.geophysics import (
@@ -53,14 +58,20 @@ from mixle_pde.geophysics import (
     roughness_operator,
     straight_ray_operator,
 )
+from mixle_pde.guided_wave import SAFEPlate, safe_dispersion
+from mixle_pde.heat import TransientHeat
 from mixle_pde.inverse import Differential
 from mixle_pde.maxwell import Maxwell3D
+from mixle_pde.migration import born_modeling, lsrtm_step, rtm_image
 from mixle_pde.multiphysics import CoupledPDESystem, solve_poisson
+from mixle_pde.nonlinear import nonlinear_solve, reaction_diffusion_residual
 from mixle_pde.pde_solve import sparse_used_since as _sparse_used_since
 from mixle_pde.plate import KirchhoffPlate
+from mixle_pde.poroelastic import BiotPoroelastic1D, biot_gassmann_velocity
 
 # cross-modal subsurface reasoning: geophysical forward models -> mixle.reason evidence (belief + UQ)
 from mixle_pde.reasoning import JointPotentialField, MechanisticFieldReasoner, SpatialFieldStore
+from mixle_pde.rock_physics import fluid_substitute, gassmann_kdry, gassmann_ksat
 from mixle_pde.shape import level_set_material, shape_optimize
 from mixle_pde.two_phase import TwoPhaseFlow2D
 from mixle_pde.wave import WaveEquation2D
@@ -119,4 +130,21 @@ __all__ = [
     "geotherm",
     "easy_ro",
     "easy_ro_profile",
+    "nonlinear_solve",
+    "reaction_diffusion_residual",
+    "layered_mt_impedance",
+    "mt_2d_te",
+    "TransientHeat",
+    "gassmann_ksat",
+    "gassmann_kdry",
+    "fluid_substitute",
+    "rtm_image",
+    "born_modeling",
+    "lsrtm_step",
+    "AnisotropicElasticWave3D",
+    "thomsen_to_cij",
+    "safe_dispersion",
+    "SAFEPlate",
+    "BiotPoroelastic1D",
+    "biot_gassmann_velocity",
 ]
