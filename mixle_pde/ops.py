@@ -13,6 +13,7 @@ the library, the callback is handed an ``ops`` namespace (curated math + grid as
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 
@@ -102,6 +103,20 @@ class _Ops:
     def solve(self, A, b):
         """Dense linear solve (small systems). For large/sparse systems use ``sparse_solve``."""
         return self._t.linalg.solve(A, b)
+
+    # spectral transforms (for split-step / parabolic-equation propagators); differentiable through torch.fft
+    def fft(self, x, axis=-1):
+        """FFT of ``x`` along ``axis`` (complex, differentiable)."""
+        return self._t.fft.fft(x, dim=axis)
+
+    def ifft(self, x, axis=-1):
+        """Inverse FFT of ``x`` along ``axis`` (complex, differentiable)."""
+        return self._t.fft.ifft(x, dim=axis)
+
+    def fftfreq(self, n, *, spacing=1.0):
+        """Angular wavenumbers ``2*pi*m/(n*spacing)`` for a length-``n`` FFT axis -- the spectral grid a
+        split-step propagator advances in (ordered like :meth:`fft`: DC, positive, then negative)."""
+        return 2.0 * math.pi * self._t.fft.fftfreq(int(n), d=float(spacing), dtype=self._t.float64)
 
     # ODE integration (a forward model convenience): rhs(u, t) -> du/dt
     def integrate(self, rhs, y0, t_grid, *, method: str = "rk4"):
