@@ -17,7 +17,7 @@ Example -- recover a decay rate from a noisy decay curve (no shared field)::
     k = free(1, name="k", support="positive")
     obs = Differential(y_obs, drivers=[k], y0=1.0, t_grid=t, scale=0.05,
                        rhs=lambda u, t, p, ops: -p.k * u)        # dy/dt = -k y
-    post = joint([obs]).fit(how="map")
+    post = joint([obs]).fit(how="laplace")
     k_mean, k_sd = post.posterior("k")
 
 Example -- recover a source field from a steady diffusion equation (the shared field is the source)::
@@ -25,7 +25,7 @@ Example -- recover a source field from a steady diffusion equation (the shared f
     q = GP("q", index=coords, kernel=RandomWalk(scale=0.3, ridge=5.0))
     obs = Differential(u_sensors, over=q, scale=0.02, observe=lambda u, p, ops: u[sensor_idx],
                        forward=lambda p, ops: ops.sparse_solve(*ops.divergence_form(p.field, shape), b))
-    post = joint([obs]).fit(how="map")
+    post = joint([obs]).fit(how="laplace")
     q_mean, q_sd = post.posterior("q")
 """
 
