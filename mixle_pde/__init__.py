@@ -28,6 +28,15 @@ from mixle.ppl.field import register_sparse_solve_detector as _register_sparse_s
 
 # Importing `pde` fires register_composite("PDEStateSpace", ..., fit_fn=pde_fit) into mixle's registry.
 from mixle_pde import pde  # noqa: F401
+
+# realistic sonar/radar propagation (part 1): environmental transforms + the parabolic-equation keystone
+from mixle_pde.attenuation import (
+    francois_garrison_seawater,
+    itu_gaseous,
+    itu_rain_specific,
+    quality_factor,
+    thorp_seawater,
+)
 from mixle_pde.basin import easy_ro, easy_ro_profile, geotherm
 from mixle_pde.beam import EulerBernoulliBeam
 from mixle_pde.dynamics import (
@@ -73,6 +82,7 @@ from mixle_pde.migration import born_modeling, lsrtm_step, rtm_image
 from mixle_pde.misfit import envelope_misfit, hilbert_envelope, misfit, wasserstein1d_misfit, xcorr_traveltime_misfit
 from mixle_pde.multiphysics import CoupledPDESystem, solve_poisson
 from mixle_pde.nonlinear import nonlinear_solve, reaction_diffusion_residual
+from mixle_pde.parabolic_equation import ParabolicEquation2D
 from mixle_pde.pde_solve import sparse_used_since as _sparse_used_since
 from mixle_pde.plate import KirchhoffPlate
 from mixle_pde.pnp import debye_length, pnp_equilibrium
@@ -85,11 +95,13 @@ from mixle_pde.potential_fields import (
 
 # cross-modal subsurface reasoning: geophysical forward models -> mixle.reason evidence (belief + UQ)
 from mixle_pde.reasoning import JointPotentialField, MechanisticFieldReasoner, SpatialFieldStore
+from mixle_pde.refractivity import duct_layers, modified_refractivity, standard_refractivity_profile
 from mixle_pde.rock_physics import fluid_substitute, gassmann_kdry, gassmann_ksat
 from mixle_pde.shape import level_set_material, shape_optimize
 
 # new inverse-PDE families (wave 3): Smoluchowski diffusion-limited on-rates, time-domain constant-Q viscoacoustic
 from mixle_pde.smoluchowski import smoluchowski_debye_factor, smoluchowski_rate_box, smoluchowski_rate_radial
+from mixle_pde.sound_speed import mackenzie, unesco
 from mixle_pde.two_phase import TwoPhaseFlow2D
 from mixle_pde.viscoelastic import ViscoacousticWave1D, q_of_omega, tau_fit
 from mixle_pde.wave import WaveEquation2D
@@ -192,4 +204,15 @@ __all__ = [
     "ViscoacousticWave1D",
     "tau_fit",
     "q_of_omega",
+    "mackenzie",
+    "unesco",
+    "modified_refractivity",
+    "standard_refractivity_profile",
+    "duct_layers",
+    "thorp_seawater",
+    "francois_garrison_seawater",
+    "itu_gaseous",
+    "itu_rain_specific",
+    "quality_factor",
+    "ParabolicEquation2D",
 ]
