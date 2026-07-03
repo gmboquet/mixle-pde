@@ -49,6 +49,7 @@ from mixle_pde.elastic_aniso import AnisotropicElasticWave3D, thomsen_to_cij
 # full-tensor potential fields, PML/complex-modulus Helmholtz, cycle-skip FWI misfits
 from mixle_pde.electrostatics import linearized_pbe, nonlinear_pbe, reaction_field_energy
 from mixle_pde.em_diffusion import layered_mt_impedance, mt_2d_te
+from mixle_pde.em_diffusion_3d import assemble_curl_curl_3d, csem_3d, mt_3d
 from mixle_pde.flow import NavierStokes2D
 from mixle_pde.flow3d import NavierStokes3D
 from mixle_pde.geophysics import (
@@ -151,6 +152,9 @@ __all__ = [
     "reaction_diffusion_residual",
     "layered_mt_impedance",
     "mt_2d_te",
+    "mt_3d",
+    "csem_3d",
+    "assemble_curl_curl_3d",
     "TransientHeat",
     "gassmann_ksat",
     "gassmann_kdry",

@@ -131,10 +131,11 @@ differentiable forward without per-problem prior tuning: `gravity_point_sensitiv
 `joint_inversion` for structural coupling of several property models.
 
 Electromagnetics in the diffusive (induction) regime, distinct from the wave-regime `Maxwell3D`:
-`layered_mt_impedance` (1D magnetotelluric / airborne EM) and `mt_2d_te` (2D magnetotelluric), plus
-`cole_cole_conductivity` / `sip_forward` for spectral induced polarization (disseminated-sulphide
-detection). Potential fields extend to `gravity_gradient_tensor` (full-tensor gradiometry) and
-`magnetic_vector_sensitivity` / `magnetic_gradient_tensor`.
+`layered_mt_impedance` (1D magnetotelluric / airborne EM), `mt_2d_te` (2D magnetotelluric), and `mt_3d` /
+`csem_3d` (a 3D edge-element / Yee curl-curl solver for CSEM, magnetotellurics, borehole induction, and
+eddy-current NDE), plus `cole_cole_conductivity` / `sip_forward` for spectral induced polarization
+(disseminated-sulphide detection). Potential fields extend to `gravity_gradient_tensor` (full-tensor
+gradiometry) and `magnetic_vector_sensitivity` / `magnetic_gradient_tensor`.
 
 ### Petroleum systems
 
