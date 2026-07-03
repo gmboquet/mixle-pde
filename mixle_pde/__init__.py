@@ -59,6 +59,17 @@ from mixle_pde.elastic_aniso import AnisotropicElasticWave3D, thomsen_to_cij
 from mixle_pde.electrostatics import linearized_pbe, nonlinear_pbe, reaction_field_energy
 from mixle_pde.em_diffusion import layered_mt_impedance, mt_2d_te
 from mixle_pde.em_diffusion_3d import assemble_curl_curl_3d, csem_3d, mt_3d
+
+# realistic sonar/radar propagation (part 3): full-wave reference, asymptotic ray/PO scattering, real-data layer
+from mixle_pde.env_data import (
+    apply_mask,
+    assemble_field,
+    load_dem,
+    load_era5_profile,
+    load_gebco,
+    load_woa_argo,
+    seabed_mask,
+)
 from mixle_pde.flow import NavierStokes2D
 from mixle_pde.flow3d import NavierStokes3D
 from mixle_pde.geophysics import (
@@ -92,6 +103,7 @@ from mixle_pde.potential_fields import (
     magnetic_gradient_tensor,
     magnetic_vector_sensitivity,
 )
+from mixle_pde.ray_scattering import knife_edge_diffraction, multipath_power, po_rcs, two_ray_pattern
 
 # cross-modal subsurface reasoning: geophysical forward models -> mixle.reason evidence (belief + UQ)
 from mixle_pde.reasoning import JointPotentialField, MechanisticFieldReasoner, SpatialFieldStore
@@ -106,6 +118,7 @@ from mixle_pde.two_phase import TwoPhaseFlow2D
 from mixle_pde.viscoelastic import ViscoacousticWave1D, q_of_omega, tau_fit
 from mixle_pde.wave import WaveEquation2D
 from mixle_pde.wave3d import WaveEquation3D
+from mixle_pde.wavenumber_integration import WavenumberIntegration1D
 
 _register_sparse_solve_detector(_sparse_used_since)
 
@@ -215,4 +228,16 @@ __all__ = [
     "itu_rain_specific",
     "quality_factor",
     "ParabolicEquation2D",
+    "WavenumberIntegration1D",
+    "po_rcs",
+    "knife_edge_diffraction",
+    "two_ray_pattern",
+    "multipath_power",
+    "assemble_field",
+    "seabed_mask",
+    "apply_mask",
+    "load_gebco",
+    "load_woa_argo",
+    "load_dem",
+    "load_era5_profile",
 ]
