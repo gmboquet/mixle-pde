@@ -39,6 +39,15 @@ from mixle_pde.attenuation import (
 )
 from mixle_pde.basin import easy_ro, easy_ro_profile, geotherm
 from mixle_pde.beam import EulerBernoulliBeam
+
+# realistic sonar/radar propagation (part 2): boundaries, KRAKEN normal modes, and the propagation inverse problems
+from mixle_pde.boundaries import (
+    bottom_loss_db,
+    coherent_roughness_factor,
+    critical_grazing_angle,
+    radar_surface_reflection,
+    seabed_reflection,
+)
 from mixle_pde.dynamics import (
     AdvectionDiffusionOperator,
     AdvectionOperator,
@@ -93,6 +102,7 @@ from mixle_pde.migration import born_modeling, lsrtm_step, rtm_image
 from mixle_pde.misfit import envelope_misfit, hilbert_envelope, misfit, wasserstein1d_misfit, xcorr_traveltime_misfit
 from mixle_pde.multiphysics import CoupledPDESystem, solve_poisson
 from mixle_pde.nonlinear import nonlinear_solve, reaction_diffusion_residual
+from mixle_pde.normal_modes import NormalModes1D
 from mixle_pde.parabolic_equation import ParabolicEquation2D
 from mixle_pde.pde_solve import sparse_used_since as _sparse_used_since
 from mixle_pde.plate import KirchhoffPlate
@@ -103,6 +113,7 @@ from mixle_pde.potential_fields import (
     magnetic_gradient_tensor,
     magnetic_vector_sensitivity,
 )
+from mixle_pde.propagation_inverse import ocean_sound_speed_inversion, refractivity_from_clutter
 from mixle_pde.ray_scattering import knife_edge_diffraction, multipath_power, po_rcs, two_ray_pattern
 
 # cross-modal subsurface reasoning: geophysical forward models -> mixle.reason evidence (belief + UQ)
@@ -240,4 +251,12 @@ __all__ = [
     "load_woa_argo",
     "load_dem",
     "load_era5_profile",
+    "seabed_reflection",
+    "critical_grazing_angle",
+    "bottom_loss_db",
+    "coherent_roughness_factor",
+    "radar_surface_reflection",
+    "NormalModes1D",
+    "refractivity_from_clutter",
+    "ocean_sound_speed_inversion",
 ]

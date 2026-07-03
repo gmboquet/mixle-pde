@@ -153,6 +153,29 @@ free energy. `pnp_equilibrium` is the equilibrium Poisson-Nernst-Planck ion-chan
 `smoluchowski_rate_radial` / `smoluchowski_rate_box` give diffusion-limited association on-rates. All
 build on the differentiable `nonlinear_solve` keystone.
 
+### Sonar and radar propagation
+
+Long-range sonar and radar are the same problem: propagation through a range-varying medium. The shared
+keystone is `ParabolicEquation2D`, a range-marched split-step Fourier one-way propagator that serves both
+by swapping only the environmental potential and the boundary. Underwater it marches on the acoustic index
+from `mackenzie` / `unesco` sound speed c(T,S,depth); in the troposphere it marches on the modified
+refractivity from `refractivity` / `modified_refractivity` (ITU-R P.453) so radar ducting falls out. It is
+differentiable, so it drops into `Differential`.
+
+Around it: `boundaries` (seabed Rayleigh reflection with the critical grazing angle, rough-surface coherent
+loss, and the radar Fresnel surface impedance); `attenuation` (Thorp / Francois-Garrison for seawater,
+ITU-R P.676 gaseous and P.838 rain for the atmosphere) feeding the solvers' complex-modulus `Q` slot;
+`NormalModes1D`, a KRAKEN-style differentiable depth-mode solver verified against the Pekeris waveguide and
+cross-checked against the PE; and `WavenumberIntegration1D`, the OASES-style full-wave reference. For small
+scenes and targets, `po_rcs` / `knife_edge_diffraction` / `two_ray_pattern` / `multipath_power` give
+asymptotic radar cross sections and urban multipath.
+
+The inverse problems come for free on the `Differential` stack: `refractivity_from_clutter` recovers an
+atmospheric duct from radar clutter, and `ocean_sound_speed_inversion` recovers a sound-speed anomaly from a
+received acoustic field. `env_data` assembles real profiles and bathymetry/terrain into the range-depth
+coefficient fields (differentiable interpolation + seabed masking), with import-guarded loaders for GEBCO,
+World Ocean Atlas / Argo, DEM, and ERA5 data behind an optional extra.
+
 ### Cross-modal reasoning
 
 `JointPotentialField`, `SpatialFieldStore`, and `MechanisticFieldReasoner` fuse geophysical modalities
