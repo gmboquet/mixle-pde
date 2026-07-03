@@ -62,6 +62,7 @@ from mixle_pde.plate import KirchhoffPlate
 # cross-modal subsurface reasoning: geophysical forward models -> mixle.reason evidence (belief + UQ)
 from mixle_pde.reasoning import JointPotentialField, MechanisticFieldReasoner, SpatialFieldStore
 from mixle_pde.shape import level_set_material, shape_optimize
+from mixle_pde.two_phase import TwoPhaseFlow2D
 from mixle_pde.wave import WaveEquation2D
 from mixle_pde.wave3d import WaveEquation3D
 
@@ -93,6 +94,7 @@ __all__ = [
     "WaveEquation2D",
     "WaveEquation3D",
     "NavierStokes3D",
+    "TwoPhaseFlow2D",
     "Maxwell3D",
     "ElasticWave3D",
     "EulerBernoulliBeam",
