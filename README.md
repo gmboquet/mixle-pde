@@ -95,6 +95,11 @@ exact analytical solution (a normal-mode frequency, a decaying eigenmode, a Pois
 | `TwoPhaseFlow2D` | immiscible two-fluid flow (core-annular / lubricated pipelining) | diffuse-interface phase field, variable-property Chorin projection |
 | `Maxwell3D` | source-free Maxwell curl equations | FDTD on a Yee staggered grid |
 | `ElasticWave3D` | isotropic elastodynamics (P and S waves) | velocity-stress staggered grid (Virieux) |
+| `AnisotropicElasticWave3D` | anisotropic (VTI/TTI) elastodynamics | Thomsen / Bond-rotated stiffness, velocity-stress staggered grid |
+| `ViscoacousticWave1D` | constant-Q attenuating wave | GSLS memory variables (tau-method) |
+| `BiotPoroelastic1D` | Biot poroelasticity (fast + slow P) | velocity-stress-pressure staggered grid |
+| `TransientHeat` | transient heterogeneous heat conduction | divergence-form + checkpointed time stepping |
+| `SAFEPlate`, `safe_dispersion` | guided-wave (Lamb / SH) dispersion | semi-analytical finite elements |
 | `EulerBernoulliBeam` | slender-beam bending and vibration | 1D fourth-order (biharmonic) |
 | `KirchhoffPlate` | thin-plate bending, static and dynamic | 2D biharmonic |
 
@@ -110,6 +115,10 @@ perfectly-matched-layer boundary), and `fem` (P1 triangular finite elements for 
 | `Differential` | an observation whose forward model is an ODE/PDE solution; recover latent drivers (rate constants, source fields, initial states, coefficients) with `joint([...]).fit(how=...)` |
 | `PDE(operator).fit` | PDE-constrained latent-field state space (Kalman/RTS smoother + EM) over `DiffusionOperator`, `AdvectionOperator`, `AdvectionDiffusionOperator`, or any operator you `register_dynamics_operator` |
 | `pde_solve` | adjoint-capable sparse PDE solves (differentiable Poisson / divergence-form) for large-scale inverse problems |
+| `nonlinear_solve` | differentiable nonlinear steady solves `F(u;θ)=0` (Newton forward, implicit-function-theorem adjoint); the base for nonlinear elliptic inverse problems |
+| `rtm_image`, `born_modeling`, `lsrtm_step` | reverse-time migration and least-squares / Born imaging over the wave steppers |
+| `misfit` (`envelope` / `xcorr` / `wasserstein`) | cycle-skip-robust FWI misfit functionals for any wave forward |
+| `helmholtz_pml_operator` | frequency-domain Helmholtz with a PML boundary and a complex modulus (viscoacoustic attenuation) |
 | `shape_optimize`, `level_set_material` | level-set shape optimization and inverse shape inference |
 | `CoupledPDESystem`, `solve_poisson` | nD steady diffusion/Poisson and node-coupled multiphysics |
 
@@ -121,11 +130,27 @@ differentiable forward without per-problem prior tuning: `gravity_point_sensitiv
 `depth_weighting`, `roughness_operator`, `regularized_gauss_newton`, and `cross_gradient` /
 `joint_inversion` for structural coupling of several property models.
 
+Electromagnetics in the diffusive (induction) regime, distinct from the wave-regime `Maxwell3D`:
+`layered_mt_impedance` (1D magnetotelluric / airborne EM) and `mt_2d_te` (2D magnetotelluric), plus
+`cole_cole_conductivity` / `sip_forward` for spectral induced polarization (disseminated-sulphide
+detection). Potential fields extend to `gravity_gradient_tensor` (full-tensor gradiometry) and
+`magnetic_vector_sensitivity` / `magnetic_gradient_tensor`.
+
 ### Petroleum systems
 
 `geotherm` (steady conductive geotherm for a layered column) and `easy_ro` / `easy_ro_profile` (the
 EASY%Ro vitrinite-reflectance maturation model of Sweeney & Burnham 1990), differentiable forwards for
-heat-flow and thermal-history inversion.
+heat-flow and thermal-history inversion. `gassmann_ksat` / `fluid_substitute` give closed-form
+differentiable Gassmann fluid substitution, turning elastic-FWI velocities into reservoir variables
+(porosity, saturation).
+
+### Biomolecular electrostatics and reaction-diffusion
+
+`linearized_pbe` and `nonlinear_pbe` solve the Poisson-Boltzmann equation (linear Debye-Huckel and the
+full sinh form) for biomolecular electrostatics, with `reaction_field_energy` for MM-PBSA-style binding
+free energy. `pnp_equilibrium` is the equilibrium Poisson-Nernst-Planck ion-channel model, and
+`smoluchowski_rate_radial` / `smoluchowski_rate_box` give diffusion-limited association on-rates. All
+build on the differentiable `nonlinear_solve` keystone.
 
 ### Cross-modal reasoning
 
