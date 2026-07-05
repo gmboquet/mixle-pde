@@ -67,6 +67,7 @@ def refractivity_from_clutter(
     m0: float = 350.0,
     base_gradient: float = 0.118,
     strength: float = 1.0,
+    h0: float = 0.0,
     starter_width: float | None = None,
     n_range: int | None = None,
     observe=None,
@@ -98,6 +99,10 @@ def refractivity_from_clutter(
         Standard-atmosphere M-gradient above the duct (~0.118 M-units/m).
     strength : float
         Trapping slope magnitude below the duct (M-units/m); the sub-duct gradient is ``-strength`` (< 0).
+    h0 : float
+        Prior duct-height centre (m). The ``duct_height`` driver is fit as an OFFSET from ``h0``, so the
+        Gauss-Newton start (offset 0 -> height ``h0``) lands in the convex basin near the truth. Seed it from a
+        coarse grid search or climatology; the recovered height is ``h0 + posterior mean``. Default 0.
     starter_width, n_range :
         PE starter width and number of range steps (defaults: ``pe`` starter default, full ``y`` length).
     observe : callable, optional
@@ -115,7 +120,9 @@ def refractivity_from_clutter(
     nr = int(n_range) if n_range is not None else None
 
     def forward(p, ops):
-        m_profile = _soft_surface_duct(z, p.h_d, float(m0), float(base_gradient), float(strength), ops)
+        # h0 is a prior duct-height centre (e.g. from a coarse grid search / climatology); the driver is the
+        # offset from it, so Gauss-Newton starts in the convex basin near the truth instead of at h_d = 0.
+        m_profile = _soft_surface_duct(z, float(h0) + p.h_d, float(m0), float(base_gradient), float(strength), ops)
         n_col = modified_refractivity_index(m_profile)
         return pe.march(psi0, n_col, nr)
 
