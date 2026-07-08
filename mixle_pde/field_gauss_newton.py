@@ -33,7 +33,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from mixle_pde.field_inversion import FieldGaussianPrior, _noise_precision
+from mixle_pde.field_inversion import FieldGaussianPrior, _noise_precision, linear_gaussian_invert
 from mixle_pde.latent import Field3D, PosteriorField3D
 from mixle_pde.observations import ForwardOperatorRegistry, Observation
 
@@ -98,6 +98,20 @@ def gauss_newton_invert(
 
     rinvs = {id(obs): _noise_precision(obs) for obs in observations}
 
+    if grid.bounds is None and all(op.is_linear for op in ops.values()):
+        posterior = linear_gaussian_invert(grid, observations, registry, prior, jitter=jitter)
+        misfit = 0.0
+        for obs in observations:
+            resid = obs.value - ops[id(obs)].predict_observation(grid, posterior.mean, obs)
+            misfit += float(resid @ rinvs[id(obs)] @ resid)
+        step_norm = float(np.linalg.norm(posterior.mean - m0))
+        return posterior, GaussNewtonReport(
+            iterations=1,
+            converged=True,
+            step_norms=[step_norm],
+            final_data_misfit=misfit,
+        )
+
     def objective(u_vec: np.ndarray) -> float:
         phi = grid.from_unconstrained(u_vec)
         val = 0.5 * float((u_vec - m0) @ Q @ (u_vec - m0))
@@ -113,6 +127,7 @@ def gauss_newton_invert(
     lam = Q
     mu = 1.0e-3  # Levenberg-Marquardt damping: scales toward gradient descent when GN overshoots
     obj = objective(u)
+    step_tol = max(np.sqrt(tol), 1.0e-4)
     for _ in range(max_iter):
         phi = grid.from_unconstrained(u)
         B = _transform_jacobian_diag(grid, u)
@@ -136,12 +151,14 @@ def gauss_newton_invert(
             obj_try = objective(u_try)
             if obj_try < obj:
                 rel_improve = (obj - obj_try) / max(abs(obj), 1.0)
+                step_norm = float(np.linalg.norm(step))
+                scaled_step = step_norm / max(1.0, float(np.linalg.norm(u_try)))
                 u, obj = u_try, obj_try
                 mu = max(mu * 0.5, 1.0e-9)
-                step_norms.append(float(np.linalg.norm(step)))
+                step_norms.append(step_norm)
                 accepted = True
                 # scale-free convergence: the penalized objective has stopped improving meaningfully
-                if rel_improve < tol:
+                if rel_improve < tol or scaled_step < step_tol:
                     converged = True
                 break
             mu *= 3.0

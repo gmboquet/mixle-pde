@@ -129,9 +129,7 @@ class ForwardOperator:
             raise ValueError(f"operator kind {self.kind!r} does not match observation kind {observation.kind!r}.")
         return np.atleast_1d(np.asarray(self.predict(grid, field_values, observation.location), dtype=float))
 
-    def local_jacobian(
-        self, grid: Field3D, field_values: np.ndarray | None, observation: Observation
-    ) -> np.ndarray:
+    def local_jacobian(self, grid: Field3D, field_values: np.ndarray | None, observation: Observation) -> np.ndarray:
         """Return the fixed or state-dependent Jacobian for ``observation``.
 
         ``field_values`` is required only for nonlinear operators. The return shape is always

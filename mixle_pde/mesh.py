@@ -171,7 +171,9 @@ def box_simplex_mesh(shape: Any, *, lengths: Any = None, origin: Any = None) -> 
         raise ValueError("shape must have at least one axis.")
     if any(s < 2 for s in shape):
         raise ValueError("every mesh axis needs at least two nodes.")
-    lengths = np.ones(dim, dtype=float) if lengths is None else np.broadcast_to(np.asarray(lengths, dtype=float), (dim,))
+    lengths = (
+        np.ones(dim, dtype=float) if lengths is None else np.broadcast_to(np.asarray(lengths, dtype=float), (dim,))
+    )
     origin = np.zeros(dim, dtype=float) if origin is None else np.broadcast_to(np.asarray(origin, dtype=float), (dim,))
 
     axes = [origin[i] + np.linspace(0.0, lengths[i], shape[i]) for i in range(dim)]

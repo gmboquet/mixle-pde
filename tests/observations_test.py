@@ -187,13 +187,17 @@ class DCResistivityOperatorTest(unittest.TestCase):
         locations = np.array([[1.5, 1.0, 1.5]])
         op = dc_resistivity_forward_operator(shape, schedule, sigma_ref=0.02, log_data=True)
 
-        expected = dc_resistivity(
-            torch.as_tensor(values, dtype=torch.float64),
-            shape,
-            schedule,
-            sigma_ref=0.02,
-            log_data=True,
-        ).detach().numpy()
+        expected = (
+            dc_resistivity(
+                torch.as_tensor(values, dtype=torch.float64),
+                shape,
+                schedule,
+                sigma_ref=0.02,
+                log_data=True,
+            )
+            .detach()
+            .numpy()
+        )
         np.testing.assert_allclose(op.predict(grid, values, locations), expected)
         self.assertTrue(op.has_adjoint())
         self.assertFalse(op.is_linear)
@@ -422,9 +426,7 @@ class MT2DTEForwardOperatorTest(unittest.TestCase):
 class MT3DForwardOperatorTest(unittest.TestCase):
     def _grid(self, shape):
         nx, ny, nz = shape
-        coords = np.array(
-            [[float(i), float(j), -float(k)] for i in range(nx) for j in range(ny) for k in range(nz)]
-        )
+        coords = np.array([[float(i), float(j), -float(k)] for i in range(nx) for j in range(ny) for k in range(nz)])
         return Field3D(coords, spacing=1.0, units="log(S/m)", property_name="log_conductivity_3d")
 
     def test_predict_matches_mt_3d_forward(self):
@@ -498,9 +500,7 @@ class MT3DForwardOperatorTest(unittest.TestCase):
 class CSEM3DForwardOperatorTest(unittest.TestCase):
     def _grid(self, shape):
         nx, ny, nz = shape
-        coords = np.array(
-            [[float(i), float(j), -float(k)] for i in range(nx) for j in range(ny) for k in range(nz)]
-        )
+        coords = np.array([[float(i), float(j), -float(k)] for i in range(nx) for j in range(ny) for k in range(nz)])
         return Field3D(coords, spacing=1.0, units="log(S/m)", property_name="log_conductivity_3d")
 
     def _survey(self, shape, spacing):

@@ -291,7 +291,9 @@ def get_capability(capability_id: str) -> ModelingCapability:
         raise KeyError(f"unknown PDE modeling capability {capability_id!r}") from exc
 
 
-def missing_required_dependencies(required: tuple[str, ...] = DEFAULT_REQUIRED_CAPABILITIES) -> dict[str, tuple[str, ...]]:
+def missing_required_dependencies(
+    required: tuple[str, ...] = DEFAULT_REQUIRED_CAPABILITIES,
+) -> dict[str, tuple[str, ...]]:
     """Return missing required import dependencies by capability id."""
     missing: dict[str, tuple[str, ...]] = {}
     for capability_id in required:
@@ -662,9 +664,9 @@ def _run_earth_observation_likelihoods() -> ScenarioResult:
         age_difference=8.0,
         std=1.0,
     )
-    strat_gap = stratigraphic_correlation_log_likelihood(strat, 118.0, 110.0) - stratigraphic_correlation_log_likelihood(
-        strat, 118.0, 95.0
-    )
+    strat_gap = stratigraphic_correlation_log_likelihood(
+        strat, 118.0, 110.0
+    ) - stratigraphic_correlation_log_likelihood(strat, 118.0, 95.0)
     facies = FaciesIntervalConstraint(
         location=np.array([[0.0, 0.0, -50.0]]),
         label="deltaic",
@@ -741,7 +743,9 @@ def _run_earth_forward_operator_contract() -> ScenarioResult:
         noise_cov=np.full(2, 25.0),
     )
     ll = sum(registry.log_likelihood(grid, values, obs) for obs in (gravity, borehole))
-    ll += gaussian_log_likelihood(magnetic, registry.get("magnetics").predict_observation(grid, values / 10000.0, magnetic))
+    ll += gaussian_log_likelihood(
+        magnetic, registry.get("magnetics").predict_observation(grid, values / 10000.0, magnetic)
+    )
     shapes_ok = all(registry.get(kind).has_adjoint() for kind in ("gravity", "magnetics", "borehole"))
     passed = shapes_ok and np.isfinite(ll)
     return _result(
@@ -889,7 +893,9 @@ def _run_earth_dc_resistivity_nonlinear_inversion() -> ScenarioResult:
             "final_data_misfit": report.final_data_misfit,
         },
         tolerance={"posterior_residual_lt_prior": 1.0},
-        message="DC/ERT nonlinear posterior observation reduced residual" if passed else "DC/ERT posterior check failed",
+        message="DC/ERT nonlinear posterior observation reduced residual"
+        if passed
+        else "DC/ERT posterior check failed",
     )
 
 
@@ -1033,7 +1039,9 @@ def _run_earth_mt_3d_nonlinear_observation() -> ScenarioResult:
     shape = (3, 3, 6)
     freqs = np.array([5.0, 20.0])
     spacing = 50.0
-    coords = np.array([[float(i), float(j), -float(k)] for i in range(shape[0]) for j in range(shape[1]) for k in range(shape[2])])
+    coords = np.array(
+        [[float(i), float(j), -float(k)] for i in range(shape[0]) for j in range(shape[1]) for k in range(shape[2])]
+    )
     grid = Field3D(coords, spacing=1.0, units="log(S/m)", property_name="log_conductivity_3d")
     values = np.zeros(grid.n)
     param = shape[2] * (shape[1] + 1) + 2

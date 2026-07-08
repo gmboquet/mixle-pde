@@ -183,9 +183,7 @@ class MultiElementAssay:
                 raise ValueError("noise_cov must be positive definite.")
         self.noise_cov = cov_stack
 
-        self.censored = (
-            np.zeros((n, k), dtype=bool) if self.censored is None else np.asarray(self.censored, dtype=bool)
-        )
+        self.censored = np.zeros((n, k), dtype=bool) if self.censored is None else np.asarray(self.censored, dtype=bool)
         if self.censored.shape != (n, k):
             raise ValueError("censored must have shape (n, k).")
         if self.detection_limit is not None:

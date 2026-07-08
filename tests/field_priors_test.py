@@ -8,7 +8,7 @@ import unittest
 
 import numpy as np
 
-from mixle_pde.field_inversion import FieldGaussianPrior
+from mixle_pde.field_inversion import FieldGaussianPrior, _stable_nearest_neighbor_rows
 from mixle_pde.field_priors import (
     CrossPropertyPrior,
     depth_weighted_marginal_precision,
@@ -64,6 +64,19 @@ class DepthWeightingTest(unittest.TestCase):
 
 
 class SparsePrecisionAssemblyTest(unittest.TestCase):
+    def test_nearest_neighbor_ties_are_index_stable(self):
+        coords = np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [-1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, -1.0, 0.0],
+            ]
+        )
+        rows = _stable_nearest_neighbor_rows(coords, neighbors=2)
+        self.assertEqual(rows[0], [1, 2])
+
     def test_sparse_prior_precision_matches_dense_reference(self):
         grid = _grid()
         prior = FieldGaussianPrior(mean=0.0, smoothness_precision=1e-3, marginal_precision=1e-2, length_scale=25.0)

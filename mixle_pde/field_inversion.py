@@ -33,6 +33,28 @@ from mixle_pde.latent import Field3D, PosteriorField3D, SparsePosteriorPrecision
 from mixle_pde.observations import ForwardOperatorRegistry, Observation
 
 
+def _stable_nearest_neighbor_rows(coords: np.ndarray, neighbors: int) -> list[list[int]]:
+    """Nearest-neighbor indices with deterministic tie-breaking on regular grids."""
+    from scipy.spatial import cKDTree
+
+    n = coords.shape[0]
+    if n <= 1:
+        return [[] for _ in range(n)]
+    k = min(int(neighbors) + 1, n)
+    tree = cKDTree(coords)
+    distances, _ = tree.query(coords, k=k)
+    distances = np.asarray(distances, dtype=float)
+    cutoffs = distances if distances.ndim == 1 else distances[:, -1]
+
+    rows: list[list[int]] = []
+    for i, cutoff in enumerate(cutoffs):
+        radius = float(cutoff) + max(1.0, float(cutoff)) * 1.0e-12
+        candidates = [int(j) for j in tree.query_ball_point(coords[i], r=radius) if int(j) != i]
+        candidates.sort(key=lambda j: (float(np.linalg.norm(coords[i] - coords[j])), j))
+        rows.append(candidates[: k - 1])
+    return rows
+
+
 @dataclass
 class FieldGaussianPrior:
     """A Gaussian smoothness prior over a :class:`Field3D`, in the field's unconstrained space.
@@ -73,7 +95,6 @@ class FieldGaussianPrior:
         the existing exact small/medium Gaussian paths.
         """
         import scipy.sparse as sp
-        from scipy.spatial import cKDTree
 
         coords = grid.coordinates
         n = coords.shape[0]
@@ -84,17 +105,10 @@ class FieldGaussianPrior:
         if n == 1 or self.smoothness_precision == 0.0:
             return sp.diags(diag, format="csr")
 
-        k = min(int(self.neighbors) + 1, n)
-        _, indices = cKDTree(coords).query(coords, k=k)
-        if indices.ndim == 1:
-            indices = indices[:, None]
         scaled = coords / self.length_scale
         seen: set[tuple[int, int]] = set()
-        for i, row in enumerate(indices):
+        for i, row in enumerate(_stable_nearest_neighbor_rows(coords, int(self.neighbors))):
             for j in row:
-                j = int(j)
-                if i == j:
-                    continue
                 edge = (min(i, j), max(i, j))
                 if edge in seen:
                     continue
