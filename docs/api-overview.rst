@@ -28,9 +28,10 @@ Field Modeling
     :doc:`observation-and-inversion-contract` for runnable usage.
 
 * ``mixle_pde.field_inversion``, ``mixle_pde.field_gauss_newton``,
-  ``mixle_pde.field_assimilation``, and ``mixle_pde.field_priors`` provide
-  linear-Gaussian inversion, Gauss-Newton inversion, 4D assimilation, depth
-  weights, and cross-property priors.
+  ``mixle_pde.field_mcmc``, ``mixle_pde.field_assimilation``, and
+  ``mixle_pde.field_priors`` provide linear-Gaussian inversion, Gauss-Newton
+  inversion, small-reference MCMC validation, 4D assimilation, depth weights,
+  and cross-property priors.
 
 Geoscience And Mechanistic Helpers
 ----------------------------------

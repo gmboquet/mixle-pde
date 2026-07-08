@@ -450,3 +450,121 @@ class PosteriorField3D:
             "map": map_physical[index],
             "marginal_std": np.abs(std_physical_hi)[index],
         }
+
+
+@dataclass
+class PosteriorFieldSamples3D:
+    """An empirical posterior over a :class:`Field3D`, stored as unconstrained samples.
+
+    This is the small-reference posterior artifact for non-Gaussian or nonlinear checks where a Gaussian
+    covariance summary would hide posterior shape. It deliberately mirrors the core query surface of
+    :class:`PosteriorField3D`: ``mean`` / ``map`` in unconstrained space, marginal variance/std,
+    physical-unit ``sample`` draws, physical-unit credible intervals, and axis-aligned slices.
+    """
+
+    grid: Field3D
+    samples: np.ndarray
+    log_posterior: np.ndarray | None = None
+    map: np.ndarray | None = None
+    provenance: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        n = self.grid.n
+        samples = np.asarray(self.samples, dtype=float)
+        if samples.ndim != 2 or samples.shape[1] != n:
+            raise ValueError(f"samples must have shape (n_samples, {n}).")
+        if samples.shape[0] == 0:
+            raise ValueError("samples must contain at least one posterior draw.")
+        if not np.all(np.isfinite(samples)):
+            raise ValueError("samples must be finite.")
+        self.samples = samples
+
+        if self.log_posterior is not None:
+            logp = np.asarray(self.log_posterior, dtype=float)
+            if logp.shape != (samples.shape[0],):
+                raise ValueError(f"log_posterior must have shape ({samples.shape[0]},).")
+            self.log_posterior = logp
+
+        if self.map is None:
+            if self.log_posterior is None:
+                self.map = np.mean(samples, axis=0)
+            else:
+                self.map = samples[int(np.argmax(self.log_posterior))].copy()
+        else:
+            self.map = np.asarray(self.map, dtype=float)
+        if self.map.shape != (n,):
+            raise ValueError(f"map must have shape ({n},).")
+        self.provenance = dict(self.provenance)
+
+    @property
+    def mean(self) -> np.ndarray:
+        """Empirical posterior mean in the field's unconstrained space."""
+        return np.mean(self.samples, axis=0)
+
+    @property
+    def marginal_variance(self) -> np.ndarray:
+        """Empirical per-point posterior variance in unconstrained space."""
+        if self.samples.shape[0] == 1:
+            return np.zeros(self.grid.n)
+        return np.var(self.samples, axis=0, ddof=1)
+
+    @property
+    def marginal_std(self) -> np.ndarray:
+        return np.sqrt(self.marginal_variance)
+
+    @property
+    def physical_samples(self) -> np.ndarray:
+        """Stored posterior samples mapped into physical units."""
+        return self.grid.from_unconstrained(self.samples)
+
+    def sample(self, n: int, rng: np.random.Generator) -> np.ndarray:
+        """Resample ``n`` empirical draws with replacement, mapped into physical units."""
+        if int(n) <= 0:
+            raise ValueError("n must be positive.")
+        idx = rng.integers(0, self.samples.shape[0], size=int(n))
+        return self.grid.from_unconstrained(self.samples[idx])
+
+    def credible_interval(self, alpha: float = 0.1) -> tuple[np.ndarray, np.ndarray]:
+        """Per-point empirical central credible interval in physical units."""
+        if not 0.0 < alpha < 1.0:
+            raise ValueError("alpha must be in (0, 1).")
+        physical = self.physical_samples
+        lo, hi = np.quantile(physical, [alpha / 2.0, 1.0 - alpha / 2.0], axis=0)
+        return lo, hi
+
+    def posterior_predictive_draws(
+        self,
+        registry: Any,
+        observation: Any,
+        *,
+        n: int,
+        rng: np.random.Generator,
+    ) -> np.ndarray:
+        """Draw posterior-predictive model values for one registered observation."""
+        draws = self.sample(n, rng)
+        op = registry.get(observation.kind)
+        return np.vstack([op.predict_observation(self.grid, draw, observation) for draw in draws])
+
+    def slice(
+        self, *, x: float | None = None, y: float | None = None, z: float | None = None, tol: float = 1e-9
+    ) -> dict[str, Any]:
+        """Select grid points matching fixed axis coordinate(s), within ``tol``."""
+        fixed = [(axis, value) for axis, value in (("x", x), ("y", y), ("z", z)) if value is not None]
+        if not fixed:
+            raise ValueError("slice() requires at least one of x, y, z.")
+        axis_index = {"x": 0, "y": 1, "z": 2}
+        index = np.ones(self.grid.n, dtype=bool)
+        for axis, value in fixed:
+            index &= np.isclose(self.grid.coordinates[:, axis_index[axis]], value, atol=tol)
+        physical = self.physical_samples
+        mean_physical = np.mean(physical, axis=0)
+        map_physical = self.grid.from_unconstrained(self.map)
+        return {
+            "index": index,
+            "coordinates": self.grid.coordinates[index],
+            "mean": mean_physical[index],
+            "map": map_physical[index],
+            "marginal_std": (
+                np.std(physical[:, index], axis=0, ddof=1) if physical.shape[0] > 1 else np.zeros(index.sum())
+            ),
+        }

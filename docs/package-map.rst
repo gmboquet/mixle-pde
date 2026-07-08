@@ -13,8 +13,8 @@ Forward solver families
 
 Field inversion and assimilation
     ``latent``, ``observations``, ``field_inversion``,
-    ``field_gauss_newton``, ``field_assimilation``, ``field_priors``, and
-    ``posterior_query``.
+    ``field_gauss_newton``, ``field_mcmc``, ``field_assimilation``,
+    ``field_priors``, and ``posterior_query``.
 
 Geoscience and potential fields
     ``geophysics``, ``geo_observations``, ``potential_fields``,

@@ -102,6 +102,11 @@ from mixle_pde.field_inversion import (
     posterior_predictive_check,
     sparse_linear_gaussian_invert,
 )
+from mixle_pde.field_mcmc import (
+    MCMCReport,
+    field_log_posterior_kernel,
+    metropolis_field_invert,
+)
 from mixle_pde.field_priors import (
     CrossPropertyPrior,
     SpatioTemporalGaussianPrior,
@@ -156,7 +161,7 @@ from mixle_pde.heat import TransientHeat
 from mixle_pde.helmholtz_pml import helmholtz_pml_operator, solve_helmholtz_pml
 from mixle_pde.induced_polarization import apparent_conductivity, cole_cole_conductivity, sip_forward
 from mixle_pde.inverse import Differential
-from mixle_pde.latent import Field3D, Field4D, PosteriorField3D, SparsePosteriorPrecision
+from mixle_pde.latent import Field3D, Field4D, PosteriorField3D, PosteriorFieldSamples3D, SparsePosteriorPrecision
 from mixle_pde.maxwell import Maxwell3D
 from mixle_pde.mesh import (
     MovingSimplexMesh,

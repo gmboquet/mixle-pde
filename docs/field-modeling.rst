@@ -42,6 +42,11 @@ Capability Map
    * - Bounded inversion
      - ``gauss_newton_invert``, ``GaussNewtonReport``
      - MAP plus Laplace covariance for bounded or nonlinear-transform fields.
+   * - Sampled validation
+     - ``metropolis_field_invert``, ``PosteriorFieldSamples3D``,
+       ``MCMCReport``
+     - Small-reference empirical posteriors for nonlinear or non-Gaussian
+       likelihood checks.
    * - 4D assimilation
      - ``PosteriorField4D``, ``assimilate_4d``, ``assimilate_4d_ensemble``
      - Kalman/RTS smoothing for linear observations and ensemble filtering for
@@ -128,6 +133,21 @@ estimate in that unconstrained space and returns a Laplace covariance there.
 Every posterior sample and interval endpoint maps back through the field
 transform, so bounded inversions should not report physically impossible
 values.
+
+Sampled Validation
+------------------
+
+``metropolis_field_invert`` provides a small Random-Walk Metropolis reference
+path when a likelihood is nonlinear, non-Gaussian, or lacks a Jacobian. It uses
+the same ``Field3D``, ``FieldGaussianPrior``, ``Observation``, and
+``ForwardOperatorRegistry`` contracts as the other inversion paths, but returns
+``PosteriorFieldSamples3D`` rather than a Gaussian covariance artifact.
+
+The sampled artifact exposes empirical means, MAP samples, marginal
+uncertainty, credible intervals, slices, physical-unit resampling, and
+posterior-predictive draws. It is for validation and small reference problems;
+large 3D/4D production inversions still need sparse, adjoint, ensemble,
+variational, or problem-specific samplers.
 
 4D Assimilation
 ---------------

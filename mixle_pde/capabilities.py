@@ -136,6 +136,7 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
             equations=(
                 "linear-Gaussian field inversion",
                 "bounded-field Gauss-Newton MAP/Laplace inversion",
+                "small-reference MCMC empirical posterior validation",
                 "Kalman/RTS random-walk 4D assimilation",
                 "ensemble Kalman nonlinear 4D assimilation",
                 "geochemical censored-assay likelihoods",
@@ -185,6 +186,9 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "linear_gaussian_invert",
                 "sparse_linear_gaussian_invert",
                 "gauss_newton_invert",
+                "PosteriorFieldSamples3D",
+                "metropolis_field_invert",
+                "MCMCReport",
                 "assimilate_4d",
                 "assimilate_4d_ensemble",
                 "dc_resistivity_forward_operator",
@@ -216,6 +220,7 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "earth_forward_operator_contract",
                 "earth_static_linear_inversion",
                 "earth_bounded_gauss_newton",
+                "earth_mcmc_reference_posterior",
                 "earth_dc_resistivity_nonlinear_inversion",
                 "earth_aem_layered_nonlinear_observation",
                 "earth_layered_mt_nonlinear_inversion",
@@ -235,6 +240,7 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "multi-element censored assays use marginal censoring terms rather than a full truncated multivariate normal integral",
                 "sparse posterior factorization stores precision-form Gaussian posteriors; production-scale preconditioned iterative solvers remain future work",
                 "ensemble 4D assimilation is a stochastic Gaussian-summary reference, not a particle/MCMC smoother",
+                "Random-Walk Metropolis field inversion is a small-reference validation path, not a production-scale sampler",
                 "DC/ERT posterior observations use finite-difference local sensitivities; production-scale adjoints remain future work",
                 "MT, AEM, and CSEM observations use finite-difference local sensitivities; production-scale adjoints remain future work",
                 "full airborne loop/flight-line AEM geometry remains future work",
@@ -420,6 +426,13 @@ def verification_scenarios() -> tuple[VerificationScenario, ...]:
             name="Bounded-field MAP/Laplace inversion",
             description="Gauss-Newton inversion respects physical bounds through the latent-field transform.",
             runner=_run_earth_bounded_gauss_newton,
+        ),
+        VerificationScenario(
+            id="earth_mcmc_reference_posterior",
+            capability_id="earth.geochem_biostrat_likelihoods",
+            name="Small-reference sampled posterior",
+            description="Random-Walk Metropolis samples a one-cell posterior against a closed-form reference.",
+            runner=_run_earth_mcmc_reference_posterior,
         ),
         VerificationScenario(
             id="earth_dc_resistivity_nonlinear_inversion",
@@ -967,6 +980,61 @@ def _run_earth_bounded_gauss_newton() -> ScenarioResult:
         metrics={"rmse": rmse, "iterations": report.iterations, "final_data_misfit": report.final_data_misfit},
         tolerance={"rmse": 0.05},
         message="bounded MAP/Laplace inversion matched" if passed else "bounded inversion check failed",
+    )
+
+
+def _run_earth_mcmc_reference_posterior() -> ScenarioResult:
+    from mixle_pde.field_inversion import FieldGaussianPrior
+    from mixle_pde.field_mcmc import metropolis_field_invert
+    from mixle_pde.latent import Field3D
+    from mixle_pde.observations import ForwardOperatorRegistry, Observation, borehole_forward_operator
+
+    grid = Field3D(
+        coordinates=np.array([[0.0, 0.0, -10.0]]),
+        spacing=1.0,
+        units="kg/m^3",
+        property_name="density_contrast",
+    )
+    registry = ForwardOperatorRegistry()
+    registry.register(borehole_forward_operator())
+    observation = Observation("borehole", grid.coordinates, np.array([2.0]), np.array([0.25]))
+    prior = FieldGaussianPrior(mean=0.0, smoothness_precision=0.0, marginal_precision=1.0)
+    posterior, report = metropolis_field_invert(
+        grid,
+        [observation],
+        registry,
+        prior,
+        n_samples=500,
+        burn_in=150,
+        thin=1,
+        step_scale=0.7,
+        rng=np.random.default_rng(17),
+    )
+    expected_var = 1.0 / (1.0 + 1.0 / 0.25)
+    expected_mean = expected_var * (2.0 / 0.25)
+    mean_error = abs(float(posterior.mean[0]) - expected_mean)
+    variance_error = abs(float(posterior.marginal_variance[0]) - expected_var)
+    lo, hi = posterior.credible_interval(alpha=0.1)
+    interval_ok = bool(lo[0] < expected_mean < hi[0])
+    passed = (
+        report.stored_samples == 500
+        and 0.15 < report.acceptance_rate < 0.95
+        and mean_error <= 0.2
+        and variance_error <= 0.15
+        and interval_ok
+    )
+    return _result(
+        "earth_mcmc_reference_posterior",
+        "earth.geochem_biostrat_likelihoods",
+        passed=passed,
+        metrics={
+            "acceptance_rate": report.acceptance_rate,
+            "posterior_mean_error": mean_error,
+            "posterior_variance_error": variance_error,
+            "stored_samples": float(report.stored_samples),
+        },
+        tolerance={"posterior_mean_error": 0.2, "posterior_variance_error": 0.15},
+        message="MCMC reference posterior matched" if passed else "MCMC reference posterior check failed",
     )
 
 
