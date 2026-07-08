@@ -206,6 +206,8 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "marginal_at_points",
                 "region_summary",
                 "region_mass",
+                "SampledDerivedQuantity",
+                "sampled_derived_quantity",
                 "compress_to_low_rank",
                 "to_ensemble",
                 "truth_coverage",
@@ -1594,12 +1596,13 @@ def _run_earth_sparse_posterior_factorization() -> ScenarioResult:
 
 
 def _run_earth_posterior_extraction() -> ScenarioResult:
-    from mixle_pde.latent import PosteriorField3D
+    from mixle_pde.latent import PosteriorField3D, PosteriorFieldSamples3D
     from mixle_pde.posterior_query import (
         compress_to_low_rank,
         marginal_at_points,
         region_mass,
         region_summary,
+        sampled_derived_quantity,
         section,
         to_diagonal,
         to_ensemble,
@@ -1620,23 +1623,46 @@ def _run_earth_posterior_extraction() -> ScenarioResult:
     sec = section(posterior, z=-30.0)
     region = region_summary(posterior, np.array([False, True, False, True]))
     mass = region_mass(posterior, np.array([False, True, False, True]), np.full(grid.n, 40.0**3))
+    sampled = PosteriorFieldSamples3D(
+        grid=grid,
+        samples=np.array(
+            [
+                [70.0, 410.0, 110.0, 290.0],
+                [85.0, 425.0, 125.0, 305.0],
+                [95.0, 440.0, 130.0, 320.0],
+            ]
+        ),
+    )
+    sampled_region = region_summary(sampled, np.array([False, True, False, True]))
+    sampled_mass = region_mass(sampled, np.array([False, True, False, True]), np.full(grid.n, 40.0**3))
+    sampled_q = sampled_derived_quantity(sampled, np.array([1.0, 0.0, -1.0, 0.0]))
     compact = compress_to_low_rank(posterior, rank=2)
     diagonal = to_diagonal(posterior)
     ensemble = to_ensemble(compact, 8, np.random.default_rng(123))
+    sampled_ensemble = to_ensemble(sampled, 8, np.random.default_rng(321))
     passed = (
         point.mean.shape == (2,)
         and len(sec["mean"]) == 1
         and region["n_cells"] == 2
         and mass.std > 0.0
+        and sampled_region["n_cells"] == 2
+        and sampled_mass.std > 0.0
+        and sampled_q.samples.shape == (3,)
         and compact.low_rank.shape == (grid.n, 2)
         and diagonal.diag_var.shape == (grid.n,)
         and ensemble.samples.shape == (8, grid.n)
+        and sampled_ensemble.samples.shape == (8, grid.n)
     )
     return _result(
         "earth_posterior_extraction",
         "earth.geochem_biostrat_likelihoods",
         passed=passed,
-        metrics={"low_rank_columns": 2.0, "ensemble_samples": 8.0, "region_cells": region["n_cells"]},
+        metrics={
+            "low_rank_columns": 2.0,
+            "ensemble_samples": 8.0,
+            "sampled_derived_draws": float(sampled_q.samples.size),
+            "region_cells": region["n_cells"],
+        },
         tolerance={},
         message="posterior extraction and compression matched" if passed else "posterior extraction check failed",
     )

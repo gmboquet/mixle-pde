@@ -1,7 +1,8 @@
 """Posterior extraction and compact storage for latent-field posteriors (workstream G8).
 
-Workstream G6/G7 produce a :class:`~mixle_pde.latent.PosteriorField3D`; this module is the query and
-compression layer over it -- the APIs a consumer uses to pull answers out of a posterior without
+Workstream G6/G7 produce :class:`~mixle_pde.latent.PosteriorField3D` Gaussian artifacts and
+:class:`~mixle_pde.latent.PosteriorFieldSamples3D` empirical artifacts; this module is the query and
+compression layer over them -- the APIs a consumer uses to pull answers out of a posterior without
 re-running the inversion, and to store a large posterior compactly.
 
 Extraction (every result in the field's PHYSICAL units where the transform is monotone, exact where the
@@ -11,11 +12,13 @@ transform is the identity):
 * :func:`section` -- a marginal summary over an axis-aligned plane (thin wrapper on
   :meth:`PosteriorField3D.slice`).
 * :func:`region_summary` -- mean / std of every cell inside a boolean region mask.
-* :func:`derived_quantity` -- the EXACT posterior of a linear functional ``w . m`` of the field
+* :func:`derived_quantity` -- the EXACT Gaussian posterior of a linear functional ``w . m`` of the field
   (mean ``w . mu``, variance ``w^T Sigma w``); the honest way to ask "total anomalous mass in this
   block" or "average grade in this zone" and get a mean AND an uncertainty, since a linear functional of
   a Gaussian is Gaussian in closed form. :func:`region_mass` is the common special case (sum of
   ``field * cell_volume`` over a region).
+* :func:`sampled_derived_quantity` -- the empirical version for sampled posteriors, preserving
+  non-Gaussian shape by carrying derived samples.
 
 Compression (compact storage for large posteriors, each returning a valid ``PosteriorField3D``):
 
@@ -35,7 +38,9 @@ from typing import Any
 import numpy as np
 from scipy.special import ndtri
 
-from mixle_pde.latent import Field3D, PosteriorField3D
+from mixle_pde.latent import Field3D, PosteriorField3D, PosteriorFieldSamples3D
+
+Posterior3D = PosteriorField3D | PosteriorFieldSamples3D
 
 
 @dataclass
@@ -50,29 +55,39 @@ class MarginalSummary:
     upper: np.ndarray
 
 
-def marginal_at_points(posterior: PosteriorField3D, indices, *, alpha: float = 0.1) -> MarginalSummary:
+def marginal_at_points(posterior: Posterior3D, indices, *, alpha: float = 0.1) -> MarginalSummary:
     """Per-point posterior mean / std / ``1-alpha`` credible interval at the given cell ``indices``."""
+    if not 0.0 < alpha < 1.0:
+        raise ValueError("alpha must be in (0, 1).")
     idx = np.atleast_1d(np.asarray(indices, dtype=int))
     grid = posterior.grid
-    mean_phys = grid.from_unconstrained(posterior.mean)
-    std_u = posterior.marginal_std
-    z = ndtri(1.0 - alpha / 2.0)
-    lo = grid.from_unconstrained(posterior.mean - z * std_u)
-    hi = grid.from_unconstrained(posterior.mean + z * std_u)
-    # physical-space per-point std via the local monotone map (exact for identity transform)
-    std_phys = np.abs(grid.from_unconstrained(posterior.mean + std_u) - mean_phys)
+    if isinstance(posterior, PosteriorFieldSamples3D):
+        physical = posterior.physical_samples
+        mean_phys = np.mean(physical, axis=0)
+        std_phys = np.std(physical, axis=0, ddof=1) if physical.shape[0] > 1 else np.zeros(grid.n)
+        lo, hi = posterior.credible_interval(alpha)
+    else:
+        mean_phys = grid.from_unconstrained(posterior.mean)
+        std_u = posterior.marginal_std
+        z = ndtri(1.0 - alpha / 2.0)
+        lo = grid.from_unconstrained(posterior.mean - z * std_u)
+        hi = grid.from_unconstrained(posterior.mean + z * std_u)
+        # physical-space per-point std via the local monotone map (exact for identity transform)
+        std_phys = np.abs(grid.from_unconstrained(posterior.mean + std_u) - mean_phys)
+    lower = np.minimum(lo, hi)
+    upper = np.maximum(lo, hi)
     return MarginalSummary(
         indices=idx,
         coordinates=grid.coordinates[idx],
         mean=mean_phys[idx],
         std=std_phys[idx],
-        lower=lo[idx],
-        upper=hi[idx],
+        lower=lower[idx],
+        upper=upper[idx],
     )
 
 
 def section(
-    posterior: PosteriorField3D,
+    posterior: Posterior3D,
     *,
     x: float | None = None,
     y: float | None = None,
@@ -83,7 +98,7 @@ def section(
     return posterior.slice(x=x, y=y, z=z, tol=tol)
 
 
-def region_summary(posterior: PosteriorField3D, mask) -> dict[str, Any]:
+def region_summary(posterior: Posterior3D, mask) -> dict[str, Any]:
     """Per-cell mean / std (physical units) restricted to a boolean region ``mask`` over the grid."""
     mask = np.asarray(mask, dtype=bool)
     if mask.shape != (posterior.grid.n,):
@@ -107,6 +122,35 @@ class DerivedQuantity:
     def credible_interval(self, alpha: float = 0.1) -> tuple[float, float]:
         z = ndtri(1.0 - alpha / 2.0)
         return self.mean - z * self.std, self.mean + z * self.std
+
+
+@dataclass
+class SampledDerivedQuantity:
+    """An empirical posterior of a derived scalar quantity, preserving sampled posterior shape."""
+
+    samples: np.ndarray
+
+    def __post_init__(self) -> None:
+        samples = np.asarray(self.samples, dtype=float).reshape(-1)
+        if samples.size == 0:
+            raise ValueError("samples must contain at least one derived draw.")
+        if not np.all(np.isfinite(samples)):
+            raise ValueError("samples must be finite.")
+        self.samples = samples
+
+    @property
+    def mean(self) -> float:
+        return float(np.mean(self.samples))
+
+    @property
+    def std(self) -> float:
+        return float(np.std(self.samples, ddof=1)) if self.samples.size > 1 else 0.0
+
+    def credible_interval(self, alpha: float = 0.1) -> tuple[float, float]:
+        if not 0.0 < alpha < 1.0:
+            raise ValueError("alpha must be in (0, 1).")
+        lo, hi = np.quantile(self.samples, [alpha / 2.0, 1.0 - alpha / 2.0])
+        return float(lo), float(hi)
 
 
 def derived_quantity(posterior: PosteriorField3D, weights) -> DerivedQuantity:
@@ -133,15 +177,26 @@ def derived_quantity(posterior: PosteriorField3D, weights) -> DerivedQuantity:
     return DerivedQuantity(mean=mean, std=float(np.sqrt(max(var, 0.0))))
 
 
-def region_mass(posterior: PosteriorField3D, mask, cell_volumes) -> DerivedQuantity:
-    """Exact posterior of total anomalous mass in a region: ``sum_{i in mask} field_i * volume_i``.
+def sampled_derived_quantity(posterior: PosteriorFieldSamples3D, weights) -> SampledDerivedQuantity:
+    """Empirical posterior of a linear functional over physical posterior samples."""
+    w = np.asarray(weights, dtype=float).reshape(-1)
+    if w.shape != (posterior.grid.n,):
+        raise ValueError(f"weights must have shape ({posterior.grid.n},).")
+    return SampledDerivedQuantity(posterior.physical_samples @ w)
+
+
+def region_mass(posterior: Posterior3D, mask, cell_volumes) -> DerivedQuantity | SampledDerivedQuantity:
+    """Posterior of total anomalous mass in a region: ``sum_{i in mask} field_i * volume_i``.
 
     The common derived quantity for a subsurface body -- a mean tonnage/mass AND its uncertainty, in one
-    closed-form Gaussian (weights = ``volume`` inside the region, 0 outside).
+    closed-form Gaussian for Gaussian posteriors or as derived samples for empirical posteriors.
     """
     mask = np.asarray(mask, dtype=bool)
     vols = np.broadcast_to(np.asarray(cell_volumes, dtype=float), (posterior.grid.n,))
-    return derived_quantity(posterior, np.where(mask, vols, 0.0))
+    weights = np.where(mask, vols, 0.0)
+    if isinstance(posterior, PosteriorFieldSamples3D):
+        return sampled_derived_quantity(posterior, weights)
+    return derived_quantity(posterior, weights)
 
 
 def compress_to_low_rank(posterior: PosteriorField3D, rank: int) -> PosteriorField3D:
@@ -197,6 +252,6 @@ class PosteriorEnsemble:
         return self.samples.std(axis=0)
 
 
-def to_ensemble(posterior: PosteriorField3D, n_samples: int, rng: np.random.Generator) -> PosteriorEnsemble:
-    """Draw a fixed ensemble of posterior samples (physical units) for downstream draw-based consumers."""
+def to_ensemble(posterior: Posterior3D, n_samples: int, rng: np.random.Generator) -> PosteriorEnsemble:
+    """Draw or resample a fixed posterior ensemble (physical units) for downstream consumers."""
     return PosteriorEnsemble(grid=posterior.grid, samples=posterior.sample(int(n_samples), rng))

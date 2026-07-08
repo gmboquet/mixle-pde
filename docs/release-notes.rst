@@ -21,6 +21,8 @@ Included
 * Sparse spatiotemporal Gaussian prior over ``Field4D`` objects.
 * Small-reference Random-Walk Metropolis inversion with empirical posterior
   artifacts for nonlinear/non-Gaussian validation problems.
+* Sampled posterior-query support for empirical marginals, derived quantities,
+  region mass, and ensemble export.
 * 4D posterior artifacts with full-time mean, marginal uncertainty, credible
   intervals, marginal samples, and interpolated time slices.
 * Zero-dimensional reactive gas/engine-cylinder combustion kernel with fuel

@@ -58,8 +58,8 @@ Capability Map
        simulators.
    * - Posterior queries
      - ``marginal_at_points``, ``section``, ``region_summary``,
-       ``derived_quantity``
-     - Query and compact posterior field artifacts.
+       ``derived_quantity``, ``sampled_derived_quantity``
+     - Query and compact Gaussian or sampled posterior field artifacts.
    * - 3D/4D meshes
      - ``SimplexMesh``, ``MovingSimplexMesh``, ``moving_mesh``,
        ``pipe_radial_deformation``
@@ -185,7 +185,9 @@ Posterior Queries And Calibration
 
 Use posterior query helpers after inversion or assimilation for point
 marginals, sections, region summaries, linear derived quantities, low-rank
-summaries, diagonal summaries, and ensemble exports.
+summaries, diagonal summaries, and ensemble exports. Gaussian posteriors use
+closed-form derived quantities where possible; sampled posteriors use
+empirical derived draws so non-Gaussian shape is not collapsed away.
 
 Use calibration diagnostics before promotion:
 

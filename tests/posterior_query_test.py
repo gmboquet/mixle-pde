@@ -8,13 +8,15 @@ import unittest
 
 import numpy as np
 
-from mixle_pde.latent import Field3D, PosteriorField3D, SparsePosteriorPrecision
+from mixle_pde.latent import Field3D, PosteriorField3D, PosteriorFieldSamples3D, SparsePosteriorPrecision
 from mixle_pde.posterior_query import (
+    SampledDerivedQuantity,
     compress_to_low_rank,
     derived_quantity,
     marginal_at_points,
     region_mass,
     region_summary,
+    sampled_derived_quantity,
     section,
     to_diagonal,
     to_ensemble,
@@ -38,6 +40,18 @@ def _dense_posterior(seed=0):
     return grid, PosteriorField3D(grid=grid, mean=mean, cov=cov), cov
 
 
+def _sampled_posterior():
+    grid = _grid(n_side=2)
+    samples = np.array(
+        [
+            [1.0, 2.0, 3.0, 4.0],
+            [2.0, 3.0, 4.0, 5.0],
+            [3.0, 4.0, 5.0, 6.0],
+        ]
+    )
+    return grid, PosteriorFieldSamples3D(grid=grid, samples=samples), samples
+
+
 class ExtractionTest(unittest.TestCase):
     def test_marginal_at_points_matches_the_posterior(self):
         grid, post, cov = _dense_posterior()
@@ -59,6 +73,28 @@ class ExtractionTest(unittest.TestCase):
         r = region_summary(post, mask)
         self.assertEqual(r["n_cells"], int(mask.sum()))
         self.assertEqual(r["mean"].shape, (int(mask.sum()),))
+
+    def test_sampled_posterior_uses_empirical_marginals(self):
+        grid, post, samples = _sampled_posterior()
+        idx = np.array([1, 3])
+        summary = marginal_at_points(post, idx, alpha=0.2)
+
+        np.testing.assert_allclose(summary.mean, samples[:, idx].mean(axis=0))
+        np.testing.assert_allclose(summary.std, samples[:, idx].std(axis=0, ddof=1))
+        expected_lo, expected_hi = np.quantile(samples[:, idx], [0.1, 0.9], axis=0)
+        np.testing.assert_allclose(summary.lower, expected_lo)
+        np.testing.assert_allclose(summary.upper, expected_hi)
+
+    def test_sampled_region_summary_and_section_share_the_query_surface(self):
+        grid, post, samples = _sampled_posterior()
+        mask = np.array([True, False, True, False])
+
+        region = region_summary(post, mask)
+        sec = section(post, y=0.0)
+
+        self.assertEqual(region["n_cells"], 2)
+        np.testing.assert_allclose(region["mean"], samples[:, mask].mean(axis=0))
+        self.assertEqual(int(sec["index"].sum()), 2)
 
 
 class DerivedQuantityTest(unittest.TestCase):
@@ -104,6 +140,31 @@ class DerivedQuantityTest(unittest.TestCase):
         self.assertAlmostEqual(sparse.mean, exact.mean, places=9)
         self.assertAlmostEqual(sparse.std, exact.std, places=6)
 
+    def test_sampled_derived_quantity_preserves_empirical_draws(self):
+        grid, post, samples = _sampled_posterior()
+        weights = np.array([1.0, 0.0, 2.0, 0.0])
+
+        dq = sampled_derived_quantity(post, weights)
+        expected = samples @ weights
+
+        self.assertIsInstance(dq, SampledDerivedQuantity)
+        np.testing.assert_allclose(dq.samples, expected)
+        self.assertAlmostEqual(dq.mean, float(expected.mean()))
+        self.assertAlmostEqual(dq.std, float(expected.std(ddof=1)))
+        lo, hi = dq.credible_interval(0.2)
+        self.assertLess(lo, dq.mean)
+        self.assertGreater(hi, dq.mean)
+
+    def test_region_mass_dispatches_to_empirical_quantity_for_sampled_posterior(self):
+        grid, post, samples = _sampled_posterior()
+        mask = np.array([False, True, False, True])
+        volumes = np.full(grid.n, 10.0)
+
+        dq = region_mass(post, mask, volumes)
+
+        self.assertIsInstance(dq, SampledDerivedQuantity)
+        np.testing.assert_allclose(dq.samples, samples[:, mask].sum(axis=1) * 10.0)
+
 
 class CompressionTest(unittest.TestCase):
     def test_low_rank_preserves_marginal_variance_exactly(self):
@@ -131,6 +192,13 @@ class CompressionTest(unittest.TestCase):
         ens = to_ensemble(post, 200, np.random.default_rng(0))
         self.assertEqual(ens.samples.shape, (200, grid.n))
         np.testing.assert_allclose(ens.mean(), post.mean, atol=1.0)  # ensemble mean ~ posterior mean
+
+    def test_to_ensemble_resamples_empirical_posterior(self):
+        grid, post, samples = _sampled_posterior()
+        ens = to_ensemble(post, 20, np.random.default_rng(8))
+
+        self.assertEqual(ens.samples.shape, (20, grid.n))
+        self.assertTrue(all(np.any(np.all(row == samples, axis=1)) for row in ens.samples))
 
     def test_rank_bounds_are_validated(self):
         grid, post, _ = _dense_posterior()
