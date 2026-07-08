@@ -212,6 +212,70 @@ def solve_euler_1d(
     return pr[:, 0], pr[:, 1], pr[:, 2]
 
 
+def solve_reactive_euler_1d(
+    rho0: Any,
+    u0: Any,
+    p0: Any,
+    fuel0: Any,
+    dx: float,
+    t_final: float,
+    *,
+    gamma: float = 1.35,
+    cfl: float = 0.35,
+    gas_constant: float = 287.0,
+    heat_release: float = 4.0e7,
+    pre_exponential: float = 1000.0,
+    activation_temperature: float = 5000.0,
+    reaction_order: float = 1.0,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Evolve 1-D Euler flow with a passively advected fuel fraction and heat release."""
+    rho = np.asarray(rho0, dtype=np.float64).reshape(-1)
+    vel = np.asarray(u0, dtype=np.float64).reshape(-1)
+    pressure = np.asarray(p0, dtype=np.float64).reshape(-1)
+    fuel = np.broadcast_to(np.asarray(fuel0, dtype=np.float64), rho.shape).copy()
+    if rho.shape != vel.shape or rho.shape != pressure.shape:
+        raise ValueError("rho0, u0, and p0 must have the same shape.")
+    if np.any(rho <= 0.0) or np.any(pressure <= 0.0) or np.any(fuel < 0.0):
+        raise ValueError("density and pressure must be positive and fuel must be nonnegative.")
+    if dx <= 0.0 or t_final < 0.0:
+        raise ValueError("dx must be positive and t_final must be nonnegative.")
+    if gamma <= 1.0 or gas_constant <= 0.0 or reaction_order <= 0.0:
+        raise ValueError("gamma, gas_constant, and reaction_order are invalid.")
+
+    n = int(rho.size)
+    conserved = np.empty((4, n), dtype=np.float64)
+    for i in range(n):
+        conserved[:3, i] = _to_conserved(np.array([rho[i], vel[i], pressure[i]]), gamma)
+        conserved[3, i] = rho[i] * fuel[i]
+
+    t = 0.0
+    while t < t_final:
+        prim = np.array([_to_reactive_primitive(conserved[:, i], gamma) for i in range(n)])
+        sound = np.sqrt(gamma * prim[:, 2] / prim[:, 0])
+        smax = float(np.max(np.abs(prim[:, 1]) + sound))
+        dt = min(float(cfl) * float(dx) / max(smax, 1.0e-12), float(t_final) - t)
+        flux = np.zeros((4, n + 1), dtype=np.float64)
+        for i in range(1, n):
+            flux[:, i] = _hll_reactive_flux(conserved[:, i - 1], conserved[:, i], gamma)
+        flux[:, 0] = _reactive_flux(conserved[:, 0], gamma)
+        flux[:, n] = _reactive_flux(conserved[:, n - 1], gamma)
+        conserved = conserved - dt / float(dx) * (flux[:, 1:] - flux[:, :-1])
+        _apply_arrhenius_heat_release(
+            conserved,
+            dt,
+            gamma=gamma,
+            gas_constant=gas_constant,
+            heat_release=heat_release,
+            pre_exponential=pre_exponential,
+            activation_temperature=activation_temperature,
+            reaction_order=reaction_order,
+        )
+        t += dt
+
+    prim = np.array([_to_reactive_primitive(conserved[:, i], gamma) for i in range(n)])
+    return prim[:, 0], prim[:, 1], prim[:, 2], prim[:, 3]
+
+
 def engine_cylinder_volume(
     time: Any,
     *,
@@ -341,3 +405,63 @@ def _volume_history(volume: Any, time: np.ndarray) -> np.ndarray:
     if vol.shape != time.shape:
         raise ValueError("volume must be a scalar, callable, or array with the same shape as time.")
     return vol
+
+
+def _to_reactive_primitive(cons: np.ndarray, gamma: float) -> np.ndarray:
+    rho = max(float(cons[0]), 1.0e-14)
+    velocity = float(cons[1]) / rho
+    pressure = max((float(gamma) - 1.0) * (float(cons[2]) - 0.5 * rho * velocity * velocity), 1.0e-14)
+    fuel = max(float(cons[3]) / rho, 0.0)
+    return np.array([rho, velocity, pressure, fuel], dtype=np.float64)
+
+
+def _reactive_flux(cons: np.ndarray, gamma: float) -> np.ndarray:
+    rho, velocity, pressure, fuel = _to_reactive_primitive(cons, gamma)
+    return np.array(
+        [
+            rho * velocity,
+            rho * velocity * velocity + pressure,
+            velocity * (float(cons[2]) + pressure),
+            rho * fuel * velocity,
+        ],
+        dtype=np.float64,
+    )
+
+
+def _hll_reactive_flux(left: np.ndarray, right: np.ndarray, gamma: float) -> np.ndarray:
+    rho_l, u_l, p_l, _ = _to_reactive_primitive(left, gamma)
+    rho_r, u_r, p_r, _ = _to_reactive_primitive(right, gamma)
+    a_l = math.sqrt(gamma * p_l / rho_l)
+    a_r = math.sqrt(gamma * p_r / rho_r)
+    sl = min(u_l - a_l, u_r - a_r)
+    sr = max(u_l + a_l, u_r + a_r)
+    if sl >= 0.0:
+        return _reactive_flux(left, gamma)
+    if sr <= 0.0:
+        return _reactive_flux(right, gamma)
+    return (sr * _reactive_flux(left, gamma) - sl * _reactive_flux(right, gamma) + sl * sr * (right - left)) / (
+        sr - sl
+    )
+
+
+def _apply_arrhenius_heat_release(
+    conserved: np.ndarray,
+    dt: float,
+    *,
+    gamma: float,
+    gas_constant: float,
+    heat_release: float,
+    pre_exponential: float,
+    activation_temperature: float,
+    reaction_order: float,
+) -> None:
+    for i in range(conserved.shape[1]):
+        rho, _, pressure, fuel = _to_reactive_primitive(conserved[:, i], gamma)
+        if fuel <= 0.0:
+            conserved[3, i] = 0.0
+            continue
+        temperature = max(pressure / (rho * float(gas_constant)), 1.0)
+        rate = float(pre_exponential) * math.exp(-float(activation_temperature) / temperature)
+        burned = min(fuel, float(dt) * rate * (fuel ** float(reaction_order)))
+        conserved[3, i] = rho * (fuel - burned)
+        conserved[2, i] += rho * float(heat_release) * burned

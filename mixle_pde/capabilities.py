@@ -329,6 +329,7 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
             solver_symbols=(
                 "exact_riemann_solution",
                 "solve_euler_1d",
+                "solve_reactive_euler_1d",
                 "engine_cylinder_volume",
                 "simulate_zero_d_combustion",
                 "CombustionResult",
@@ -338,8 +339,8 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
             inverse_ready=False,
             scenario_ids=("gas_zero_d_combustion_pressure_rise",),
             limitations=(
-                "zero-dimensional combustion kernel only; no turbulent CFD, flame fronts, detonation, "
-                "or detailed chemistry yet",
+                "combustion uses one-step Arrhenius chemistry; no turbulent flame fronts, detonation, "
+                "or detailed reaction mechanisms yet",
                 "moving-volume coupling is prescribed rather than solved as fluid-structure interaction",
             ),
         ),
@@ -1985,7 +1986,7 @@ def _run_heat_fourier_decay() -> ScenarioResult:
 
 
 def _run_gas_zero_d_combustion_pressure_rise() -> ScenarioResult:
-    from mixle_pde.gas_dynamics import simulate_zero_d_combustion
+    from mixle_pde.gas_dynamics import simulate_zero_d_combustion, solve_reactive_euler_1d
 
     time = np.linspace(0.0, 0.05, 101)
     result = simulate_zero_d_combustion(
@@ -2005,12 +2006,46 @@ def _run_gas_zero_d_combustion_pressure_rise() -> ScenarioResult:
         and np.isfinite(result.pressure).all()
         and np.isfinite(result.fuel_fraction).all()
     )
-    passed = finite and pressure_ratio > 1.05 and fuel_burned > 0.0 and np.all(result.fuel_fraction >= 0.0)
+    n = 48
+    p0 = np.full(n, 5.0e5)
+    fuel0 = np.full(n, 0.02)
+    _, _, reactive_pressure, reactive_fuel = solve_reactive_euler_1d(
+        np.ones(n),
+        np.zeros(n),
+        p0,
+        fuel0,
+        dx=1.0 / n,
+        t_final=0.002,
+        heat_release=4.0e7,
+        pre_exponential=1000.0,
+        activation_temperature=3000.0,
+    )
+    reactive_pressure_ratio = float(np.mean(reactive_pressure) / np.mean(p0))
+    reactive_fuel_burned = float(np.mean(fuel0) - np.mean(reactive_fuel))
+    reactive_ok = (
+        bool(np.isfinite(reactive_pressure).all())
+        and bool(np.isfinite(reactive_fuel).all())
+        and reactive_pressure_ratio > 1.01
+        and reactive_fuel_burned > 0.0
+        and bool(np.all(reactive_fuel >= 0.0))
+    )
+    passed = (
+        finite
+        and pressure_ratio > 1.05
+        and fuel_burned > 0.0
+        and np.all(result.fuel_fraction >= 0.0)
+        and reactive_ok
+    )
     return _result(
         "gas_zero_d_combustion_pressure_rise",
         "gas.reactive_combustion",
         passed=passed,
-        metrics={"pressure_ratio": pressure_ratio, "fuel_burned": fuel_burned},
+        metrics={
+            "pressure_ratio": pressure_ratio,
+            "fuel_burned": fuel_burned,
+            "reactive_euler_pressure_ratio": reactive_pressure_ratio,
+            "reactive_euler_fuel_burned": reactive_fuel_burned,
+        },
         tolerance={"min_pressure_ratio": 1.05, "min_fuel_burned": 0.0},
         message="zero-dimensional combustion pressure rose" if passed else "zero-dimensional combustion failed",
     )

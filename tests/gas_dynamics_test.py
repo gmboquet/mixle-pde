@@ -10,6 +10,7 @@ from mixle_pde.gas_dynamics import (
     exact_riemann_solution,
     simulate_zero_d_combustion,
     solve_euler_1d,
+    solve_reactive_euler_1d,
 )
 
 
@@ -73,6 +74,46 @@ class GasDynamicsTest(unittest.TestCase):
         self.assertGreater(result.pressure[-1], result.pressure[0])
         self.assertLess(result.fuel_fraction[-1], result.fuel_fraction[0])
         self.assertTrue(np.all(result.fuel_fraction >= 0.0))
+
+    def test_reactive_euler_pressure_rises_and_consumes_fuel(self):
+        n = 48
+        rho0 = np.ones(n)
+        u0 = np.zeros(n)
+        p0 = np.full(n, 5.0e5)
+        fuel0 = np.full(n, 0.02)
+
+        rho, u, p, fuel = solve_reactive_euler_1d(
+            rho0,
+            u0,
+            p0,
+            fuel0,
+            dx=1.0 / n,
+            t_final=0.002,
+            heat_release=4.0e7,
+            pre_exponential=1000.0,
+            activation_temperature=3000.0,
+        )
+
+        self.assertTrue(np.all(np.isfinite(rho)))
+        self.assertGreater(float(p.mean()), float(p0.mean()))
+        self.assertLess(float(fuel.mean()), float(fuel0.mean()))
+        self.assertTrue(np.all(fuel >= 0.0))
+
+    def test_reactive_euler_zero_fuel_keeps_uniform_pressure(self):
+        n = 32
+        p0 = np.full(n, 2.0e5)
+
+        _, _, p, fuel = solve_reactive_euler_1d(
+            np.ones(n),
+            np.zeros(n),
+            p0,
+            np.zeros(n),
+            dx=1.0 / n,
+            t_final=0.001,
+        )
+
+        np.testing.assert_allclose(p, p0)
+        np.testing.assert_allclose(fuel, np.zeros(n))
 
 
 if __name__ == "__main__":

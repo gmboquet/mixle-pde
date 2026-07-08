@@ -161,6 +161,7 @@ from mixle_pde.gas_dynamics import (
     exact_riemann_solution,
     simulate_zero_d_combustion,
     solve_euler_1d,
+    solve_reactive_euler_1d,
 )
 from mixle_pde.geophysics import (
     cross_gradient,
@@ -416,6 +417,7 @@ __all__ = [
     "exact_riemann_solution",
     "simulate_zero_d_combustion",
     "solve_euler_1d",
+    "solve_reactive_euler_1d",
     "NavierStokes2D",
     "WaveEquation2D",
     "WaveEquation3D",
