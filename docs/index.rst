@@ -13,6 +13,7 @@ clean integration point with Mixle's probabilistic-programming surface.
    :maxdepth: 2
 
    installation
+   quickstart
    overview
    package-map
    modeling-workflows
