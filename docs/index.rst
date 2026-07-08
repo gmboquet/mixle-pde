@@ -18,6 +18,7 @@ clean integration point with Mixle's probabilistic-programming surface.
    modeling-workflows
    README
    release-0-6-3
+   changelog
    security-and-data
    0.6.x-field-modeling
    api-overview
