@@ -217,9 +217,14 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "depth_weighted_marginal_precision_sparse",
                 "joint_linear_gaussian_invert",
                 "marginal_at_points",
+                "marginal_time_series",
                 "region_summary",
+                "region_time_summary",
                 "region_mass",
+                "region_mass_time_series",
+                "time_slice",
                 "SampledDerivedQuantity",
+                "DerivedTimeSeries",
                 "sampled_derived_quantity",
                 "compress_to_low_rank",
                 "to_ensemble",
@@ -1703,15 +1708,20 @@ def _run_earth_sparse_posterior_factorization() -> ScenarioResult:
 
 
 def _run_earth_posterior_extraction() -> ScenarioResult:
+    from mixle_pde.field_assimilation import PosteriorField4D, PosteriorFieldSamples4D
     from mixle_pde.latent import PosteriorField3D, PosteriorFieldSamples3D
     from mixle_pde.observations import ForwardOperatorRegistry, Observation, borehole_forward_operator
     from mixle_pde.posterior_query import (
         compress_to_low_rank,
         marginal_at_points,
+        marginal_time_series,
         region_mass,
+        region_mass_time_series,
         region_summary,
+        region_time_summary,
         sampled_derived_quantity,
         section,
+        time_slice,
         to_diagonal,
         to_ensemble,
     )
@@ -1749,6 +1759,17 @@ def _run_earth_posterior_extraction() -> ScenarioResult:
     sampled_mass = region_mass(sampled, np.array([False, True, False, True]), np.full(grid.n, 40.0**3))
     sampled_q = sampled_derived_quantity(sampled, np.array([1.0, 0.0, -1.0, 0.0]))
     sampled_predictive = sampled.posterior_predictive_draws(registry, obs, n=4, rng=np.random.default_rng(98))
+    posterior4d = PosteriorField4D(grid=grid, times=np.array([0.0, 1.0]), means=[mean, mean + 10.0], covs=[cov, cov])
+    sampled4d = PosteriorFieldSamples4D(
+        grid=grid,
+        times=np.array([0.0, 1.0]),
+        samples=np.stack([sampled.samples, sampled.samples + 10.0], axis=1),
+    )
+    point4d = marginal_time_series(posterior4d, [1, 3])
+    sampled_region4d = region_time_summary(sampled4d, np.array([False, True, False, True]))
+    mass4d = region_mass_time_series(posterior4d, np.array([False, True, False, True]), np.full(grid.n, 40.0**3))
+    sampled_mass4d = region_mass_time_series(sampled4d, np.array([False, True, False, True]), np.full(grid.n, 40.0**3))
+    slice4d = time_slice(posterior4d, 0.5, interpolate=True)
     compact = compress_to_low_rank(posterior, rank=2)
     diagonal = to_diagonal(posterior)
     ensemble = to_ensemble(compact, 8, np.random.default_rng(123))
@@ -1763,6 +1784,11 @@ def _run_earth_posterior_extraction() -> ScenarioResult:
         and sampled_mass.std > 0.0
         and sampled_q.samples.shape == (3,)
         and sampled_predictive.shape == (4, 2)
+        and point4d.mean.shape == (2, 2)
+        and sampled_region4d["mean"].shape == (2, 2)
+        and mass4d.mean.shape == (2,)
+        and sampled_mass4d.samples.shape == (3, 2)
+        and slice4d.mean.shape == (grid.n,)
         and compact.low_rank.shape == (grid.n, 2)
         and diagonal.diag_var.shape == (grid.n,)
         and ensemble.samples.shape == (8, grid.n)
@@ -1776,6 +1802,7 @@ def _run_earth_posterior_extraction() -> ScenarioResult:
             "low_rank_columns": 2.0,
             "ensemble_samples": 8.0,
             "sampled_derived_draws": float(sampled_q.samples.size),
+            "time_series_count": float(point4d.mean.shape[0]),
             "posterior_predictive_draws": float(predictive.shape[0] + sampled_predictive.shape[0]),
             "region_cells": region["n_cells"],
         },

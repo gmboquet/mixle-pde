@@ -8,16 +8,23 @@ import unittest
 
 import numpy as np
 
+from mixle_pde.field_assimilation import PosteriorField4D, PosteriorFieldSamples4D
 from mixle_pde.latent import Field3D, PosteriorField3D, PosteriorFieldSamples3D, SparsePosteriorPrecision
 from mixle_pde.posterior_query import (
+    DerivedTimeSeries,
+    MarginalTimeSeries,
     SampledDerivedQuantity,
     compress_to_low_rank,
     derived_quantity,
     marginal_at_points,
+    marginal_time_series,
     region_mass,
+    region_mass_time_series,
     region_summary,
+    region_time_summary,
     sampled_derived_quantity,
     section,
+    time_slice,
     to_diagonal,
     to_ensemble,
 )
@@ -50,6 +57,31 @@ def _sampled_posterior():
         ]
     )
     return grid, PosteriorFieldSamples3D(grid=grid, samples=samples), samples
+
+
+def _gaussian_4d_posterior():
+    grid = _grid(n_side=2)
+    times = np.array([0.0, 1.0, 3.0])
+    means = [
+        np.array([1.0, 2.0, 3.0, 4.0]),
+        np.array([2.0, 3.0, 4.0, 5.0]),
+        np.array([4.0, 5.0, 6.0, 7.0]),
+    ]
+    covs = [np.diag(np.full(grid.n, scale)) for scale in (0.25, 1.0, 4.0)]
+    return grid, PosteriorField4D(grid=grid, times=times, means=means, covs=covs)
+
+
+def _sampled_4d_posterior():
+    grid = _grid(n_side=2)
+    times = np.array([0.0, 2.0])
+    samples = np.array(
+        [
+            [[1.0, 2.0, 3.0, 4.0], [2.0, 3.0, 4.0, 5.0]],
+            [[2.0, 3.0, 4.0, 5.0], [3.0, 4.0, 5.0, 6.0]],
+            [[3.0, 4.0, 5.0, 6.0], [4.0, 5.0, 6.0, 7.0]],
+        ]
+    )
+    return grid, PosteriorFieldSamples4D(grid=grid, times=times, samples=samples), samples
 
 
 class ExtractionTest(unittest.TestCase):
@@ -95,6 +127,35 @@ class ExtractionTest(unittest.TestCase):
         self.assertEqual(region["n_cells"], 2)
         np.testing.assert_allclose(region["mean"], samples[:, mask].mean(axis=0))
         self.assertEqual(int(sec["index"].sum()), 2)
+
+    def test_4d_time_slice_and_marginal_time_series_for_gaussian_posterior(self):
+        grid, post = _gaussian_4d_posterior()
+        summary = marginal_time_series(post, [0, 2], alpha=0.2)
+        slice_t = time_slice(post, 1.0)
+        interp = time_slice(post, 0.5, interpolate=True)
+
+        self.assertIsInstance(summary, MarginalTimeSeries)
+        self.assertIsInstance(slice_t, PosteriorField3D)
+        self.assertEqual(summary.mean.shape, (3, 2))
+        np.testing.assert_allclose(summary.mean[:, 0], np.array([1.0, 2.0, 4.0]))
+        np.testing.assert_allclose(summary.std[:, 0], np.array([0.5, 1.0, 2.0]))
+        np.testing.assert_allclose(interp.mean, 0.5 * (post.means[0] + post.means[1]))
+        self.assertTrue(np.all(summary.upper >= summary.lower))
+
+    def test_4d_region_time_summary_for_sampled_posterior(self):
+        grid, post, samples = _sampled_4d_posterior()
+        mask = np.array([True, False, True, False])
+        summary = marginal_time_series(post, [1, 3], alpha=0.2)
+        region = region_time_summary(post, mask)
+        slice_t = time_slice(post, 2.0)
+
+        self.assertIsInstance(summary, MarginalTimeSeries)
+        self.assertIsInstance(slice_t, PosteriorFieldSamples3D)
+        np.testing.assert_allclose(summary.mean, samples[:, :, [1, 3]].mean(axis=0))
+        np.testing.assert_allclose(region["mean"], samples[:, :, mask].mean(axis=0))
+        self.assertEqual(region["mean"].shape, (2, 2))
+        with self.assertRaises(ValueError):
+            time_slice(post, 1.0, interpolate=True)
 
 
 class DerivedQuantityTest(unittest.TestCase):
@@ -164,6 +225,32 @@ class DerivedQuantityTest(unittest.TestCase):
 
         self.assertIsInstance(dq, SampledDerivedQuantity)
         np.testing.assert_allclose(dq.samples, samples[:, mask].sum(axis=1) * 10.0)
+
+    def test_region_mass_time_series_for_gaussian_posterior(self):
+        grid, post = _gaussian_4d_posterior()
+        mask = np.array([False, True, False, True])
+        volumes = np.full(grid.n, 10.0)
+
+        series = region_mass_time_series(post, mask, volumes)
+        lo, hi = series.credible_interval(0.2)
+
+        self.assertIsInstance(series, DerivedTimeSeries)
+        np.testing.assert_allclose(series.mean, np.array([60.0, 80.0, 120.0]))
+        np.testing.assert_allclose(series.std, np.sqrt(np.array([50.0, 200.0, 800.0])))
+        self.assertTrue(np.all(hi > lo))
+
+    def test_region_mass_time_series_for_sampled_posterior_preserves_draws(self):
+        grid, post, samples = _sampled_4d_posterior()
+        mask = np.array([True, False, True, False])
+        volumes = np.full(grid.n, 2.0)
+
+        series = region_mass_time_series(post, mask, volumes)
+        expected = np.einsum("stn,n->st", samples, np.where(mask, volumes, 0.0))
+
+        self.assertIsInstance(series, DerivedTimeSeries)
+        np.testing.assert_allclose(series.samples, expected)
+        np.testing.assert_allclose(series.mean, expected.mean(axis=0))
+        np.testing.assert_allclose(series.std, expected.std(axis=0, ddof=1))
 
 
 class CompressionTest(unittest.TestCase):

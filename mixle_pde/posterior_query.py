@@ -38,9 +38,11 @@ from typing import Any
 import numpy as np
 from scipy.special import ndtri
 
+from mixle_pde.field_assimilation import PosteriorField4D, PosteriorFieldSamples4D
 from mixle_pde.latent import Field3D, PosteriorField3D, PosteriorFieldSamples3D
 
 Posterior3D = PosteriorField3D | PosteriorFieldSamples3D
+Posterior4D = PosteriorField4D | PosteriorFieldSamples4D
 
 
 @dataclass
@@ -53,6 +55,38 @@ class MarginalSummary:
     std: np.ndarray
     lower: np.ndarray
     upper: np.ndarray
+
+
+@dataclass
+class MarginalTimeSeries:
+    """Per-point marginal posterior through time, in physical units."""
+
+    indices: np.ndarray
+    times: np.ndarray
+    coordinates: np.ndarray
+    mean: np.ndarray
+    std: np.ndarray
+    lower: np.ndarray
+    upper: np.ndarray
+
+
+@dataclass
+class DerivedTimeSeries:
+    """Posterior of a derived scalar quantity through time."""
+
+    times: np.ndarray
+    mean: np.ndarray
+    std: np.ndarray
+    samples: np.ndarray | None = None
+
+    def credible_interval(self, alpha: float = 0.1) -> tuple[np.ndarray, np.ndarray]:
+        if not 0.0 < alpha < 1.0:
+            raise ValueError("alpha must be in (0, 1).")
+        if self.samples is not None:
+            lo, hi = np.quantile(self.samples, [alpha / 2.0, 1.0 - alpha / 2.0], axis=0)
+            return lo, hi
+        z = ndtri(1.0 - alpha / 2.0)
+        return self.mean - z * self.std, self.mean + z * self.std
 
 
 def marginal_at_points(posterior: Posterior3D, indices, *, alpha: float = 0.1) -> MarginalSummary:
@@ -98,6 +132,15 @@ def section(
     return posterior.slice(x=x, y=y, z=z, tol=tol)
 
 
+def time_slice(posterior: Posterior4D, time: float, *, interpolate: bool = False) -> Posterior3D:
+    """Return the 3D posterior slice at ``time``."""
+    if isinstance(posterior, PosteriorField4D):
+        return posterior.at_time(float(time), interpolate=interpolate)
+    if interpolate:
+        raise ValueError("sampled 4D posteriors only support exact stored times.")
+    return posterior.at_time(float(time))
+
+
 def region_summary(posterior: Posterior3D, mask) -> dict[str, Any]:
     """Per-cell mean / std (physical units) restricted to a boolean region ``mask`` over the grid."""
     mask = np.asarray(mask, dtype=bool)
@@ -106,6 +149,54 @@ def region_summary(posterior: Posterior3D, mask) -> dict[str, Any]:
     summary = marginal_at_points(posterior, np.flatnonzero(mask))
     return {
         "n_cells": int(mask.sum()),
+        "coordinates": summary.coordinates,
+        "mean": summary.mean,
+        "std": summary.std,
+    }
+
+
+def marginal_time_series(posterior: Posterior4D, indices, *, alpha: float = 0.1) -> MarginalTimeSeries:
+    """Per-point posterior marginals across all stored times."""
+    if not 0.0 < alpha < 1.0:
+        raise ValueError("alpha must be in (0, 1).")
+    idx = np.atleast_1d(np.asarray(indices, dtype=int))
+    grid = posterior.grid
+    if isinstance(posterior, PosteriorFieldSamples4D):
+        physical = posterior.physical_samples
+        mean = np.mean(physical, axis=0)[:, idx]
+        std = np.std(physical, axis=0, ddof=1)[:, idx] if posterior.n_samples > 1 else np.zeros_like(mean)
+        lo_all, hi_all = posterior.credible_interval(alpha)
+        lo = lo_all[:, idx]
+        hi = hi_all[:, idx]
+    else:
+        mean = grid.from_unconstrained(posterior.mean_array)[:, idx]
+        std_u = posterior.marginal_std
+        z = ndtri(1.0 - alpha / 2.0)
+        lo = grid.from_unconstrained(posterior.mean_array - z * std_u)[:, idx]
+        hi = grid.from_unconstrained(posterior.mean_array + z * std_u)[:, idx]
+        std = np.abs(grid.from_unconstrained(posterior.mean_array + std_u) - grid.from_unconstrained(posterior.mean_array))[
+            :, idx
+        ]
+    return MarginalTimeSeries(
+        indices=idx,
+        times=posterior.times.copy(),
+        coordinates=grid.coordinates[idx],
+        mean=mean,
+        std=std,
+        lower=np.minimum(lo, hi),
+        upper=np.maximum(lo, hi),
+    )
+
+
+def region_time_summary(posterior: Posterior4D, mask) -> dict[str, Any]:
+    """Per-cell mean/std over a region through time."""
+    mask = np.asarray(mask, dtype=bool)
+    if mask.shape != (posterior.grid.n,):
+        raise ValueError(f"mask must have shape ({posterior.grid.n},).")
+    summary = marginal_time_series(posterior, np.flatnonzero(mask))
+    return {
+        "n_cells": int(mask.sum()),
+        "times": summary.times,
         "coordinates": summary.coordinates,
         "mean": summary.mean,
         "std": summary.std,
@@ -197,6 +288,30 @@ def region_mass(posterior: Posterior3D, mask, cell_volumes) -> DerivedQuantity |
     if isinstance(posterior, PosteriorFieldSamples3D):
         return sampled_derived_quantity(posterior, weights)
     return derived_quantity(posterior, weights)
+
+
+def region_mass_time_series(posterior: Posterior4D, mask, cell_volumes) -> DerivedTimeSeries:
+    """Posterior of region mass through time."""
+    mask = np.asarray(mask, dtype=bool)
+    vols = np.broadcast_to(np.asarray(cell_volumes, dtype=float), (posterior.grid.n,))
+    if mask.shape != (posterior.grid.n,):
+        raise ValueError(f"mask must have shape ({posterior.grid.n},).")
+    weights = np.where(mask, vols, 0.0)
+    if isinstance(posterior, PosteriorFieldSamples4D):
+        samples = np.einsum("stn,n->st", posterior.physical_samples, weights)
+        std = np.std(samples, axis=0, ddof=1) if samples.shape[0] > 1 else np.zeros(samples.shape[1])
+        return DerivedTimeSeries(
+            times=posterior.times.copy(),
+            mean=np.mean(samples, axis=0),
+            std=std,
+            samples=samples,
+        )
+    quantities = [region_mass(posterior.at_time(float(time)), mask, weights) for time in posterior.times]
+    return DerivedTimeSeries(
+        times=posterior.times.copy(),
+        mean=np.asarray([quantity.mean for quantity in quantities], dtype=float),
+        std=np.asarray([quantity.std for quantity in quantities], dtype=float),
+    )
 
 
 def compress_to_low_rank(posterior: PosteriorField3D, rank: int) -> PosteriorField3D:
