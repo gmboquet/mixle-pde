@@ -119,6 +119,9 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "SimplexMesh.interpolate",
                 "SimplexMesh.refined",
                 "MovingSimplexMesh.interpolate_values",
+                "assemble_simplex_mass_matrix",
+                "assemble_simplex_stiffness_matrix",
+                "assemble_simplex_fem_matrices",
                 "box_simplex_mesh",
                 "delaunay_mesh",
                 "interpolate_simplex_field",
@@ -684,6 +687,7 @@ def _small_registry(grid, volumes):
 
 
 def _run_mesh_3d_4d_measure() -> ScenarioResult:
+    from mixle_pde.fem import assemble_simplex_mass_matrix, assemble_simplex_stiffness_matrix
     from mixle_pde.mesh import box_simplex_mesh, refine_simplex_mesh, space_time_mesh
 
     mesh3 = box_simplex_mesh((2, 2, 2), lengths=(2.0, 3.0, 4.0))
@@ -703,6 +707,15 @@ def _run_mesh_3d_4d_measure() -> ScenarioResult:
     err_st = abs(space_time.total_measure() - 1.0)
     err_refined3 = abs(refined3.total_measure() - mesh3.total_measure()) / mesh3.total_measure()
     err_refined4 = abs(refined4.total_measure() - mesh4.total_measure()) / mesh4.total_measure()
+    mass3 = assemble_simplex_mass_matrix(mesh3)
+    mass4 = assemble_simplex_mass_matrix(mesh4)
+    stiffness3 = assemble_simplex_stiffness_matrix(mesh3)
+    mass3_err = abs(float(mass3.sum()) - mesh3.total_measure()) / mesh3.total_measure()
+    mass4_err = abs(float(mass4.sum()) - mesh4.total_measure()) / mesh4.total_measure()
+    constant_residual = float(np.max(np.abs(stiffness3 @ np.ones(mesh3.n_nodes))))
+    linear_x = mesh3.nodes[:, 0]
+    linear_energy = float(linear_x @ (stiffness3 @ linear_x))
+    linear_energy_err = abs(linear_energy - mesh3.total_measure()) / mesh3.total_measure()
     counts_ok = (
         mesh3.dim == 3
         and mesh3.n_simplices == 6
@@ -722,6 +735,10 @@ def _run_mesh_3d_4d_measure() -> ScenarioResult:
         and err_st <= tol
         and err_refined3 <= tol
         and err_refined4 <= tol
+        and mass3_err <= tol
+        and mass4_err <= tol
+        and constant_residual <= tol
+        and linear_energy_err <= tol
     )
     return _result(
         "mesh_3d_4d_measure",
@@ -739,6 +756,10 @@ def _run_mesh_3d_4d_measure() -> ScenarioResult:
             "box_3d_min_quality": mesh3.validate()["min_quality"],
             "box_4d_min_quality": mesh4.validate()["min_quality"],
             "space_time_min_quality": space_time.validate()["min_quality"],
+            "fem_3d_mass_relative_error": mass3_err,
+            "fem_4d_mass_relative_error": mass4_err,
+            "fem_constant_stiffness_residual": constant_residual,
+            "fem_linear_energy_relative_error": linear_energy_err,
         },
         tolerance={"relative_measure_error": tol},
         message="3D/4D simplex measures matched" if passed else "3D/4D simplex measure mismatch",

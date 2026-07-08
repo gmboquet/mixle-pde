@@ -5,7 +5,14 @@ import unittest
 import numpy as np
 from scipy.spatial import Delaunay
 
-from mixle_pde.fem import boundary_nodes, fem_poisson
+from mixle_pde.fem import (
+    assemble_simplex_fem_matrices,
+    assemble_simplex_mass_matrix,
+    assemble_simplex_stiffness_matrix,
+    boundary_nodes,
+    fem_poisson,
+)
+from mixle_pde.mesh import box_simplex_mesh
 
 
 def _mesh_square(n):
@@ -54,6 +61,31 @@ class FEMPoissonTest(unittest.TestCase):
         nodes, tris = _mesh_square(15)
         u = fem_poisson(nodes, tris, 1.0, conductivity=np.linspace(0.5, 2.0, len(tris)))
         self.assertTrue(np.all(np.isfinite(u)))
+
+    def test_simplex_mass_matrix_conserves_3d_measure(self):
+        mesh = box_simplex_mesh((2, 2, 2), lengths=(2.0, 3.0, 4.0))
+        mass = assemble_simplex_mass_matrix(mesh)
+
+        self.assertEqual(mass.shape, (mesh.n_nodes, mesh.n_nodes))
+        self.assertAlmostEqual(float(mass.sum()), mesh.total_measure())
+        np.testing.assert_allclose((mass - mass.T).toarray(), np.zeros(mass.shape))
+
+    def test_simplex_stiffness_annihilates_4d_constants(self):
+        mesh = box_simplex_mesh((2, 2, 2, 2), lengths=(1.0, 2.0, 3.0, 4.0))
+        stiffness, mass = assemble_simplex_fem_matrices(mesh)
+
+        self.assertEqual(stiffness.shape, (mesh.n_nodes, mesh.n_nodes))
+        self.assertAlmostEqual(float(mass.sum()), mesh.total_measure())
+        np.testing.assert_allclose(stiffness @ np.ones(mesh.n_nodes), np.zeros(mesh.n_nodes), atol=1.0e-12)
+
+    def test_simplex_stiffness_exact_linear_energy_3d(self):
+        mesh = box_simplex_mesh((2, 2, 2), lengths=(2.0, 3.0, 4.0))
+        stiffness = assemble_simplex_stiffness_matrix(mesh)
+        linear_x = mesh.nodes[:, 0]
+
+        energy = float(linear_x @ (stiffness @ linear_x))
+
+        self.assertAlmostEqual(energy, mesh.total_measure())
 
 
 if __name__ == "__main__":

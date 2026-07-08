@@ -122,6 +122,12 @@ from mixle_pde.field_priors import (
     depth_weights,
     joint_linear_gaussian_invert,
 )
+from mixle_pde.fem import (
+    assemble_simplex_fem_matrices,
+    assemble_simplex_mass_matrix,
+    assemble_simplex_stiffness_matrix,
+    simplex_p1_gradients,
+)
 from mixle_pde.flow import NavierStokes2D
 from mixle_pde.flow3d import NavierStokes3D
 from mixle_pde.geo_observations import (
@@ -377,6 +383,10 @@ __all__ = [
     "compress_to_low_rank",
     "to_diagonal",
     "to_ensemble",
+    "assemble_simplex_fem_matrices",
+    "assemble_simplex_mass_matrix",
+    "assemble_simplex_stiffness_matrix",
+    "simplex_p1_gradients",
     "SimplexMesh",
     "MovingSimplexMesh",
     "box_simplex_mesh",
