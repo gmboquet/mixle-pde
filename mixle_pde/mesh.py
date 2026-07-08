@@ -21,6 +21,7 @@ __all__ = [
     "SimplexMesh",
     "box_simplex_mesh",
     "delaunay_mesh",
+    "interpolate_simplex_field",
     "moving_mesh",
     "pipe_radial_deformation",
     "refine_simplex_mesh",
@@ -131,6 +132,55 @@ class SimplexMesh:
         if facets.size == 0:
             return np.array([], dtype=int)
         return np.unique(facets.ravel())
+
+    def locate_points(self, points: Any, *, tol: float = 1.0e-10) -> tuple[np.ndarray, np.ndarray]:
+        """Locate points in mesh simplices and return simplex indices plus barycentric weights."""
+        pts = _as_points(points, self.dim)
+        simplex_indices = np.full(pts.shape[0], -1, dtype=int)
+        barycentric = np.full((pts.shape[0], self.dim + 1), np.nan, dtype=float)
+        if pts.size == 0 or self.n_simplices == 0:
+            return simplex_indices, barycentric
+
+        tol = float(tol)
+        for simplex_id, simplex in enumerate(self.simplices):
+            unresolved = np.flatnonzero(simplex_indices < 0)
+            if unresolved.size == 0:
+                break
+            coords = self.nodes[simplex]
+            matrix = (coords[1:] - coords[0]).T
+            rhs = (pts[unresolved] - coords[0]).T
+            try:
+                tail = np.linalg.solve(matrix, rhs).T
+            except np.linalg.LinAlgError:
+                continue
+            candidate = np.column_stack([1.0 - tail.sum(axis=1), tail])
+            inside = np.all(candidate >= -tol, axis=1) & np.all(candidate <= 1.0 + tol, axis=1)
+            if not np.any(inside):
+                continue
+            chosen = unresolved[inside]
+            weights = np.clip(candidate[inside], 0.0, 1.0)
+            totals = weights.sum(axis=1, keepdims=True)
+            weights = np.divide(weights, totals, out=weights, where=totals > 0.0)
+            simplex_indices[chosen] = simplex_id
+            barycentric[chosen] = weights
+        return simplex_indices, barycentric
+
+    def interpolate(self, values: Any, points: Any, *, fill_value: Any = np.nan, tol: float = 1.0e-10) -> np.ndarray:
+        """Interpolate node-based values to arbitrary points with simplex barycentric weights."""
+        vals = np.asarray(values)
+        if vals.shape[:1] != (self.n_nodes,):
+            raise ValueError(f"values must have first dimension equal to n_nodes ({self.n_nodes}).")
+        pts = _as_points(points, self.dim)
+        simplex_indices, barycentric = self.locate_points(pts, tol=tol)
+
+        dtype = np.result_type(vals.dtype, np.asarray(fill_value).dtype)
+        out = np.empty((pts.shape[0], *vals.shape[1:]), dtype=dtype)
+        out[...] = fill_value
+        inside = simplex_indices >= 0
+        if np.any(inside):
+            simplex_values = vals[self.simplices[simplex_indices[inside]]]
+            out[inside] = np.einsum("ij,ij...->i...", barycentric[inside], simplex_values)
+        return out
 
     def validate(self, *, min_measure: float = 1.0e-14, min_quality: float = 1.0e-8) -> dict[str, Any]:
         """Return structural validation metrics for the mesh."""
@@ -344,6 +394,20 @@ class MovingSimplexMesh:
         ref = signed[int(reference_step)]
         return np.divide(signed, ref, out=np.full_like(signed, np.nan), where=np.abs(ref) > 0.0)
 
+    def interpolate_values(
+        self,
+        values: Any,
+        source_time: float,
+        target_time: float,
+        *,
+        fill_value: Any = np.nan,
+        tol: float = 1.0e-10,
+    ) -> np.ndarray:
+        """Transfer node-based values from ``source_time`` onto the nodes at ``target_time``."""
+        source = self.at_time(float(source_time))
+        target = self.at_time(float(target_time))
+        return source.interpolate(values, target.nodes, fill_value=fill_value, tol=tol)
+
     def to_space_time_mesh(self) -> SimplexMesh:
         """Extrude moving spatial meshes into a ``dim + 1`` space-time simplex mesh."""
         layers = [
@@ -487,6 +551,18 @@ def refine_simplex_mesh(mesh: SimplexMesh, *, levels: int = 1, mask: Any = None)
     return mesh.refined(levels=levels, mask=mask)
 
 
+def interpolate_simplex_field(
+    mesh: SimplexMesh,
+    values: Any,
+    points: Any,
+    *,
+    fill_value: Any = np.nan,
+    tol: float = 1.0e-10,
+) -> np.ndarray:
+    """Convenience wrapper for :meth:`SimplexMesh.interpolate`."""
+    return mesh.interpolate(values, points, fill_value=fill_value, tol=tol)
+
+
 def pipe_radial_deformation(
     *,
     axis: int | str = 2,
@@ -531,6 +607,23 @@ def pipe_radial_deformation(
 def space_time_mesh(spatial_mesh: SimplexMesh, times: Any) -> SimplexMesh:
     """Convenience wrapper for ``spatial_mesh.extrude_time(times)``."""
     return spatial_mesh.extrude_time(times)
+
+
+def _as_points(points: Any, dim: int) -> np.ndarray:
+    pts = np.asarray(points, dtype=float)
+    if pts.ndim == 0:
+        if dim != 1:
+            raise ValueError(f"points must have shape (n_points, {dim}) or ({dim},).")
+        return pts.reshape(1, 1)
+    if pts.ndim == 1:
+        if dim == 1:
+            return pts.reshape(-1, 1)
+        if pts.shape[0] == dim:
+            return pts.reshape(1, dim)
+        raise ValueError(f"points must have shape (n_points, {dim}) or ({dim},).")
+    if pts.ndim == 2 and pts.shape[1] == dim:
+        return pts
+    raise ValueError(f"points must have shape (n_points, {dim}) or ({dim},).")
 
 
 def _axis_index(axis: int | str) -> int:

@@ -8,6 +8,7 @@ from mixle_pde.mesh import (
     SimplexMesh,
     box_simplex_mesh,
     delaunay_mesh,
+    interpolate_simplex_field,
     moving_mesh,
     pipe_radial_deformation,
     refine_simplex_mesh,
@@ -88,6 +89,39 @@ class SimplexMeshTest(unittest.TestCase):
         self.assertEqual(refined.n_simplices, mesh.n_simplices + int(mask.sum()) * mesh.dim)
         self.assertAlmostEqual(refined.total_measure(), mesh.total_measure())
 
+    def test_simplex_interpolates_linear_field_inside_3d_mesh(self):
+        mesh = box_simplex_mesh((2, 2, 2), lengths=(1.0, 1.0, 1.0))
+        values = mesh.nodes[:, 0] + 2.0 * mesh.nodes[:, 1] + 3.0 * mesh.nodes[:, 2]
+        points = np.array([[0.25, 0.25, 0.25], [0.75, 0.5, 0.25]])
+
+        simplex_indices, barycentric = mesh.locate_points(points)
+        out = interpolate_simplex_field(mesh, values, points)
+
+        self.assertTrue(np.all(simplex_indices >= 0))
+        np.testing.assert_allclose(barycentric.sum(axis=1), np.ones(points.shape[0]))
+        np.testing.assert_allclose(out, points[:, 0] + 2.0 * points[:, 1] + 3.0 * points[:, 2])
+
+    def test_simplex_interpolation_marks_outside_points(self):
+        mesh = box_simplex_mesh((2, 2, 2), lengths=(1.0, 1.0, 1.0))
+        values = np.arange(mesh.n_nodes, dtype=float)
+        points = np.array([[0.25, 0.25, 0.25], [1.25, 0.25, 0.25]])
+
+        simplex_indices, _ = mesh.locate_points(points)
+        out = mesh.interpolate(values, points, fill_value=-99.0)
+
+        self.assertGreaterEqual(simplex_indices[0], 0)
+        self.assertEqual(simplex_indices[1], -1)
+        self.assertEqual(out[1], -99.0)
+
+    def test_simplex_interpolates_linear_field_inside_4d_mesh(self):
+        mesh = box_simplex_mesh((2, 2, 2, 2), lengths=(1.0, 1.0, 1.0, 1.0))
+        values = mesh.nodes @ np.array([1.0, 2.0, 3.0, 4.0])
+        points = np.array([[0.25, 0.25, 0.25, 0.25], [0.75, 0.5, 0.25, 0.5]])
+
+        out = mesh.interpolate(values, points)
+
+        np.testing.assert_allclose(out, points @ np.array([1.0, 2.0, 3.0, 4.0]))
+
     def test_extrude_3d_mesh_to_4d_space_time(self):
         spatial = box_simplex_mesh((2, 2, 2), lengths=(1.0, 1.0, 1.0))
         mesh = space_time_mesh(spatial, [0.0, 0.25, 1.0])
@@ -151,6 +185,20 @@ class SimplexMeshTest(unittest.TestCase):
         self.assertAlmostEqual(moving.measure_series()[1] / moving.measure_series()[0], 1.2**2)
         np.testing.assert_allclose(ratios[1], np.full(mesh.n_simplices, 1.2**2))
         self.assertEqual(report["n_inverted_or_degenerate_relative_to_reference"], 0)
+
+    def test_moving_mesh_transfers_values_between_deformed_domains(self):
+        mesh = box_simplex_mesh((2, 2, 2), lengths=(1.0, 1.0, 1.0))
+        moving = moving_mesh(
+            mesh,
+            [0.0, 1.0],
+            map_fn=lambda nodes, t: nodes * np.array([1.0 + t, 1.0, 1.0]),
+        )
+        source = moving.at_time(1.0)
+        values = source.nodes[:, 0] + 2.0 * source.nodes[:, 1] + 3.0 * source.nodes[:, 2]
+
+        transferred = moving.interpolate_values(values, 1.0, 0.0)
+
+        np.testing.assert_allclose(transferred, mesh.nodes[:, 0] + 2.0 * mesh.nodes[:, 1] + 3.0 * mesh.nodes[:, 2])
 
     def test_delaunay_mesh_3d(self):
         rng = np.random.RandomState(0)
