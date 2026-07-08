@@ -15,6 +15,7 @@ Added
 * Sphinx manual for PDE/ODE solvers, field modeling, observation and inversion
   contracts, solver selection, validation, and troubleshooting.
 * field-modeling guide converted into Sphinx-native docs.
+* Mesh-backed ``Field3D`` and time-indexed ``Field4D`` latent object contracts.
 * Moving-domain simplex mesh primitives for 3D deformation and 4D space-time
   geometry.
 * Full-time-axis 4D posterior arrays, intervals, samples, and interpolated

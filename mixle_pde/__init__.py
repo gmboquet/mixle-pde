@@ -152,7 +152,7 @@ from mixle_pde.heat import TransientHeat
 from mixle_pde.helmholtz_pml import helmholtz_pml_operator, solve_helmholtz_pml
 from mixle_pde.induced_polarization import apparent_conductivity, cole_cole_conductivity, sip_forward
 from mixle_pde.inverse import Differential
-from mixle_pde.latent import Field3D, PosteriorField3D, SparsePosteriorPrecision
+from mixle_pde.latent import Field3D, Field4D, PosteriorField3D, SparsePosteriorPrecision
 from mixle_pde.maxwell import Maxwell3D
 from mixle_pde.mesh import (
     MovingSimplexMesh,
@@ -265,6 +265,7 @@ __all__ = [
     "run_required_modeling_checks",
     "assert_required_modeling",
     "Field3D",
+    "Field4D",
     "PosteriorField3D",
     "SparsePosteriorPrecision",
     "PosteriorField4D",

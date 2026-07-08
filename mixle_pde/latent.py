@@ -1,9 +1,10 @@
 """Latent 3D/4D field objects and posterior artifacts (workstream G1, first card).
 
-Storage-agnostic containers for a gridded physical property: :class:`Field3D` fixes the grid
-geometry, units, and (optional) bound constraints for a named property; :class:`PosteriorField3D`
-carries a Gaussian posterior over that property (mean/MAP, marginal std, and dense, sparse-precision,
-or compact covariance storage) with sampling, credible intervals, and axis-aligned slicing.
+Storage-agnostic containers for a physical property: :class:`Field3D` fixes the 3D geometry, units, and
+(optional) bound constraints for a named property on grid points or simplex-mesh nodes;
+:class:`Field4D` adds a time axis and optional moving mesh geometry; :class:`PosteriorField3D` carries a
+Gaussian posterior over that property (mean/MAP, marginal std, and dense, sparse-precision, or compact
+covariance storage) with sampling, credible intervals, and axis-aligned slicing.
 
 This card defines the objects only. Inversion lives in :mod:`mixle_pde.field_inversion`,
 :mod:`mixle_pde.field_gauss_newton`, and :mod:`mixle_pde.field_assimilation`; forward mappings live in
@@ -87,7 +88,12 @@ class SparsePosteriorPrecision:
 
 @dataclass
 class Field3D:
-    """Grid geometry and units for one named physical property, storage-agnostic w.r.t. any posterior."""
+    """3D geometry and units for one named physical property.
+
+    ``coordinates`` are node or grid-point coordinates with shape ``(n, 3)``. ``mesh`` may be a
+    :class:`mixle_pde.mesh.SimplexMesh` with matching 3D nodes, which lets the same latent-field object
+    represent an unstructured tetrahedral domain without changing the posterior API.
+    """
 
     coordinates: np.ndarray
     spacing: float | tuple[float, float, float]
@@ -96,12 +102,15 @@ class Field3D:
     bounds: tuple[float | None, float | None] | None = None
     mask: np.ndarray | None = None
     provenance: dict[str, Any] = field(default_factory=dict)
+    mesh: Any | None = None
 
     def __post_init__(self) -> None:
         coords = np.asarray(self.coordinates, dtype=float)
         if coords.ndim != 2 or coords.shape[1] != 3:
             raise ValueError("coordinates must be an (n, 3) array of (x, y, z) grid points.")
         self.coordinates = coords
+        if self.mesh is not None:
+            self._validate_mesh(self.mesh)
         if self.mask is not None:
             mask = np.asarray(self.mask, dtype=bool)
             if mask.shape != (coords.shape[0],):
@@ -116,6 +125,51 @@ class Field3D:
     @property
     def n(self) -> int:
         return self.coordinates.shape[0]
+
+    @property
+    def geometry_kind(self) -> str:
+        """Return ``"simplex_mesh"`` for meshed fields, otherwise ``"point_grid"``."""
+        return "simplex_mesh" if self.mesh is not None else "point_grid"
+
+    @classmethod
+    def from_mesh(
+        cls,
+        mesh: Any,
+        *,
+        spacing: float | tuple[float, float, float],
+        units: str,
+        property_name: str,
+        bounds: tuple[float | None, float | None] | None = None,
+        mask: np.ndarray | None = None,
+        provenance: dict[str, Any] | None = None,
+    ) -> "Field3D":
+        """Construct a field over the nodes of a 3D simplex mesh."""
+        return cls(
+            coordinates=np.asarray(mesh.nodes, dtype=float),
+            spacing=spacing,
+            units=units,
+            property_name=property_name,
+            bounds=bounds,
+            mask=mask,
+            provenance={} if provenance is None else provenance,
+            mesh=mesh,
+        )
+
+    @property
+    def cell_measures(self) -> np.ndarray | None:
+        """Simplex lengths/areas/volumes for meshed fields, otherwise ``None``."""
+        if self.mesh is None:
+            return None
+        return self.mesh.simplex_measures()
+
+    def _validate_mesh(self, mesh: Any) -> None:
+        if getattr(mesh, "dim", None) != 3:
+            raise ValueError("Field3D mesh must be three-dimensional.")
+        nodes = np.asarray(getattr(mesh, "nodes", None), dtype=float)
+        if nodes.shape != self.coordinates.shape:
+            raise ValueError("Field3D mesh nodes must match coordinates shape.")
+        if not np.allclose(nodes, self.coordinates):
+            raise ValueError("Field3D mesh nodes must match coordinates.")
 
     def to_unconstrained(self, values: Any, *, eps: float = 1.0e-12) -> np.ndarray:
         """Map physical (bounded) property values into an unconstrained real-valued space."""
@@ -146,6 +200,118 @@ class Field3D:
         if hi is not None:
             return hi - np.exp(arr)
         return arr.copy()
+
+
+@dataclass
+class Field4D:
+    """A time-indexed 3D field object with optional moving-domain geometry."""
+
+    spatial: Field3D
+    times: np.ndarray
+    provenance: dict[str, Any] = field(default_factory=dict)
+    moving_mesh: Any | None = None
+
+    def __post_init__(self) -> None:
+        times = np.asarray(self.times, dtype=float).reshape(-1)
+        if times.size == 0:
+            raise ValueError("times must be a non-empty 1-D array.")
+        if np.any(np.diff(times) <= 0.0):
+            raise ValueError("times must be strictly increasing.")
+        if self.moving_mesh is not None:
+            self._validate_moving_mesh(self.moving_mesh, times)
+        self.times = times
+        self.provenance = dict(self.provenance)
+
+    @property
+    def n_times(self) -> int:
+        return int(self.times.size)
+
+    @property
+    def n_per_time(self) -> int:
+        return int(self.spatial.n)
+
+    @property
+    def n(self) -> int:
+        return int(self.n_times * self.n_per_time)
+
+    @property
+    def property_name(self) -> str:
+        return self.spatial.property_name
+
+    @property
+    def units(self) -> str:
+        return self.spatial.units
+
+    @property
+    def bounds(self) -> tuple[float | None, float | None] | None:
+        return self.spatial.bounds
+
+    @property
+    def geometry_kind(self) -> str:
+        if self.moving_mesh is not None:
+            return "moving_simplex_mesh"
+        return f"static_{self.spatial.geometry_kind}"
+
+    @property
+    def coordinates(self) -> np.ndarray:
+        """Space-time coordinates with shape ``(n_times * n_per_time, 4)``."""
+        layers = [np.column_stack([self.coordinates_at_time(t), np.full(self.n_per_time, t)]) for t in self.times]
+        return np.vstack(layers)
+
+    def coordinates_at_time(self, time: float, *, interpolate: bool = True) -> np.ndarray:
+        """3D coordinates at ``time`` using moving geometry when available."""
+        if self.moving_mesh is None:
+            return self.spatial.coordinates.copy()
+        if interpolate:
+            return self.moving_mesh.at_time(float(time), clamp=False).nodes
+        idx = self._index_of(float(time))
+        return self.moving_mesh.at_step(idx).nodes
+
+    def mesh_at_time(self, time: float, *, interpolate: bool = True) -> Any | None:
+        """Return the simplex mesh at ``time`` when moving or static mesh geometry is available."""
+        if self.moving_mesh is not None:
+            return self.moving_mesh.at_time(float(time), clamp=False) if interpolate else self.moving_mesh.at_step(
+                self._index_of(float(time))
+            )
+        return self.spatial.mesh
+
+    def values_at_time(self, values: Any, time: float) -> np.ndarray:
+        """Extract one time slice from a ``(n_times, n_per_time)`` or flattened value array."""
+        arr = self.reshape_values(values)
+        return arr[self._index_of(float(time))].copy()
+
+    def reshape_values(self, values: Any) -> np.ndarray:
+        """Return values as ``(n_times, n_per_time)`` and validate their size."""
+        arr = np.asarray(values, dtype=float)
+        if arr.shape == (self.n_times, self.n_per_time):
+            return arr.copy()
+        if arr.shape == (self.n,):
+            return arr.reshape(self.n_times, self.n_per_time)
+        raise ValueError(f"values must have shape ({self.n_times}, {self.n_per_time}) or ({self.n},).")
+
+    def to_unconstrained(self, values: Any) -> np.ndarray:
+        """Map physical time-indexed values to unconstrained space."""
+        return self.spatial.to_unconstrained(self.reshape_values(values))
+
+    def from_unconstrained(self, values: Any) -> np.ndarray:
+        """Map unconstrained time-indexed values to physical units."""
+        return self.spatial.from_unconstrained(self.reshape_values(values))
+
+    def _index_of(self, time: float, tol: float = 1e-9) -> int:
+        matches = np.flatnonzero(np.isclose(self.times, time, atol=tol))
+        if matches.size == 0:
+            raise KeyError(f"time {time!r} is not in this Field4D; have {self.times.tolist()}.")
+        return int(matches[0])
+
+    def _validate_moving_mesh(self, moving_mesh: Any, times: np.ndarray) -> None:
+        if getattr(moving_mesh, "dim", None) != 3:
+            raise ValueError("Field4D moving_mesh must contain 3D spatial meshes.")
+        if getattr(moving_mesh, "n_nodes", None) != self.spatial.n:
+            raise ValueError("Field4D moving_mesh node count must match the spatial field.")
+        if len(getattr(moving_mesh, "times", [])) != times.size:
+            raise ValueError("Field4D moving_mesh must have the same number of times.")
+        if not np.allclose(moving_mesh.times, times):
+            raise ValueError("Field4D moving_mesh times must match Field4D times.")
 
 
 @dataclass

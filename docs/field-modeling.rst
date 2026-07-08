@@ -25,9 +25,9 @@ Capability Map
      - Public surface
      - Purpose
    * - Fields
-     - ``Field3D``, ``PosteriorField3D``
-     - Geometry, units, bounds, posterior covariance, samples, intervals, and
-       slices.
+     - ``Field3D``, ``Field4D``, ``PosteriorField3D``
+     - Grid or simplex-mesh geometry, time axes, units, bounds, posterior
+       covariance, samples, intervals, and slices.
    * - Observations
      - ``Observation``, ``ForwardOperator``, ``ForwardOperatorRegistry``
      - Common measurement contract and registry-based prediction path.
@@ -66,6 +66,11 @@ Static Inversion
 Use ``Field3D`` to name one physical property on a grid. Observations carry
 geometry, values, noise, units, time, and provenance. A registry resolves each
 observation kind to a forward operator.
+
+``Field3D`` can also bind to a 3D simplex mesh through ``Field3D.from_mesh``.
+``Field4D`` adds a strictly increasing time axis and optional moving-mesh
+geometry so a posterior can describe a time-varying object rather than a loose
+list of arrays.
 
 .. code-block:: python
 

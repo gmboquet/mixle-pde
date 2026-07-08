@@ -13,6 +13,7 @@ Included
 * 3D/4D field-modeling guide for the release branch.
 * Moving-domain simplex meshes with 3D pipe/cylinder deformation and 4D
   space-time extrusion.
+* Mesh-backed ``Field3D`` and time-indexed ``Field4D`` latent object contracts.
 * 4D posterior artifacts with full-time mean, marginal uncertainty, credible
   intervals, marginal samples, and interpolated time slices.
 * Zero-dimensional reactive gas/engine-cylinder combustion kernel with fuel

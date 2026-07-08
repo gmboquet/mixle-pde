@@ -4,7 +4,8 @@ import unittest
 
 import numpy as np
 
-from mixle_pde.latent import Field3D, PosteriorField3D, SparsePosteriorPrecision
+from mixle_pde.latent import Field3D, Field4D, PosteriorField3D, SparsePosteriorPrecision
+from mixle_pde.mesh import box_simplex_mesh, moving_mesh, pipe_radial_deformation
 
 
 def _grid(n_per_axis=3):
@@ -18,6 +19,15 @@ class Field3DConstructionTestCase(unittest.TestCase):
         coords = _grid()
         f = Field3D(coordinates=coords, spacing=1.0, units="m", property_name="porosity")
         self.assertEqual(f.n, coords.shape[0])
+        self.assertEqual(f.geometry_kind, "point_grid")
+
+    def test_field_can_bind_to_static_simplex_mesh(self):
+        mesh = box_simplex_mesh((2, 2, 2), lengths=(1.0, 1.0, 1.0))
+        field = Field3D.from_mesh(mesh, spacing=1.0, units="kg/m^3", property_name="density")
+
+        self.assertEqual(field.n, mesh.n_nodes)
+        self.assertEqual(field.geometry_kind, "simplex_mesh")
+        self.assertEqual(field.cell_measures.shape, (mesh.n_simplices,))
 
     def test_bad_coordinate_shape_raises(self):
         with self.assertRaises(ValueError):
@@ -32,6 +42,44 @@ class Field3DConstructionTestCase(unittest.TestCase):
         coords = _grid()
         with self.assertRaises(ValueError):
             Field3D(coordinates=coords, spacing=1.0, units="m", property_name="x", bounds=(1.0, 0.0))
+
+    def test_mesh_coordinate_mismatch_raises(self):
+        mesh = box_simplex_mesh((2, 2, 2), lengths=(1.0, 1.0, 1.0))
+        with self.assertRaises(ValueError):
+            Field3D(
+                coordinates=mesh.nodes + np.array([1.0, 0.0, 0.0]),
+                spacing=1.0,
+                units="m",
+                property_name="x",
+                mesh=mesh,
+            )
+
+
+class Field4DConstructionTestCase(unittest.TestCase):
+    def test_static_4d_field_exposes_space_time_coordinates_and_transforms(self):
+        spatial = Field3D(coordinates=_grid(n_per_axis=2), spacing=1.0, units="frac", property_name="porosity")
+        field = Field4D(spatial, times=np.array([0.0, 1.0, 2.0]))
+        values = np.arange(field.n, dtype=float).reshape(field.n_times, field.n_per_time)
+
+        self.assertEqual(field.n, 24)
+        self.assertEqual(field.coordinates.shape, (24, 4))
+        np.testing.assert_allclose(field.values_at_time(values, 1.0), values[1])
+        np.testing.assert_allclose(field.from_unconstrained(field.to_unconstrained(values)), values)
+
+    def test_moving_4d_field_uses_deformed_coordinates(self):
+        mesh = box_simplex_mesh((2, 2, 2), lengths=(1.0, 1.0, 1.0), origin=(-0.5, -0.5, 0.0))
+        spatial = Field3D.from_mesh(mesh, spacing=1.0, units="m", property_name="deformation")
+        motion = moving_mesh(mesh, [0.0, 1.0], pipe_radial_deformation(axis="z", radial_strain=0.25))
+        field = Field4D(spatial, times=np.array([0.0, 1.0]), moving_mesh=motion)
+
+        self.assertEqual(field.geometry_kind, "moving_simplex_mesh")
+        self.assertEqual(field.coordinates_at_time(1.0).shape, spatial.coordinates.shape)
+        self.assertAlmostEqual(field.mesh_at_time(1.0).total_measure() / mesh.total_measure(), 1.25**2)
+
+    def test_bad_4d_times_raise(self):
+        spatial = Field3D(coordinates=_grid(n_per_axis=2), spacing=1.0, units="m", property_name="x")
+        with self.assertRaises(ValueError):
+            Field4D(spatial, times=np.array([0.0, 0.0]))
 
 
 class TransformRoundTripTestCase(unittest.TestCase):

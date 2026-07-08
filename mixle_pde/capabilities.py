@@ -157,6 +157,7 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
             ),
             solver_symbols=(
                 "Field3D",
+                "Field4D",
                 "PosteriorField3D",
                 "PosteriorField4D",
                 "PosteriorField4D.credible_interval",
@@ -1228,10 +1229,12 @@ def _run_earth_csem_3d_nonlinear_observation() -> ScenarioResult:
 def _run_earth_4d_assimilation() -> ScenarioResult:
     from mixle_pde.field_assimilation import assimilate_4d
     from mixle_pde.field_inversion import FieldGaussianPrior
+    from mixle_pde.latent import Field4D
     from mixle_pde.observations import ForwardOperatorRegistry, Observation, borehole_forward_operator
 
     grid = _small_grid("temperature_c", "C")
     times = np.array([0.0, 1.0, 2.0])
+    field4d = Field4D(grid, times=times, provenance={"scenario": "earth_4d_assimilation"})
     truth = [
         np.array([40.0, 55.0, 65.0, 80.0]),
         np.array([45.0, 63.0, 73.0, 91.0]),
@@ -1256,6 +1259,8 @@ def _run_earth_4d_assimilation() -> ScenarioResult:
     samples = posterior.sample(4, np.random.default_rng(42))
     interpolated = posterior.at_time(0.5, interpolate=True).mean
     artifacts_ok = (
+        field4d.n == times.size * grid.n
+        and field4d.coordinates.shape == (times.size * grid.n, 4)
         posterior.mean_array.shape == (times.size, grid.n)
         and posterior.marginal_std.shape == (times.size, grid.n)
         and ci_lo.shape == (times.size, grid.n)
@@ -1274,6 +1279,7 @@ def _run_earth_4d_assimilation() -> ScenarioResult:
             "mid_bracket_fraction": bracketed,
             "sample_count": float(samples.shape[0]),
             "time_count": float(posterior.mean_array.shape[0]),
+            "field4d_node_count": float(field4d.n),
         },
         tolerance={"posterior_error_lt_prior": 1.0},
         message="4D assimilation produced posterior artifacts" if passed else "4D assimilation check failed",
