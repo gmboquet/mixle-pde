@@ -20,6 +20,7 @@ Added
   uncertainty.
 * Forward-operator capability reports for Jacobian, finite-difference,
   differentiable, and adjoint metadata.
+* Sparse spatiotemporal Gaussian prior over ``Field4D`` objects.
 * Moving-domain simplex mesh primitives for 3D deformation and 4D space-time
   geometry.
 * Full-time-axis 4D posterior arrays, intervals, samples, and interpolated

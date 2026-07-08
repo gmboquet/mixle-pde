@@ -104,6 +104,7 @@ from mixle_pde.field_inversion import (
 )
 from mixle_pde.field_priors import (
     CrossPropertyPrior,
+    SpatioTemporalGaussianPrior,
     depth_weighted_marginal_precision,
     depth_weighted_marginal_precision_sparse,
     depth_weights,
@@ -314,6 +315,7 @@ __all__ = [
     "assimilate_4d",
     "assimilate_4d_ensemble",
     "CrossPropertyPrior",
+    "SpatioTemporalGaussianPrior",
     "depth_weights",
     "depth_weighted_marginal_precision",
     "depth_weighted_marginal_precision_sparse",

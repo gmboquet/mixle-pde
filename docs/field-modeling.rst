@@ -36,6 +36,9 @@ Capability Map
        ``sparse_linear_gaussian_invert``
      - Exact dense or sparse linear-Gaussian posteriors for identity-transform
        fields.
+   * - 4D priors
+     - ``SpatioTemporalGaussianPrior``
+     - Sparse spatial plus random-walk temporal precision over ``Field4D``.
    * - Bounded inversion
      - ``gauss_newton_invert``, ``GaussNewtonReport``
      - MAP plus Laplace covariance for bounded or nonlinear-transform fields.

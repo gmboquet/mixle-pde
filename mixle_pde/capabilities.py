@@ -152,6 +152,7 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "3D MT curl-curl log-conductivity likelihoods",
                 "3D CSEM curl-curl log-conductivity likelihoods",
                 "dense and sparse graph-Matern smoothness priors",
+                "sparse spatiotemporal random-walk priors",
                 "sparse posterior precision factorization and covariance actions",
                 "cross-property Gaussian priors",
                 "posterior calibration diagnostics",
@@ -194,6 +195,8 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "csem_3d_forward_operator",
                 "CrossPropertyPrior",
                 "CrossPropertyPrior.precision_sparse",
+                "SpatioTemporalGaussianPrior",
+                "SpatioTemporalGaussianPrior.precision_sparse",
                 "depth_weighted_marginal_precision_sparse",
                 "joint_linear_gaussian_invert",
                 "marginal_at_points",
@@ -1424,10 +1427,11 @@ def _run_earth_sparse_prior_precision() -> ScenarioResult:
     from mixle_pde.field_inversion import FieldGaussianPrior
     from mixle_pde.field_priors import (
         CrossPropertyPrior,
+        SpatioTemporalGaussianPrior,
         depth_weighted_marginal_precision,
         depth_weighted_marginal_precision_sparse,
     )
-    from mixle_pde.latent import Field3D
+    from mixle_pde.latent import Field3D, Field4D
 
     xs = np.linspace(0.0, 80.0, 4)
     ys = np.linspace(0.0, 80.0, 4)
@@ -1444,14 +1448,21 @@ def _run_earth_sparse_prior_precision() -> ScenarioResult:
     joint = CrossPropertyPrior(prior, prior, coupling=0.2, slope=1.5)
     joint_sparse = joint.precision_sparse(grid)
     joint_error = float(np.linalg.norm(joint_sparse.toarray() - joint.precision(grid)))
+    field4d = Field4D(grid, times=np.array([0.0, 1.0, 3.0]))
+    st_prior = SpatioTemporalGaussianPrior(prior, temporal_precision=0.5)
+    st_sparse = st_prior.precision_sparse(field4d)
+    st_error = float(np.linalg.norm(st_sparse.toarray() - st_prior.precision(field4d)))
     density = float(sparse.nnz / (grid.n * grid.n))
     joint_density = float(joint_sparse.nnz / ((2 * grid.n) * (2 * grid.n)))
+    st_density = float(st_sparse.nnz / (field4d.n * field4d.n))
     passed = (
         dense_error <= 1.0e-12
         and weighted_error <= 1.0e-12
         and joint_error <= 1.0e-12
+        and st_error <= 1.0e-12
         and density < 0.35
         and joint_density < 0.35
+        and st_density < 0.35
     )
     return _result(
         "earth_sparse_prior_precision",
@@ -1463,6 +1474,8 @@ def _run_earth_sparse_prior_precision() -> ScenarioResult:
             "dense_sparse_error": dense_error,
             "depth_weighted_sparse_error": weighted_error,
             "joint_sparse_error": joint_error,
+            "spatiotemporal_sparse_error": st_error,
+            "spatiotemporal_precision_density": st_density,
         },
         tolerance={"max_sparse_dense_error": 1.0e-12, "max_density": 0.35},
         message="sparse graph prior precision matched dense references" if passed else "sparse prior check failed",

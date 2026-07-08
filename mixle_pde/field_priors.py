@@ -1,4 +1,4 @@
-"""Depth weighting and cross-property coupling priors (workstream G5, remaining rungs).
+"""Depth weighting, spatiotemporal, and cross-property coupling priors (workstream G5, remaining rungs).
 
 Workstream G6 shipped the spatial smoothness prior (:class:`~mixle_pde.field_inversion.FieldGaussianPrior`,
 a graph-Matern/roughness precision) and G7 the temporal process prior. This module adds the two prior
@@ -9,6 +9,10 @@ ingredients step 5 still names:
   is the standard Li & Oldenburg depth weighting ``w(z) = (|z| + z0)^(-beta/2)``; folded into the prior's
   marginal precision via :func:`depth_weighted_marginal_precision` or its sparse CSR counterpart, it
   removes that bias so a body is recovered at its true depth rather than smeared to the surface.
+
+* **Spatiotemporal coupling.** :class:`SpatioTemporalGaussianPrior` lifts a spatial
+  :class:`FieldGaussianPrior` onto a :class:`~mixle_pde.latent.Field4D` and adds random-walk temporal
+  precision blocks, producing one sparse precision over the whole ``(time, space)`` object.
 
 * **Cross-property coupling.** Two physical properties over the same grid (e.g. density contrast and
   magnetic susceptibility) are rarely independent -- a petrophysical relation ``b ~ slope * a`` ties them.
@@ -28,7 +32,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from mixle_pde.field_inversion import FieldGaussianPrior, _noise_precision
-from mixle_pde.latent import Field3D, PosteriorField3D
+from mixle_pde.latent import Field3D, Field4D, PosteriorField3D
 from mixle_pde.observations import ForwardOperatorRegistry, Observation
 
 
@@ -73,6 +77,52 @@ def depth_weighted_marginal_precision_sparse(
     w = depth_weights(grid, beta=beta, z0=z0)
     correction = sp.diags(prior.marginal_precision * (w**2 - 1.0), format="csr")
     return (base + correction).tocsr()
+
+
+@dataclass
+class SpatioTemporalGaussianPrior:
+    """A sparse Gaussian prior over a :class:`Field4D`.
+
+    The spatial prior is applied independently at each time. ``temporal_precision`` adds a random-walk
+    penalty ``temporal_precision / dt * ||x[t+1] - x[t]||^2`` for each interval, so shorter intervals
+    constrain changes more tightly than longer intervals.
+    """
+
+    spatial_prior: FieldGaussianPrior
+    temporal_precision: float
+
+    def __post_init__(self) -> None:
+        if self.temporal_precision < 0.0:
+            raise ValueError("temporal_precision must be non-negative.")
+
+    def precision_sparse(self, field: Field4D):
+        """Sparse CSR precision over the flattened ``(time, space)`` field."""
+        import scipy.sparse as sp
+
+        n_t = field.n_times
+        n_x = field.n_per_time
+        q_space = self.spatial_prior.precision_sparse(field.spatial)
+        q = sp.kron(sp.eye(n_t, format="csr"), q_space, format="csr")
+        if self.temporal_precision > 0.0 and n_t > 1:
+            diag = np.zeros(n_t, dtype=float)
+            off = np.zeros(n_t - 1, dtype=float)
+            for t in range(n_t - 1):
+                dt = float(field.times[t + 1] - field.times[t])
+                weight = self.temporal_precision / dt
+                diag[t] += weight
+                diag[t + 1] += weight
+                off[t] = -weight
+            temporal = sp.diags([off, diag, off], offsets=[-1, 0, 1], format="csr")
+            q = q + sp.kron(temporal, sp.eye(n_x, format="csr"), format="csr")
+        return q.tocsr()
+
+    def precision(self, field: Field4D) -> np.ndarray:
+        """Dense precision for small reference problems."""
+        return self.precision_sparse(field).toarray()
+
+    def mean_vector(self, field: Field4D) -> np.ndarray:
+        """Flattened prior mean over all times."""
+        return np.tile(self.spatial_prior.mean_vector(field.spatial), field.n_times)
 
 
 @dataclass

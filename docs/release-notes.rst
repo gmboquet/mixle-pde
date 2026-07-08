@@ -18,6 +18,7 @@ Included
   reworking/background mixture, and overdispersion support.
 * Forward-operator capability reports that distinguish fixed Jacobians,
   finite-difference fallbacks, differentiable paths, and true adjoint support.
+* Sparse spatiotemporal Gaussian prior over ``Field4D`` objects.
 * 4D posterior artifacts with full-time mean, marginal uncertainty, credible
   intervals, marginal samples, and interpolated time slices.
 * Zero-dimensional reactive gas/engine-cylinder combustion kernel with fuel

@@ -11,12 +11,13 @@ import numpy as np
 from mixle_pde.field_inversion import FieldGaussianPrior, _stable_nearest_neighbor_rows
 from mixle_pde.field_priors import (
     CrossPropertyPrior,
+    SpatioTemporalGaussianPrior,
     depth_weighted_marginal_precision,
     depth_weighted_marginal_precision_sparse,
     depth_weights,
     joint_linear_gaussian_invert,
 )
-from mixle_pde.latent import Field3D
+from mixle_pde.latent import Field3D, Field4D
 from mixle_pde.observations import (
     ForwardOperatorRegistry,
     Observation,
@@ -107,6 +108,45 @@ class SparsePrecisionAssemblyTest(unittest.TestCase):
         self.assertEqual(sparse.shape, dense.shape)
         self.assertLess(sparse.nnz, dense.size)
         np.testing.assert_allclose(sparse.toarray(), dense)
+
+
+class SpatioTemporalPriorTest(unittest.TestCase):
+    def test_sparse_spatiotemporal_precision_matches_dense_reference(self):
+        spatial = _grid()
+        field = Field4D(spatial, times=np.array([0.0, 1.0, 3.0]))
+        prior = SpatioTemporalGaussianPrior(
+            FieldGaussianPrior(mean=2.0, smoothness_precision=1.0e-3, marginal_precision=1.0e-2, length_scale=25.0),
+            temporal_precision=0.5,
+        )
+        sparse = prior.precision_sparse(field)
+        dense = prior.precision(field)
+
+        self.assertEqual(sparse.shape, (field.n, field.n))
+        np.testing.assert_allclose(sparse.toarray(), dense)
+        self.assertEqual(prior.mean_vector(field).shape, (field.n,))
+
+    def test_temporal_precision_couples_adjacent_times(self):
+        spatial = _grid()
+        field = Field4D(spatial, times=np.array([0.0, 1.0, 3.0]))
+        prior = SpatioTemporalGaussianPrior(
+            FieldGaussianPrior(mean=0.0, smoothness_precision=0.0, marginal_precision=0.0, length_scale=25.0),
+            temporal_precision=2.0,
+        )
+        q = prior.precision(field)
+        n = spatial.n
+
+        self.assertLess(q[0, n], 0.0)
+        self.assertLess(q[n, 2 * n], 0.0)
+        self.assertAlmostEqual(abs(q[0, n]), 2.0)
+        self.assertAlmostEqual(abs(q[n, 2 * n]), 1.0)
+        self.assertAlmostEqual(q[n, n], 3.0)
+
+    def test_negative_temporal_precision_raises(self):
+        with self.assertRaises(ValueError):
+            SpatioTemporalGaussianPrior(
+                FieldGaussianPrior(mean=0.0, smoothness_precision=0.0, marginal_precision=1.0, length_scale=1.0),
+                temporal_precision=-1.0,
+            )
 
 
 class CrossPropertyCouplingTest(unittest.TestCase):
