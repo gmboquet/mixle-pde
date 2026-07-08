@@ -132,6 +132,7 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "refine_simplex_mesh",
                 "moving_mesh",
                 "pipe_radial_deformation",
+                "pipe_simplex_mesh",
                 "space_time_mesh",
             ),
             required_dependencies=("numpy", "scipy"),
@@ -831,9 +832,9 @@ def _run_mesh_3d_4d_measure() -> ScenarioResult:
 
 
 def _run_mesh_moving_pipe_deformation() -> ScenarioResult:
-    from mixle_pde.mesh import box_simplex_mesh, moving_mesh, pipe_radial_deformation
+    from mixle_pde.mesh import moving_mesh, pipe_radial_deformation, pipe_simplex_mesh
 
-    base = box_simplex_mesh((2, 2, 3), lengths=(1.0, 1.0, 2.0), origin=(-0.5, -0.5, 0.0))
+    base = pipe_simplex_mesh(inner_radius=0.5, outer_radius=1.0, length=2.0, n_theta=24, n_axial=3)
     motion = moving_mesh(
         base,
         [0.0, 0.5, 1.0],
@@ -843,17 +844,14 @@ def _run_mesh_moving_pipe_deformation() -> ScenarioResult:
     final_ratio = float(motion.measure_series()[-1] / motion.measure_series()[0])
     expected_ratio = 1.1**2
     space_time = motion.to_space_time_mesh()
-    final_mesh = motion.at_time(1.0)
-    field = final_mesh.nodes[:, 0] + 2.0 * final_mesh.nodes[:, 1] + 3.0 * final_mesh.nodes[:, 2]
-    transferred = motion.interpolate_values(field, 1.0, 0.0)
-    expected_field = base.nodes[:, 0] + 2.0 * base.nodes[:, 1] + 3.0 * base.nodes[:, 2]
-    interpolation_error = float(np.max(np.abs(transferred - expected_field)))
+    expected_pipe_volume = np.pi * (1.0**2 - 0.5**2) * 2.0
+    pipe_volume_error = abs(base.total_measure() - expected_pipe_volume) / expected_pipe_volume
     rel_err = abs(final_ratio - expected_ratio) / expected_ratio
     counts_ok = motion.dim == 3 and space_time.dim == 4 and space_time.n_simplices == base.n_simplices * 4 * 2
     health_ok = report["positive_measure_all_steps"] and report["n_inverted_or_degenerate_relative_to_reference"] == 0
     quality_ok = report["min_quality"] > 0.0 and report["n_low_quality"] == 0
     tol = 1.0e-12
-    passed = counts_ok and health_ok and quality_ok and rel_err <= tol and interpolation_error <= tol
+    passed = counts_ok and health_ok and quality_ok and rel_err <= tol and pipe_volume_error <= 0.02
     return _result(
         "mesh_moving_pipe_deformation",
         "mesh.simplicial_3d_4d",
@@ -865,9 +863,9 @@ def _run_mesh_moving_pipe_deformation() -> ScenarioResult:
             "space_time_simplices": space_time.n_simplices,
             "min_signed_measure_ratio": float(report["min_signed_measure_ratio"]),
             "min_quality": float(report["min_quality"]),
-            "linear_field_transfer_error": interpolation_error,
+            "pipe_volume_relative_error": pipe_volume_error,
         },
-        tolerance={"relative_volume_ratio_error": tol, "linear_field_transfer_error": tol},
+        tolerance={"relative_volume_ratio_error": tol, "pipe_volume_relative_error": 0.02},
         message="moving pipe mesh remained valid" if passed else "moving pipe mesh deformation failed",
     )
 

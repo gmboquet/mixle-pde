@@ -190,6 +190,7 @@ from mixle_pde.mesh import (
     interpolate_simplex_field,
     moving_mesh,
     pipe_radial_deformation,
+    pipe_simplex_mesh,
     refine_simplex_mesh,
     space_time_mesh,
 )
@@ -413,6 +414,7 @@ __all__ = [
     "interpolate_simplex_field",
     "moving_mesh",
     "pipe_radial_deformation",
+    "pipe_simplex_mesh",
     "refine_simplex_mesh",
     "space_time_mesh",
     "DiffusionOperator",

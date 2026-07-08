@@ -24,6 +24,7 @@ __all__ = [
     "interpolate_simplex_field",
     "moving_mesh",
     "pipe_radial_deformation",
+    "pipe_simplex_mesh",
     "refine_simplex_mesh",
     "space_time_mesh",
 ]
@@ -546,6 +547,81 @@ def moving_mesh(
     return MovingSimplexMesh(times, np.asarray(nodes_over_time, dtype=float), base_mesh.simplices.copy())
 
 
+def pipe_simplex_mesh(
+    *,
+    inner_radius: float,
+    outer_radius: float,
+    length: float,
+    n_radial: int = 2,
+    n_theta: int = 32,
+    n_axial: int = 2,
+    center: Any = None,
+    axial_origin: float = 0.0,
+    axis: int | str = 2,
+) -> SimplexMesh:
+    """Create a tetrahedral simplex mesh for an annular pipe/cylinder segment."""
+    inner = float(inner_radius)
+    outer = float(outer_radius)
+    if inner < 0.0 or outer <= inner:
+        raise ValueError("outer_radius must be greater than a non-negative inner_radius.")
+    if float(length) <= 0.0:
+        raise ValueError("length must be positive.")
+    n_radial = int(n_radial)
+    n_theta = int(n_theta)
+    n_axial = int(n_axial)
+    if n_radial < 2 or n_theta < 3 or n_axial < 2:
+        raise ValueError("n_radial >= 2, n_theta >= 3, and n_axial >= 2 are required.")
+
+    axis_index = _axis_index(axis)
+    if axis_index < 0 or axis_index > 2:
+        raise ValueError("pipe_simplex_mesh axis must be x, y, z, or an integer in [0, 2].")
+    radial_axes = [i for i in range(3) if i != axis_index]
+    radial_center = (
+        np.zeros(2, dtype=float) if center is None else np.broadcast_to(np.asarray(center, dtype=float), (2,))
+    )
+    radii = np.linspace(inner, outer, n_radial)
+    thetas = np.linspace(0.0, 2.0 * np.pi, n_theta, endpoint=False)
+    axial = float(axial_origin) + np.linspace(0.0, float(length), n_axial)
+
+    nodes = np.empty((n_radial * n_theta * n_axial, 3), dtype=float)
+
+    def node_index(ir: int, it: int, iz: int) -> int:
+        return (iz * n_radial + ir) * n_theta + (it % n_theta)
+
+    for iz, z in enumerate(axial):
+        for ir, radius in enumerate(radii):
+            for it, theta in enumerate(thetas):
+                point = np.zeros(3, dtype=float)
+                point[axis_index] = z
+                point[radial_axes[0]] = radial_center[0] + radius * np.cos(theta)
+                point[radial_axes[1]] = radial_center[1] + radius * np.sin(theta)
+                nodes[node_index(ir, it, iz)] = point
+
+    simplices: list[list[int]] = []
+    for iz in range(n_axial - 1):
+        for ir in range(n_radial - 1):
+            for it in range(n_theta):
+                corners = {
+                    (0, 0, 0): node_index(ir, it, iz),
+                    (1, 0, 0): node_index(ir + 1, it, iz),
+                    (0, 1, 0): node_index(ir, it + 1, iz),
+                    (1, 1, 0): node_index(ir + 1, it + 1, iz),
+                    (0, 0, 1): node_index(ir, it, iz + 1),
+                    (1, 0, 1): node_index(ir + 1, it, iz + 1),
+                    (0, 1, 1): node_index(ir, it + 1, iz + 1),
+                    (1, 1, 1): node_index(ir + 1, it + 1, iz + 1),
+                }
+                for perm in permutations(range(3)):
+                    local = [0, 0, 0]
+                    verts = [tuple(local)]
+                    for local_axis in perm:
+                        local = local.copy()
+                        local[local_axis] = 1
+                        verts.append(tuple(local))
+                    simplices.append([corners[vertex] for vertex in verts])
+    return _orient_simplex_mesh(nodes, np.asarray(simplices, dtype=int))
+
+
 def refine_simplex_mesh(mesh: SimplexMesh, *, levels: int = 1, mask: Any = None) -> SimplexMesh:
     """Convenience wrapper for :meth:`SimplexMesh.refined`."""
     return mesh.refined(levels=levels, mask=mask)
@@ -624,6 +700,16 @@ def _as_points(points: Any, dim: int) -> np.ndarray:
     if pts.ndim == 2 and pts.shape[1] == dim:
         return pts
     raise ValueError(f"points must have shape (n_points, {dim}) or ({dim},).")
+
+
+def _orient_simplex_mesh(nodes: np.ndarray, simplices: np.ndarray) -> SimplexMesh:
+    mesh = SimplexMesh(nodes, simplices)
+    oriented = simplices.copy()
+    signed = mesh.simplex_signed_measures()
+    for i, measure in enumerate(signed):
+        if measure < 0.0:
+            oriented[i, [0, 1]] = oriented[i, [1, 0]]
+    return SimplexMesh(nodes, oriented)
 
 
 def _axis_index(axis: int | str) -> int:

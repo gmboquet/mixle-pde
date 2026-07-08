@@ -11,6 +11,7 @@ from mixle_pde.mesh import (
     interpolate_simplex_field,
     moving_mesh,
     pipe_radial_deformation,
+    pipe_simplex_mesh,
     refine_simplex_mesh,
     space_time_mesh,
 )
@@ -185,6 +186,28 @@ class SimplexMeshTest(unittest.TestCase):
         self.assertAlmostEqual(moving.measure_series()[1] / moving.measure_series()[0], 1.2**2)
         np.testing.assert_allclose(ratios[1], np.full(mesh.n_simplices, 1.2**2))
         self.assertEqual(report["n_inverted_or_degenerate_relative_to_reference"], 0)
+
+    def test_pipe_simplex_mesh_approximates_annular_cylinder_volume(self):
+        mesh = pipe_simplex_mesh(inner_radius=0.5, outer_radius=1.0, length=2.0, n_theta=32, n_axial=3)
+        expected = np.pi * (1.0**2 - 0.5**2) * 2.0
+
+        self.assertEqual(mesh.dim, 3)
+        self.assertEqual(mesh.n_nodes, 2 * 32 * 3)
+        self.assertEqual(mesh.n_simplices, 32 * 2 * 6)
+        self.assertTrue(mesh.validate()["positive_measure"])
+        self.assertLess(abs(mesh.total_measure() - expected) / expected, 0.01)
+
+    def test_pipe_simplex_mesh_deforms_radially(self):
+        mesh = pipe_simplex_mesh(inner_radius=0.5, outer_radius=1.0, length=2.0, n_theta=24, n_axial=2)
+        moving = moving_mesh(
+            mesh,
+            [0.0, 1.0],
+            pipe_radial_deformation(axis="z", radial_strain=lambda t: 0.2 * t),
+        )
+        ratios = moving.simplex_measure_ratios()
+
+        self.assertTrue(moving.validate()["positive_measure_all_steps"])
+        np.testing.assert_allclose(ratios[1], np.full(mesh.n_simplices, 1.2**2))
 
     def test_moving_mesh_transfers_values_between_deformed_domains(self):
         mesh = box_simplex_mesh((2, 2, 2), lengths=(1.0, 1.0, 1.0))
