@@ -16,6 +16,7 @@ clean integration point with Mixle's probabilistic-programming surface.
    overview
    package-map
    modeling-workflows
+   solver-selection-and-inversion-guide
    README
    release-0-6-3
    changelog
