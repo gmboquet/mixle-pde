@@ -139,8 +139,9 @@ performs exact linear-Gaussian inversion, and `gauss_newton_invert` adds bounded
 properties such as porosity, susceptibility, or concentration. `dc_resistivity_forward_operator` wraps the
 existing DC/ERT forward as a nonlinear log-conductivity observation with local finite-difference
 sensitivities for Gauss-Newton posterior construction.
-`layered_mt_forward_operator` and `mt_2d_te_forward_operator` do the same for 1D layered and 2D
-TE-mode magnetotelluric soundings, mapping log-conductivity to apparent resistivity or phase observations.
+`layered_mt_forward_operator`, `mt_2d_te_forward_operator`, `mt_3d_forward_operator`, and
+`csem_3d_forward_operator` do the same for 1D layered, 2D TE-mode, 3D curl-curl magnetotelluric, and
+3D controlled-source EM soundings, mapping log-conductivity to real-valued geophysical observations.
 
 `PosteriorField4D`, `assimilate_4d`, and `assimilate_4d_ensemble` add a time axis through exact
 Kalman/RTS smoothing for linear observations and ensemble Kalman filtering for nonlinear observations,
@@ -160,8 +161,8 @@ mass, low-rank or diagonal Gaussian summaries, and ensemble samples. `posterior_
 synthetic-truth coverage, held-out observation fit, uncertainty inflation away from data, and
 insufficient-observation flags. Full reaction-path geochemistry,
 paleoecological/basin-process simulators, full truncated multivariate censoring for multi-element assays,
-sparse posterior factorization/storage, production-scale adjoint ERT sensitivities, and 3D EM
-posterior-observation operators remain future validated kernels. The ensemble 4D path is a stochastic
+sparse posterior factorization/storage, production-scale adjoint sensitivities, and AEM posterior-observation
+operators remain future validated kernels. The ensemble 4D path is a stochastic
 Gaussian-summary reference, not a production particle/MCMC smoother.
 
 ### Inverse and inference layer

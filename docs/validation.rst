@@ -30,3 +30,24 @@ Run the full suite from the package root with:
 .. code-block:: console
 
    python -m pytest
+
+Strict Documentation Gate
+-------------------------
+
+.. code-block:: console
+
+   python -m sphinx -W -b html docs docs/_build/html
+
+Modeling Review
+---------------
+
+A modeling change should include more than import coverage. Record which of
+these were exercised:
+
+* analytic or manufactured-solution check;
+* synthetic inverse recovery;
+* posterior predictive check;
+* held-out observation fit;
+* uncertainty calibration or coverage;
+* stability check for zero, constant, or bounded states;
+* optional dependency behavior for SciPy, Torch, or sparse backends.

@@ -15,6 +15,7 @@ clean integration point with Mixle's probabilistic-programming surface.
    installation
    overview
    package-map
+   modeling-workflows
    README
    0.6.x-field-modeling
    api-overview
