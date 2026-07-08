@@ -32,6 +32,9 @@ Keep nonlinear observations out of exact linear-Gaussian inversion. Use the
 Gauss-Newton path or a dedicated inverse routine when the forward map is
 nonlinear.
 
+The concrete ``Observation`` and ``ForwardOperatorRegistry`` contract is shown
+in :doc:`observation-and-inversion-contract`.
+
 Choose The Inference Route
 --------------------------
 

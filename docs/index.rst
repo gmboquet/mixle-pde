@@ -12,6 +12,8 @@ Start Here
 
 Start with :doc:`quickstart` for a small capability and observation-likelihood
 check. Use :doc:`modeling-workflows` for field-to-posterior data flow and
+:doc:`observation-and-inversion-contract` for the concrete observation,
+forward-operator, inversion, and assimilation surface. Use
 :doc:`solver-selection-and-inversion-guide` when choosing a solver or inverse
 route.
 
@@ -25,6 +27,7 @@ route.
    overview
    package-map
    modeling-workflows
+   observation-and-inversion-contract
    solver-selection-and-inversion-guide
    README
    release-0-6-3

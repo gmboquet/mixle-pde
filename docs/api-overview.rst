@@ -24,7 +24,8 @@ Field Modeling
 
 ``mixle_pde.observations`` and ``mixle_pde.geo_observations``
     Forward operators, Gaussian observation likelihoods, geochemical assays,
-    biostrat constraints, and related geoscience observation models.
+    biostrat constraints, and related geoscience observation models. See
+    :doc:`observation-and-inversion-contract` for runnable usage.
 
 * ``mixle_pde.field_inversion``, ``mixle_pde.field_gauss_newton``,
   ``mixle_pde.field_assimilation``, and ``mixle_pde.field_priors`` provide
