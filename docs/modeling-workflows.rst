@@ -97,4 +97,4 @@ For a modeling change, include:
 * docs explaining the inference route;
 * generated API reference updates;
 * strict Sphinx build;
-* clear notes for future work versus validated behavior.
+* clear notes that separate planned extensions from validated behavior.
