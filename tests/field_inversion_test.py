@@ -139,6 +139,22 @@ class LinearGaussianInversionTest(unittest.TestCase):
         self.assertGreaterEqual(check.coverage, 0.7)
         self.assertLess(np.abs(check.standardized).mean(), 3.0)  # residuals are O(1) in std units
 
+    def test_posterior_predictive_draws_share_the_posterior_interface(self):
+        post = linear_gaussian_invert(self.grid, [self.gravity, self.borehole], self.registry, self.prior)
+        held = Observation(
+            kind="borehole",
+            location=self.grid.coordinates[[0, 10, 20]],
+            value=np.zeros(3),
+            noise_cov=np.full(3, 25.0),
+        )
+
+        draws = post.posterior_predictive_draws(self.registry, held, n=64, rng=np.random.default_rng(10))
+        mean_prediction = self.registry.get("borehole").predict_observation(self.grid, post.mean, held)
+
+        self.assertEqual(draws.shape, (64, held.n))
+        self.assertTrue(np.all(np.isfinite(draws)))
+        np.testing.assert_allclose(draws.mean(axis=0), mean_prediction, atol=40.0)
+
     def test_sparse_inversion_matches_dense_reference_without_dense_covariance_storage(self):
         dense = linear_gaussian_invert(self.grid, [self.gravity, self.borehole], self.registry, self.prior)
         sparse = sparse_linear_gaussian_invert(self.grid, [self.gravity, self.borehole], self.registry, self.prior)

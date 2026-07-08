@@ -141,6 +141,19 @@ class PosteriorField4D:
         op = registry.get(observation.kind)
         return op.predict_observation(self.grid, self.means[i], observation)
 
+    def posterior_predictive_draws(
+        self,
+        registry: ForwardOperatorRegistry,
+        observation: Observation,
+        *,
+        n: int,
+        rng: np.random.Generator,
+    ) -> np.ndarray:
+        """Posterior-predictive draws for ``observation`` at its own time."""
+        if observation.time is None:
+            raise ValueError("observation.time must be set to draw from a 4D posterior.")
+        return self.at_time(observation.time).posterior_predictive_draws(registry, observation, n=n, rng=rng)
+
 
 def _update(mean_pred: np.ndarray, cov_pred: np.ndarray, obs_list, grid, registry):
     """Fuse a time-step's observations into a predicted Gaussian, in precision form (exact)."""

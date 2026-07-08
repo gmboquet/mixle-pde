@@ -26,6 +26,8 @@ Added
   validation.
 * Empirical posterior-query helpers for sampled posteriors, including sampled
   derived quantities, region mass, marginal summaries, and ensemble exports.
+* Posterior-predictive draw helpers on static, sampled, and 4D field posterior
+  artifacts.
 * Moving-domain simplex mesh primitives for 3D deformation and 4D space-time
   geometry.
 * Full-time-axis 4D posterior arrays, intervals, samples, and interpolated

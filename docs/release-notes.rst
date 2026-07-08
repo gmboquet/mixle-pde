@@ -23,6 +23,8 @@ Included
   artifacts for nonlinear/non-Gaussian validation problems.
 * Sampled posterior-query support for empirical marginals, derived quantities,
   region mass, and ensemble export.
+* Posterior-predictive draws on static, sampled, and 4D field posterior
+  artifacts.
 * 4D posterior artifacts with full-time mean, marginal uncertainty, credible
   intervals, marginal samples, and interpolated time slices.
 * Zero-dimensional reactive gas/engine-cylinder combustion kernel with fuel

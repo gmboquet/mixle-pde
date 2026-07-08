@@ -149,6 +149,23 @@ class Assimilation4DTest(unittest.TestCase):
             corr = np.corrcoef(pred, truth_grav)[0, 1]
             self.assertGreater(corr, 0.9)
 
+    def test_4d_posterior_predictive_draws_at_observation_time(self):
+        post = self._assimilate()
+        held = Observation(
+            kind="borehole",
+            location=self.grid.coordinates[[2, 8, 20]],
+            value=np.zeros(3),
+            noise_cov=np.full(3, 25.0),
+            time=1.0,
+        )
+
+        draws = post.posterior_predictive_draws(self.registry, held, n=32, rng=np.random.default_rng(44))
+        mean_prediction = post.predict_observation(self.registry, held)
+
+        self.assertEqual(draws.shape, (32, held.n))
+        self.assertTrue(np.all(np.isfinite(draws)))
+        np.testing.assert_allclose(draws.mean(axis=0), mean_prediction, atol=50.0)
+
     def test_invalid_inputs_are_rejected(self):
         with self.assertRaises(ValueError):
             assimilate_4d(self.grid, self.times, self.obs_by_time, self.registry, self.prior, process_var=0.0)

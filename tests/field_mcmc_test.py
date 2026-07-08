@@ -56,6 +56,15 @@ class MetropolisFieldInversionTest(unittest.TestCase):
         self.assertLess(lo[0], expected_mean)
         self.assertGreater(hi[0], expected_mean)
 
+        draws = posterior.posterior_predictive_draws(
+            registry,
+            observation,
+            n=32,
+            rng=np.random.default_rng(4),
+        )
+        self.assertEqual(draws.shape, (32, observation.n))
+        self.assertTrue(np.all(np.isfinite(draws)))
+
     def test_bounded_field_samples_stay_physical(self):
         grid = Field3D(
             coordinates=np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]),

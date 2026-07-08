@@ -27,7 +27,7 @@ Capability Map
    * - Fields
      - ``Field3D``, ``Field4D``, ``PosteriorField3D``
      - Grid or simplex-mesh geometry, time axes, units, bounds, posterior
-       covariance, samples, intervals, and slices.
+       covariance, samples, intervals, slices, and posterior-predictive draws.
    * - Observations
      - ``Observation``, ``ForwardOperator``, ``ForwardOperatorRegistry``
      - Common measurement contract and registry-based prediction path.
@@ -165,6 +165,8 @@ estimated from the ensemble at each time.
 ``marginal_std``, ``credible_interval()``, and ``sample()``. Samples are
 per-time marginal draws because the stored artifact keeps one covariance per
 time slice rather than a full cross-time covariance.
+``posterior_predictive_draws()`` draws model-space predictions for a
+time-stamped observation from the corresponding posterior slice.
 
 Moving Meshes
 -------------

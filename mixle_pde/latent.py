@@ -415,6 +415,19 @@ class PosteriorField3D:
             unconstrained = self.mean[None, :] + eps
         return self.grid.from_unconstrained(unconstrained)
 
+    def posterior_predictive_draws(
+        self,
+        registry: Any,
+        observation: Any,
+        *,
+        n: int,
+        rng: np.random.Generator,
+    ) -> np.ndarray:
+        """Draw posterior-predictive model values for one registered observation."""
+        draws = self.sample(n, rng)
+        op = registry.get(observation.kind)
+        return np.vstack([op.predict_observation(self.grid, draw, observation) for draw in draws])
+
     def credible_interval(self, alpha: float = 0.1) -> tuple[np.ndarray, np.ndarray]:
         """Per-point central credible interval covering ``1 - alpha`` mass, in physical units."""
         if not 0.0 < alpha < 1.0:

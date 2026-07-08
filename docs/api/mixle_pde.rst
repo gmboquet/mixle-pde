@@ -23,6 +23,7 @@ Submodules
    mixle_pde.field_assimilation
    mixle_pde.field_gauss_newton
    mixle_pde.field_inversion
+   mixle_pde.field_mcmc
    mixle_pde.field_priors
    mixle_pde.flow
    mixle_pde.flow3d

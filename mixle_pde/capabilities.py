@@ -162,10 +162,12 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "Field3D",
                 "Field4D",
                 "PosteriorField3D",
+                "PosteriorField3D.posterior_predictive_draws",
                 "PosteriorField4D",
                 "PosteriorField4D.credible_interval",
                 "PosteriorField4D.sample",
                 "PosteriorField4D.at_time(interpolate=True)",
+                "PosteriorField4D.posterior_predictive_draws",
                 "Observation",
                 "ForwardOperatorRegistry",
                 "ForwardOperator.capability_report",
@@ -187,6 +189,7 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "sparse_linear_gaussian_invert",
                 "gauss_newton_invert",
                 "PosteriorFieldSamples3D",
+                "PosteriorFieldSamples3D.posterior_predictive_draws",
                 "metropolis_field_invert",
                 "MCMCReport",
                 "assimilate_4d",
@@ -1597,6 +1600,7 @@ def _run_earth_sparse_posterior_factorization() -> ScenarioResult:
 
 def _run_earth_posterior_extraction() -> ScenarioResult:
     from mixle_pde.latent import PosteriorField3D, PosteriorFieldSamples3D
+    from mixle_pde.observations import ForwardOperatorRegistry, Observation, borehole_forward_operator
     from mixle_pde.posterior_query import (
         compress_to_low_rank,
         marginal_at_points,
@@ -1609,6 +1613,9 @@ def _run_earth_posterior_extraction() -> ScenarioResult:
     )
 
     grid = _small_grid()
+    registry = ForwardOperatorRegistry()
+    registry.register(borehole_forward_operator())
+    obs = Observation("borehole", grid.coordinates[[1, 3]], np.zeros(2), np.full(2, 1.0))
     mean = np.array([80.0, 420.0, 120.0, 300.0])
     cov = np.array(
         [
@@ -1623,6 +1630,7 @@ def _run_earth_posterior_extraction() -> ScenarioResult:
     sec = section(posterior, z=-30.0)
     region = region_summary(posterior, np.array([False, True, False, True]))
     mass = region_mass(posterior, np.array([False, True, False, True]), np.full(grid.n, 40.0**3))
+    predictive = posterior.posterior_predictive_draws(registry, obs, n=4, rng=np.random.default_rng(99))
     sampled = PosteriorFieldSamples3D(
         grid=grid,
         samples=np.array(
@@ -1636,6 +1644,7 @@ def _run_earth_posterior_extraction() -> ScenarioResult:
     sampled_region = region_summary(sampled, np.array([False, True, False, True]))
     sampled_mass = region_mass(sampled, np.array([False, True, False, True]), np.full(grid.n, 40.0**3))
     sampled_q = sampled_derived_quantity(sampled, np.array([1.0, 0.0, -1.0, 0.0]))
+    sampled_predictive = sampled.posterior_predictive_draws(registry, obs, n=4, rng=np.random.default_rng(98))
     compact = compress_to_low_rank(posterior, rank=2)
     diagonal = to_diagonal(posterior)
     ensemble = to_ensemble(compact, 8, np.random.default_rng(123))
@@ -1645,9 +1654,11 @@ def _run_earth_posterior_extraction() -> ScenarioResult:
         and len(sec["mean"]) == 1
         and region["n_cells"] == 2
         and mass.std > 0.0
+        and predictive.shape == (4, 2)
         and sampled_region["n_cells"] == 2
         and sampled_mass.std > 0.0
         and sampled_q.samples.shape == (3,)
+        and sampled_predictive.shape == (4, 2)
         and compact.low_rank.shape == (grid.n, 2)
         and diagonal.diag_var.shape == (grid.n,)
         and ensemble.samples.shape == (8, grid.n)
@@ -1661,6 +1672,7 @@ def _run_earth_posterior_extraction() -> ScenarioResult:
             "low_rank_columns": 2.0,
             "ensemble_samples": 8.0,
             "sampled_derived_draws": float(sampled_q.samples.size),
+            "posterior_predictive_draws": float(predictive.shape[0] + sampled_predictive.shape[0]),
             "region_cells": region["n_cells"],
         },
         tolerance={},
