@@ -48,6 +48,20 @@ from mixle_pde.boundaries import (
     radar_surface_reflection,
     seabed_reflection,
 )
+from mixle_pde.capabilities import (
+    DEFAULT_REQUIRED_CAPABILITIES,
+    ModelingCapability,
+    ScenarioResult,
+    VerificationScenario,
+    assert_required_modeling,
+    capability_catalog,
+    get_capability,
+    missing_required_dependencies,
+    readiness_report,
+    run_required_modeling_checks,
+    run_verification_scenario,
+    verification_scenarios,
+)
 from mixle_pde.dynamics import (
     AdvectionDiffusionOperator,
     AdvectionOperator,
@@ -79,8 +93,42 @@ from mixle_pde.env_data import (
     load_woa_argo,
     seabed_mask,
 )
+from mixle_pde.field_assimilation import PosteriorField4D, assimilate_4d, assimilate_4d_ensemble
+from mixle_pde.field_gauss_newton import GaussNewtonReport, gauss_newton_invert
+from mixle_pde.field_inversion import (
+    FieldGaussianPrior,
+    PosteriorPredictiveCheck,
+    linear_gaussian_invert,
+    posterior_predictive_check,
+    sparse_linear_gaussian_invert,
+)
+from mixle_pde.field_priors import (
+    CrossPropertyPrior,
+    depth_weighted_marginal_precision,
+    depth_weighted_marginal_precision_sparse,
+    depth_weights,
+    joint_linear_gaussian_invert,
+)
 from mixle_pde.flow import NavierStokes2D
 from mixle_pde.flow3d import NavierStokes3D
+from mixle_pde.geo_observations import (
+    BiostratConstraint,
+    FaciesIntervalConstraint,
+    GeochemAssay,
+    GeochronologyAge,
+    MultiElementAssay,
+    StratigraphicCorrelation,
+    additive_log_ratio,
+    assay_log_likelihood,
+    assay_posterior_predictive,
+    biostrat_log_likelihood,
+    facies_interval_log_likelihood,
+    geochronology_log_likelihood,
+    inverse_additive_log_ratio,
+    multi_element_assay_log_likelihood,
+    multi_element_assay_posterior_predictive,
+    stratigraphic_correlation_log_likelihood,
+)
 from mixle_pde.geophysics import (
     cross_gradient,
     dc_resistivity,
@@ -97,17 +145,58 @@ from mixle_pde.heat import TransientHeat
 from mixle_pde.helmholtz_pml import helmholtz_pml_operator, solve_helmholtz_pml
 from mixle_pde.induced_polarization import apparent_conductivity, cole_cole_conductivity, sip_forward
 from mixle_pde.inverse import Differential
+from mixle_pde.latent import Field3D, PosteriorField3D, SparsePosteriorPrecision
 from mixle_pde.maxwell import Maxwell3D
+from mixle_pde.mesh import SimplexMesh, box_simplex_mesh, delaunay_mesh, space_time_mesh
 from mixle_pde.migration import born_modeling, lsrtm_step, rtm_image
 from mixle_pde.misfit import envelope_misfit, hilbert_envelope, misfit, wasserstein1d_misfit, xcorr_traveltime_misfit
 from mixle_pde.multiphysics import CoupledPDESystem, solve_poisson
 from mixle_pde.nonlinear import nonlinear_solve, reaction_diffusion_residual
 from mixle_pde.normal_modes import NormalModes1D
+from mixle_pde.observations import (
+    ForwardOperator,
+    ForwardOperatorRegistry,
+    Observation,
+    aem_layered_forward_operator,
+    borehole_forward_operator,
+    csem_3d_forward_operator,
+    dc_resistivity_forward_operator,
+    gaussian_log_likelihood,
+    gravity_forward_operator,
+    layered_mt_forward_operator,
+    magnetics_forward_operator,
+    mt_2d_te_forward_operator,
+    mt_3d_forward_operator,
+)
 from mixle_pde.parabolic_equation import ParabolicEquation2D
 from mixle_pde.pde_solve import sparse_used_since as _sparse_used_since
 from mixle_pde.plate import KirchhoffPlate
 from mixle_pde.pnp import debye_length, pnp_equilibrium
 from mixle_pde.poroelastic import BiotPoroelastic1D, biot_gassmann_velocity
+from mixle_pde.posterior_calibration import (
+    HeldoutFit,
+    IdentifiabilityDiagnostic,
+    TruthCoverage,
+    UncertaintyInflation,
+    heldout_observation_check,
+    identifiability_diagnostic,
+    observation_sensitivity,
+    truth_coverage,
+    uncertainty_inflation,
+)
+from mixle_pde.posterior_query import (
+    DerivedQuantity,
+    MarginalSummary,
+    PosteriorEnsemble,
+    compress_to_low_rank,
+    derived_quantity,
+    marginal_at_points,
+    region_mass,
+    region_summary,
+    section,
+    to_diagonal,
+    to_ensemble,
+)
 from mixle_pde.potential_fields import (
     gravity_gradient_tensor,
     magnetic_gradient_tensor,
@@ -148,6 +237,89 @@ def PDE(operator: Any, *, name: str | None = None) -> RandomVariable:
 
 __all__ = [
     "PDE",
+    "ModelingCapability",
+    "VerificationScenario",
+    "ScenarioResult",
+    "DEFAULT_REQUIRED_CAPABILITIES",
+    "capability_catalog",
+    "get_capability",
+    "missing_required_dependencies",
+    "readiness_report",
+    "verification_scenarios",
+    "run_verification_scenario",
+    "run_required_modeling_checks",
+    "assert_required_modeling",
+    "Field3D",
+    "PosteriorField3D",
+    "SparsePosteriorPrecision",
+    "PosteriorField4D",
+    "Observation",
+    "ForwardOperator",
+    "ForwardOperatorRegistry",
+    "gaussian_log_likelihood",
+    "aem_layered_forward_operator",
+    "gravity_forward_operator",
+    "magnetics_forward_operator",
+    "borehole_forward_operator",
+    "csem_3d_forward_operator",
+    "dc_resistivity_forward_operator",
+    "layered_mt_forward_operator",
+    "mt_2d_te_forward_operator",
+    "mt_3d_forward_operator",
+    "GeochemAssay",
+    "MultiElementAssay",
+    "BiostratConstraint",
+    "GeochronologyAge",
+    "StratigraphicCorrelation",
+    "FaciesIntervalConstraint",
+    "additive_log_ratio",
+    "inverse_additive_log_ratio",
+    "assay_log_likelihood",
+    "assay_posterior_predictive",
+    "multi_element_assay_log_likelihood",
+    "multi_element_assay_posterior_predictive",
+    "biostrat_log_likelihood",
+    "geochronology_log_likelihood",
+    "stratigraphic_correlation_log_likelihood",
+    "facies_interval_log_likelihood",
+    "FieldGaussianPrior",
+    "linear_gaussian_invert",
+    "sparse_linear_gaussian_invert",
+    "PosteriorPredictiveCheck",
+    "posterior_predictive_check",
+    "GaussNewtonReport",
+    "gauss_newton_invert",
+    "assimilate_4d",
+    "assimilate_4d_ensemble",
+    "CrossPropertyPrior",
+    "depth_weights",
+    "depth_weighted_marginal_precision",
+    "depth_weighted_marginal_precision_sparse",
+    "joint_linear_gaussian_invert",
+    "TruthCoverage",
+    "HeldoutFit",
+    "UncertaintyInflation",
+    "IdentifiabilityDiagnostic",
+    "truth_coverage",
+    "heldout_observation_check",
+    "observation_sensitivity",
+    "uncertainty_inflation",
+    "identifiability_diagnostic",
+    "MarginalSummary",
+    "DerivedQuantity",
+    "PosteriorEnsemble",
+    "marginal_at_points",
+    "section",
+    "region_summary",
+    "derived_quantity",
+    "region_mass",
+    "compress_to_low_rank",
+    "to_diagonal",
+    "to_ensemble",
+    "SimplexMesh",
+    "box_simplex_mesh",
+    "delaunay_mesh",
+    "space_time_mesh",
     "DiffusionOperator",
     "AdvectionOperator",
     "AdvectionDiffusionOperator",

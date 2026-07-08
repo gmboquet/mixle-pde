@@ -12,6 +12,7 @@ from mixle_pde.field_inversion import FieldGaussianPrior
 from mixle_pde.field_priors import (
     CrossPropertyPrior,
     depth_weighted_marginal_precision,
+    depth_weighted_marginal_precision_sparse,
     depth_weights,
     joint_linear_gaussian_invert,
 )
@@ -60,6 +61,39 @@ class DepthWeightingTest(unittest.TestCase):
             depth_weights(grid, z0=0.0)
         with self.assertRaises(ValueError):
             depth_weights(grid, beta=-1.0)
+
+
+class SparsePrecisionAssemblyTest(unittest.TestCase):
+    def test_sparse_prior_precision_matches_dense_reference(self):
+        grid = _grid()
+        prior = FieldGaussianPrior(mean=0.0, smoothness_precision=1e-3, marginal_precision=1e-2, length_scale=25.0)
+        sparse = prior.precision_sparse(grid)
+        dense = prior.precision(grid)
+        self.assertEqual(sparse.shape, dense.shape)
+        self.assertLess(sparse.nnz, dense.size)
+        np.testing.assert_allclose(sparse.toarray(), dense)
+
+    def test_sparse_depth_weighted_precision_matches_dense_reference(self):
+        grid = _grid()
+        prior = FieldGaussianPrior(mean=0.0, smoothness_precision=1e-3, marginal_precision=1e-2, length_scale=25.0)
+        sparse = depth_weighted_marginal_precision_sparse(prior, grid, beta=3.0, z0=10.0)
+        dense = depth_weighted_marginal_precision(prior, grid, beta=3.0, z0=10.0)
+        self.assertLess(sparse.nnz, dense.size)
+        np.testing.assert_allclose(sparse.toarray(), dense)
+
+    def test_sparse_cross_property_precision_matches_dense_reference(self):
+        grid = _grid()
+        prior = CrossPropertyPrior(
+            prior_a=FieldGaussianPrior(mean=0.0, smoothness_precision=2e-3, marginal_precision=1e-4, length_scale=25.0),
+            prior_b=FieldGaussianPrior(mean=0.0, smoothness_precision=3e-3, marginal_precision=2e-4, length_scale=30.0),
+            coupling=0.7,
+            slope=1.5,
+        )
+        sparse = prior.precision_sparse(grid)
+        dense = prior.precision(grid)
+        self.assertEqual(sparse.shape, dense.shape)
+        self.assertLess(sparse.nnz, dense.size)
+        np.testing.assert_allclose(sparse.toarray(), dense)
 
 
 class CrossPropertyCouplingTest(unittest.TestCase):

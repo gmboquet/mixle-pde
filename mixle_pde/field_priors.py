@@ -7,8 +7,8 @@ ingredients step 5 still names:
 * **Depth weighting.** A potential-field kernel decays with depth, so an un-weighted inversion piles all
   the recovered anomaly into the shallowest cells (they explain the data most cheaply). :func:`depth_weights`
   is the standard Li & Oldenburg depth weighting ``w(z) = (|z| + z0)^(-beta/2)``; folded into the prior's
-  marginal precision via :func:`depth_weighted_marginal_precision`, it removes that bias so a body is
-  recovered at its true depth rather than smeared to the surface.
+  marginal precision via :func:`depth_weighted_marginal_precision` or its sparse CSR counterpart, it
+  removes that bias so a body is recovered at its true depth rather than smeared to the surface.
 
 * **Cross-property coupling.** Two physical properties over the same grid (e.g. density contrast and
   magnetic susceptibility) are rarely independent -- a petrophysical relation ``b ~ slope * a`` ties them.
@@ -17,6 +17,8 @@ ingredients step 5 still names:
   observations of ONE property inform the OTHER. :func:`joint_linear_gaussian_invert` does the exact
   closed-form joint inversion: gravity (on ``a``) and magnetics (on ``b``) fused into one posterior, and a
   property with NO direct data of its own recovered through the coupling from the property that does.
+  ``CrossPropertyPrior.precision_sparse`` exposes the same block precision as a CSR matrix for scalable
+  assembly.
 """
 
 from __future__ import annotations
@@ -61,6 +63,18 @@ def depth_weighted_marginal_precision(
     return base
 
 
+def depth_weighted_marginal_precision_sparse(
+    prior: FieldGaussianPrior, grid: Field3D, *, beta: float = 3.0, z0: float = 1.0
+):
+    """Sparse CSR version of :func:`depth_weighted_marginal_precision`."""
+    import scipy.sparse as sp
+
+    base = prior.precision_sparse(grid)
+    w = depth_weights(grid, beta=beta, z0=z0)
+    correction = sp.diags(prior.marginal_precision * (w**2 - 1.0), format="csr")
+    return (base + correction).tocsr()
+
+
 @dataclass
 class CrossPropertyPrior:
     """A joint Gaussian prior over two properties ``a`` and ``b`` on the same grid, petrophysically coupled.
@@ -81,20 +95,23 @@ class CrossPropertyPrior:
 
     def precision(self, grid: Field3D) -> np.ndarray:
         """The ``(2n, 2n)`` joint precision over the stacked ``[a; b]`` field."""
+        return self.precision_sparse(grid).toarray()
+
+    def precision_sparse(self, grid: Field3D):
+        """Sparse CSR joint precision over the stacked ``[a; b]`` field."""
+        import scipy.sparse as sp
+
         n = grid.n
-        Qa = self.prior_a.precision(grid)
-        Qb = self.prior_b.precision(grid)
-        joint = np.zeros((2 * n, 2 * n))
-        joint[:n, :n] = Qa
-        joint[n:, n:] = Qb
         # coupling c * (b - slope a)^2 -> precision blocks c*[[slope^2, -slope],[-slope, 1]] (x) I
         c, s = self.coupling, self.slope
-        eye = np.eye(n)
-        joint[:n, :n] += c * s * s * eye
-        joint[n:, n:] += c * eye
-        joint[:n, n:] += -c * s * eye
-        joint[n:, :n] += -c * s * eye
-        return joint
+        eye = sp.eye(n, format="csr")
+        return sp.bmat(
+            [
+                [self.prior_a.precision_sparse(grid) + c * s * s * eye, -c * s * eye],
+                [-c * s * eye, self.prior_b.precision_sparse(grid) + c * eye],
+            ],
+            format="csr",
+        )
 
     def mean_vector(self, grid: Field3D) -> np.ndarray:
         return np.concatenate([self.prior_a.mean_vector(grid), self.prior_b.mean_vector(grid)])
@@ -106,8 +123,8 @@ def _data_normal_equations(grid, observations, registry, n):
     rhs = np.zeros(n)
     for obs in observations:
         op = registry.get(obs.kind)
-        if not op.has_adjoint():
-            raise ValueError(f"observation kind {obs.kind!r} needs a Jacobian for the joint inversion.")
+        if not op.is_linear:
+            raise ValueError(f"observation kind {obs.kind!r} needs a fixed Jacobian for the joint inversion.")
         J = np.atleast_2d(np.asarray(op.jacobian(grid, obs.location), dtype=float))
         jt_rinv = J.T @ _noise_precision(obs)
         lam += jt_rinv @ J

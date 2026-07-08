@@ -9,10 +9,11 @@ import unittest
 
 import numpy as np
 
-from mixle_pde.field_assimilation import PosteriorField4D, assimilate_4d
+from mixle_pde.field_assimilation import PosteriorField4D, assimilate_4d, assimilate_4d_ensemble
 from mixle_pde.field_inversion import FieldGaussianPrior
 from mixle_pde.latent import Field3D, PosteriorField3D
 from mixle_pde.observations import (
+    ForwardOperator,
     ForwardOperatorRegistry,
     Observation,
     borehole_forward_operator,
@@ -138,6 +139,96 @@ class Assimilation4DTest(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             assimilate_4d(bounded, self.times, self.obs_by_time, self.registry, self.prior, process_var=1.0)
+
+
+class EnsembleAssimilation4DTest(unittest.TestCase):
+    def setUp(self):
+        self.grid = Field3D(
+            coordinates=np.array([[0.0, 0.0, -10.0]]),
+            spacing=1.0,
+            units="state",
+            property_name="nonlinear_state",
+        )
+        self.times = np.array([0.0, 1.0, 2.0])
+        self.truth = np.array([1.0, 1.35, 1.7])
+        self.registry = ForwardOperatorRegistry()
+
+        def predict(grid, field_values, obs_locations):
+            return np.full(obs_locations.shape[0], float(field_values[0] ** 2))
+
+        self.registry.register(ForwardOperator("square_sensor", predict=predict, differentiable=False))
+        self.observations = [
+            [
+                Observation(
+                    "square_sensor",
+                    np.array([[0.0, 0.0, -10.0]]),
+                    np.array([value**2]),
+                    np.array([0.03**2]),
+                    time=time,
+                )
+            ]
+            for time, value in zip(self.times, self.truth, strict=True)
+        ]
+        self.prior = FieldGaussianPrior(mean=0.8, smoothness_precision=0.0, marginal_precision=4.0, length_scale=1.0)
+
+    def test_ensemble_assimilation_tracks_nonlinear_observations_without_a_jacobian(self):
+        post = assimilate_4d_ensemble(
+            self.grid,
+            self.times,
+            self.observations,
+            self.registry,
+            self.prior,
+            process_var=0.08,
+            ensemble_size=256,
+            rng=np.random.default_rng(123),
+        )
+        self.assertIsInstance(post, PosteriorField4D)
+        final_mean = post.at_time(2.0).mean[0]
+        self.assertLess(abs(final_mean - self.truth[-1]), abs(0.8 - self.truth[-1]))
+        self.assertLess(abs(final_mean - self.truth[-1]), 0.25)
+        self.assertGreater(post.at_time(2.0).marginal_std[0], 0.0)
+
+    def test_ensemble_posterior_predictive_supports_nonlinear_operator_at_mean(self):
+        post = assimilate_4d_ensemble(
+            self.grid,
+            self.times,
+            self.observations,
+            self.registry,
+            self.prior,
+            process_var=0.08,
+            ensemble_size=256,
+            rng=np.random.default_rng(321),
+        )
+        held = Observation(
+            "square_sensor",
+            np.array([[0.0, 0.0, -10.0]]),
+            np.array([0.0]),
+            np.array([0.03**2]),
+            time=2.0,
+        )
+        predicted = post.predict_observation(self.registry, held)
+        self.assertLess(abs(predicted[0] - self.truth[-1] ** 2), 0.7)
+
+    def test_ensemble_assimilation_validates_inputs(self):
+        with self.assertRaises(ValueError):
+            assimilate_4d_ensemble(
+                self.grid,
+                self.times,
+                self.observations,
+                self.registry,
+                self.prior,
+                process_var=0.08,
+                ensemble_size=1,
+            )
+        with self.assertRaises(ValueError):
+            assimilate_4d_ensemble(
+                self.grid,
+                self.times,
+                self.observations[:1],
+                self.registry,
+                self.prior,
+                process_var=0.08,
+            )
 
 
 if __name__ == "__main__":

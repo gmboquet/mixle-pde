@@ -1,9 +1,10 @@
 """4D assimilation and smoothing of an evolving latent field (workstream G7).
 
 Workstream G6 (:mod:`mixle_pde.field_inversion`) inverts a STATIC field. This module adds the time
-axis: a latent field that EVOLVES, observed at a sequence of times, assimilated forward and smoothed
-backward into a posterior at every time -- the linear-Gaussian state-space (Kalman filter + RTS
-smoother) over the same :class:`~mixle_pde.latent.Field3D` grid and the same
+axis: a latent field that EVOLVES, observed at a sequence of times. The exact
+:func:`assimilate_4d` path assimilates forward and smooths backward for linear-Gaussian observations.
+:func:`assimilate_4d_ensemble` adds a stochastic ensemble path for nonlinear observation operators over
+the same :class:`~mixle_pde.latent.Field3D` grid and the same
 :class:`~mixle_pde.observations.ForwardOperatorRegistry` the static inversion uses.
 
 State model (random walk in time, the honest default when no mechanistic evolution is asserted):
@@ -18,6 +19,8 @@ so each time's posterior also uses LATER observations. Both process and observat
 preserved: an un-observed time still gets a posterior (wider, from the prior + neighbours in time), and
 :meth:`PosteriorField4D.at_time` exposes the posterior slice at any assimilated time as an ordinary
 :class:`~mixle_pde.latent.PosteriorField3D` (so its samples / intervals / posterior-predictive all work).
+The ensemble path returns filtered Gaussian summaries from ensemble mean/covariance; it is a reference
+posterior approximation for nonlinear/time-evolving cases, not a production particle smoother.
 """
 
 from __future__ import annotations
@@ -59,8 +62,8 @@ class PosteriorField4D:
         if observation.time is None:
             raise ValueError("observation.time must be set to predict from a 4D posterior.")
         i = self._index_of(observation.time)
-        jac = np.atleast_2d(np.asarray(registry.get(observation.kind).jacobian(self.grid, observation.location)))
-        return jac @ self.means[i]
+        op = registry.get(observation.kind)
+        return op.predict_observation(self.grid, self.means[i], observation)
 
 
 def _update(mean_pred: np.ndarray, cov_pred: np.ndarray, obs_list, grid, registry):
@@ -71,7 +74,7 @@ def _update(mean_pred: np.ndarray, cov_pred: np.ndarray, obs_list, grid, registr
     rhs = prec_pred @ mean_pred
     for obs in obs_list:
         op = registry.get(obs.kind)
-        if not op.has_adjoint():
+        if not op.is_linear:
             raise ValueError(f"observation kind {obs.kind!r} needs a Jacobian for linear-Gaussian assimilation.")
         jac = np.atleast_2d(np.asarray(op.jacobian(grid, obs.location), dtype=float))
         jt_rinv = jac.T @ _noise_precision(obs)
@@ -141,3 +144,82 @@ def assimilate_4d(
         sm_cov[t] = filt_cov[t] + C @ (sm_cov[t + 1] - pred_cov[t + 1]) @ C.T
 
     return PosteriorField4D(grid=grid, times=times, means=list(sm_mean), covs=list(sm_cov))
+
+
+def _ensemble_covariance(ensemble: np.ndarray, *, jitter: float) -> np.ndarray:
+    centered = ensemble - ensemble.mean(axis=0, keepdims=True)
+    cov = centered.T @ centered / max(ensemble.shape[0] - 1, 1)
+    return cov + jitter * np.eye(ensemble.shape[1])
+
+
+def _observation_noise_sample(observation: Observation, rng: np.random.Generator, size: int) -> np.ndarray:
+    if observation.is_diagonal:
+        return rng.normal(0.0, np.sqrt(observation.noise_cov), size=(size, observation.n))
+    return rng.multivariate_normal(np.zeros(observation.n), observation.noise_cov, size=size)
+
+
+def assimilate_4d_ensemble(
+    grid: Field3D,
+    times,
+    observations_by_time,
+    registry: ForwardOperatorRegistry,
+    prior: FieldGaussianPrior,
+    *,
+    process_var: float,
+    ensemble_size: int = 128,
+    rng: np.random.Generator | None = None,
+    inflation: float = 1.0,
+    jitter: float = 1.0e-9,
+) -> PosteriorField4D:
+    """Ensemble Kalman assimilation for nonlinear evolving-field observations.
+
+    Unlike :func:`assimilate_4d`, this path does not require fixed-linear observation operators. Each
+    ensemble member is pushed through ``ForwardOperator.predict_observation``; the empirical
+    state/observation covariance supplies the Kalman gain. The returned :class:`PosteriorField4D`
+    contains filtered Gaussian summaries at each time.
+    """
+    if grid.bounds is not None:
+        raise ValueError("assimilate_4d_ensemble currently requires an identity-transform field (bounds=None).")
+    times = np.asarray(times, dtype=float)
+    if times.ndim != 1 or times.size == 0:
+        raise ValueError("times must be a non-empty 1-D array.")
+    if len(observations_by_time) != times.size:
+        raise ValueError("observations_by_time must have one entry (list) per time.")
+    if process_var <= 0.0:
+        raise ValueError("process_var must be positive.")
+    if ensemble_size < 2:
+        raise ValueError("ensemble_size must be at least 2.")
+    if inflation <= 0.0:
+        raise ValueError("inflation must be positive.")
+    if jitter < 0.0:
+        raise ValueError("jitter must be non-negative.")
+
+    rng = np.random.default_rng() if rng is None else rng
+    n = grid.n
+    prior_mean = prior.mean_vector(grid)
+    prior_cov = np.linalg.inv(prior.precision(grid) + jitter * np.eye(n))
+    ensemble = rng.multivariate_normal(prior_mean, prior_cov, size=ensemble_size)
+    means: list[np.ndarray] = []
+    covs: list[np.ndarray] = []
+
+    for t in range(times.size):
+        if t > 0:
+            ensemble = ensemble + rng.normal(0.0, np.sqrt(process_var), size=ensemble.shape)
+        for obs in observations_by_time[t]:
+            op = registry.get(obs.kind)
+            predicted = np.vstack([op.predict_observation(grid, member, obs) for member in ensemble])
+            x_mean = ensemble.mean(axis=0)
+            y_mean = predicted.mean(axis=0)
+            x_anom = (ensemble - x_mean) * np.sqrt(inflation)
+            y_anom = (predicted - y_mean) * np.sqrt(inflation)
+            cov_xy = x_anom.T @ y_anom / (ensemble_size - 1)
+            noise_cov = obs.noise_cov if not obs.is_diagonal else np.diag(obs.noise_cov)
+            cov_yy = y_anom.T @ y_anom / (ensemble_size - 1) + noise_cov + jitter * np.eye(obs.n)
+            gain = cov_xy @ np.linalg.inv(cov_yy)
+            perturbed = obs.value[None, :] + _observation_noise_sample(obs, rng, ensemble_size)
+            innovation = perturbed - predicted
+            ensemble = ensemble + innovation @ gain.T
+        means.append(ensemble.mean(axis=0).copy())
+        covs.append(_ensemble_covariance(ensemble, jitter=jitter))
+
+    return PosteriorField4D(grid=grid, times=times, means=means, covs=covs)

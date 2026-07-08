@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from mixle_pde.latent import Field3D, PosteriorField3D
+from mixle_pde.latent import Field3D, PosteriorField3D, SparsePosteriorPrecision
 
 
 def _grid(n_per_axis=3):
@@ -81,6 +81,16 @@ class PosteriorField3DConstructionTestCase(unittest.TestCase):
         with self.assertRaises(ValueError):
             PosteriorField3D(grid=f, mean=np.zeros(f.n), cov=np.eye(f.n), diag_var=np.ones(f.n))
 
+    def test_sparse_precision_marginals_match_dense_inverse(self):
+        import scipy.sparse as sp
+
+        coords = _grid(n_per_axis=2)
+        f = Field3D(coordinates=coords, spacing=1.0, units="m", property_name="x")
+        precision = sp.diags(np.linspace(1.0, 2.0, f.n), format="csr")
+        sparse_factor = SparsePosteriorPrecision(precision)
+        post = PosteriorField3D(grid=f, mean=np.zeros(f.n), precision_factor=sparse_factor)
+        np.testing.assert_allclose(post.marginal_variance, 1.0 / np.linspace(1.0, 2.0, f.n))
+
     def test_map_defaults_to_mean(self):
         coords = _grid()
         f = Field3D(coordinates=coords, spacing=1.0, units="m", property_name="x")
@@ -112,6 +122,21 @@ class SamplingTestCase(unittest.TestCase):
         samples = post_dense.sample(20000, np.random.default_rng(2))
         empirical_std = samples.std(axis=0)
         np.testing.assert_allclose(empirical_std, post_dense.marginal_std, atol=0.05)
+
+    def test_sparse_precision_sampling_shape_and_finite(self):
+        import scipy.sparse as sp
+
+        coords = _grid(n_per_axis=2)
+        f = Field3D(coordinates=coords, spacing=1.0, units="m", property_name="x")
+        precision = sp.diags(np.full(f.n, 4.0), format="csr")
+        post = PosteriorField3D(
+            grid=f,
+            mean=np.zeros(f.n),
+            precision_factor=SparsePosteriorPrecision(precision),
+        )
+        samples = post.sample(20, np.random.default_rng(4))
+        self.assertEqual(samples.shape, (20, f.n))
+        self.assertTrue(np.all(np.isfinite(samples)))
 
     def test_sampling_maps_through_bounds(self):
         coords = _grid()

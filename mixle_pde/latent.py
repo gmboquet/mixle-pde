@@ -2,19 +2,19 @@
 
 Storage-agnostic containers for a gridded physical property: :class:`Field3D` fixes the grid
 geometry, units, and (optional) bound constraints for a named property; :class:`PosteriorField3D`
-carries a Gaussian posterior over that property (mean/MAP, marginal std, and either a dense or a
-low-rank+diagonal covariance) with sampling, credible intervals, and axis-aligned slicing.
+carries a Gaussian posterior over that property (mean/MAP, marginal std, and dense, sparse-precision,
+or compact covariance storage) with sampling, credible intervals, and axis-aligned slicing.
 
-This card defines the objects only -- no inversion. A later card fits a :class:`PosteriorField3D`
-from geophysical data (:mod:`mixle_pde.geophysics`, :mod:`mixle_pde.earth`); those forwards feed
-this container once built.
+This card defines the objects only. Inversion lives in :mod:`mixle_pde.field_inversion`,
+:mod:`mixle_pde.field_gauss_newton`, and :mod:`mixle_pde.field_assimilation`; forward mappings live in
+:mod:`mixle_pde.observations` and the geophysics modules.
 
 Bound transforms reuse the same log / logit convention as
-:meth:`mixle_pde.earth.EarthKernelPrior.to_unconstrained`: a property with both bounds gets a logit
-transform, one-sided bounds get a log transform anchored at the bound, and an unbounded property is
-the identity. A :class:`PosteriorField3D`'s Gaussian lives in this unconstrained space; samples and
-credible intervals are mapped back through :meth:`Field3D.from_unconstrained` into physical units
-(monotone, so interval endpoints and ordering survive the map).
+:meth:`Field3D.to_unconstrained`: a property with both bounds gets a logit transform, one-sided bounds
+get a log transform anchored at the bound, and an unbounded property is the identity. A
+:class:`PosteriorField3D`'s Gaussian lives in this unconstrained space; samples and credible intervals
+are mapped back through :meth:`Field3D.from_unconstrained` into physical units (monotone, so interval
+endpoints and ordering survive the map).
 """
 
 from __future__ import annotations
@@ -24,6 +24,65 @@ from typing import Any
 
 import numpy as np
 from scipy.special import ndtri
+
+
+@dataclass
+class SparsePosteriorPrecision:
+    """Sparse precision storage and factor solves for a Gaussian posterior.
+
+    ``precision`` is the posterior precision matrix ``Lambda = Sigma^-1``. The LU factor is built
+    lazily once and then reused for covariance actions ``Sigma v = Lambda^-1 v``. This stores the
+    posterior in sparse precision form without materializing the dense covariance.
+    """
+
+    precision: Any
+    _factor: Any | None = field(default=None, init=False, repr=False)
+    _marginal_variance: np.ndarray | None = field(default=None, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        import scipy.sparse as sp
+
+        mat = sp.csc_matrix(self.precision)
+        if mat.ndim != 2 or mat.shape[0] != mat.shape[1]:
+            raise ValueError("precision must be a square matrix.")
+        self.precision = mat
+
+    @property
+    def n(self) -> int:
+        return int(self.precision.shape[0])
+
+    def factor(self):
+        """Return the cached sparse LU factor."""
+        if self._factor is None:
+            from scipy.sparse.linalg import splu
+
+            self._factor = splu(self.precision)
+        return self._factor
+
+    def solve(self, rhs) -> np.ndarray:
+        """Apply the posterior covariance to ``rhs`` by solving ``precision x = rhs``."""
+        arr = np.asarray(rhs, dtype=float)
+        if arr.ndim == 1:
+            if arr.shape != (self.n,):
+                raise ValueError(f"rhs must have shape ({self.n},), got {arr.shape}.")
+            return np.asarray(self.factor().solve(arr), dtype=float)
+        if arr.ndim == 2:
+            if arr.shape[0] != self.n:
+                raise ValueError(f"rhs must have shape ({self.n}, k), got {arr.shape}.")
+            return np.asarray(self.factor().solve(arr), dtype=float)
+        raise ValueError("rhs must be a vector or a 2D matrix.")
+
+    def marginal_variance(self) -> np.ndarray:
+        """Diagonal of the dense covariance ``precision^-1`` computed by sparse solves."""
+        if self._marginal_variance is None:
+            eye = np.eye(self.n)
+            inv_columns = self.solve(eye)
+            self._marginal_variance = np.clip(np.diag(inv_columns), 0.0, None)
+        return self._marginal_variance.copy()
+
+    def covariance_dense(self) -> np.ndarray:
+        """Materialize the dense covariance on demand for small reference sampling/export."""
+        return self.solve(np.eye(self.n))
 
 
 @dataclass
@@ -93,10 +152,11 @@ class Field3D:
 class PosteriorField3D:
     """A Gaussian posterior over a :class:`Field3D`, in the field's unconstrained space.
 
-    Covariance storage is one of three modes, chosen by which of ``cov`` / ``low_rank`` +
-    ``diag_var`` / ``diag_var`` alone is supplied:
+    Covariance storage is one of four modes, chosen by which of ``cov`` / ``precision_factor`` /
+    ``low_rank`` + ``diag_var`` / ``diag_var`` alone is supplied:
 
     * dense: ``cov`` is the full ``(n, n)`` covariance.
+    * sparse precision: ``precision_factor`` stores ``cov^-1`` and sparse solves.
     * low-rank + diagonal: ``cov = low_rank @ low_rank.T + diag(diag_var)`` with ``low_rank``
       shape ``(n, k)``.
     * diagonal only: ``diag_var`` alone, i.e. independent marginals.
@@ -106,6 +166,7 @@ class PosteriorField3D:
     mean: np.ndarray
     map: np.ndarray | None = None
     cov: np.ndarray | None = None
+    precision_factor: SparsePosteriorPrecision | None = None
     low_rank: np.ndarray | None = None
     diag_var: np.ndarray | None = None
 
@@ -119,17 +180,23 @@ class PosteriorField3D:
         if self.map.shape != (n,):
             raise ValueError(f"map must have shape ({n},) matching the grid.")
 
-        modes = [self.cov is not None, self.low_rank is not None or self.diag_var is not None]
-        if self.cov is not None and (self.low_rank is not None or self.diag_var is not None):
-            raise ValueError("supply either `cov`, or `low_rank`/`diag_var`, not both.")
+        modes = [
+            self.cov is not None,
+            self.precision_factor is not None,
+            self.low_rank is not None or self.diag_var is not None,
+        ]
+        if sum(bool(mode) for mode in modes) != 1:
+            raise ValueError("supply exactly one covariance mode: `cov`, `precision_factor`, or `low_rank`/`diag_var`.")
         if not any(modes):
-            raise ValueError("supply a covariance: `cov`, `low_rank` + `diag_var`, or `diag_var` alone.")
+            raise ValueError("supply a covariance mode.")
 
         if self.cov is not None:
             cov = np.asarray(self.cov, dtype=float)
             if cov.shape != (n, n):
                 raise ValueError(f"cov must have shape ({n}, {n}).")
             self.cov = cov
+        if self.precision_factor is not None and self.precision_factor.n != n:
+            raise ValueError(f"precision_factor must have shape ({n}, {n}).")
         if self.low_rank is not None:
             low_rank = np.asarray(self.low_rank, dtype=float)
             if low_rank.ndim != 2 or low_rank.shape[0] != n:
@@ -150,6 +217,8 @@ class PosteriorField3D:
         """Per-point posterior variance in unconstrained space, whichever storage mode is active."""
         if self.cov is not None:
             return np.diag(self.cov).copy()
+        if self.precision_factor is not None:
+            return self.precision_factor.marginal_variance()
         if self.low_rank is not None:
             return np.sum(self.low_rank**2, axis=1) + self.diag_var
         return self.diag_var.copy()
@@ -163,6 +232,11 @@ class PosteriorField3D:
         m = self.grid.n
         if self.cov is not None:
             chol = np.linalg.cholesky(self.cov + 1e-12 * np.eye(m))
+            z = rng.standard_normal((n, m))
+            unconstrained = self.mean[None, :] + z @ chol.T
+        elif self.precision_factor is not None:
+            cov = self.precision_factor.covariance_dense()
+            chol = np.linalg.cholesky(cov + 1e-12 * np.eye(m))
             z = rng.standard_normal((n, m))
             unconstrained = self.mean[None, :] + z @ chol.T
         elif self.low_rank is not None:

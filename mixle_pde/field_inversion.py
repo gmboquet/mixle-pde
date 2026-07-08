@@ -8,19 +8,15 @@ of :class:`~mixle_pde.observations.Observation` s resolved through a
 :class:`~mixle_pde.latent.PosteriorField3D` -- mean/MAP, full covariance (hence marginal variance,
 credible intervals, and samples for free).
 
-When every forward operator is LINEAR in the field (it declares a Jacobian -- gravity, magnetics, and
-borehole point-sampling all do) and the field's transform is the identity (``bounds=None``, so the
-unconstrained space the prior/posterior Gaussian lives in coincides with physical units), the posterior
-is closed-form and EXACT -- no optimization, no linearization error:
-
-    prior      m ~ N(m0, Q^-1)                       (Q = smoothness precision)
-    data       d_i = J_i m + e_i,  e_i ~ N(0, R_i)
-    posterior  m | d ~ N(mu, Lambda^-1),
-               Lambda = Q + sum_i J_i^T R_i^-1 J_i,
-               mu     = Lambda^-1 (Q m0 + sum_i J_i^T R_i^-1 d_i)
+    When every forward operator is LINEAR in the field (it declares a Jacobian -- gravity, magnetics, and
+    borehole point-sampling all do) and the field's transform is the identity (``bounds=None``, so the
+    unconstrained space the prior/posterior Gaussian lives in coincides with physical units), the posterior
+    is closed-form and EXACT -- no optimization, no linearization error. The prior is
+    ``m ~ N(m0, Q^-1)``, each observation is ``d_i = J_i m + e_i`` with ``e_i ~ N(0, R_i)``, and the
+    posterior precision is ``Q + sum_i J_i.T R_i^-1 J_i``.
 
 The prior precision is a graph-Matern (nearest-neighbour graph-Laplacian) smoothness operator built here
-from the grid coordinates -- self-contained (numpy + scipy only), so a clean-checkout test can create a
+from the grid coordinates, with both dense and sparse CSR assembly. A clean-checkout test can create a
 field, attach observations, invert, and extract posterior mean/variance/intervals/samples with no other
 module. A bounded (non-identity-transform) field makes the forward map nonlinear in the unconstrained
 variable; that is the Gauss-Newton path of a later card, and is rejected here with a clear error rather
@@ -33,7 +29,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from mixle_pde.latent import Field3D, PosteriorField3D
+from mixle_pde.latent import Field3D, PosteriorField3D, SparsePosteriorPrecision
 from mixle_pde.observations import ForwardOperatorRegistry, Observation
 
 
@@ -44,8 +40,9 @@ class FieldGaussianPrior:
     The precision is a graph-Laplacian ("graph-Matern") operator over the grid's nearest-neighbour
     graph: ``smoothness_precision`` weights each edge (penalising differences between neighbouring
     cells -> spatial smoothness), and ``marginal_precision`` (> 0) anchors every cell to ``mean`` so the
-    precision is full rank and the prior proper. ``mean`` is the unconstrained-space prior mean (a
-    scalar broadcast over the grid, or a per-cell array).
+    precision is full rank and the prior proper. ``precision_sparse`` returns the sparse CSR operator;
+    ``precision`` materializes the same operator densely for exact reference inference. ``mean`` is the
+    unconstrained-space prior mean (a scalar broadcast over the grid, or a per-cell array).
     """
 
     mean: float | np.ndarray = 0.0
@@ -67,14 +64,25 @@ class FieldGaussianPrior:
 
     def precision(self, grid: Field3D) -> np.ndarray:
         """Dense ``(n, n)`` graph-Laplacian smoothness precision + marginal anchoring."""
+        return self.precision_sparse(grid).toarray()
+
+    def precision_sparse(self, grid: Field3D):
+        """Sparse CSR graph-Laplacian smoothness precision + marginal anchoring.
+
+        This is the scalable assembly form. ``precision()`` materializes the same operator densely for
+        the existing exact small/medium Gaussian paths.
+        """
+        import scipy.sparse as sp
         from scipy.spatial import cKDTree
 
         coords = grid.coordinates
         n = coords.shape[0]
-        prec = np.zeros((n, n), dtype=float)
-        np.fill_diagonal(prec, self.marginal_precision)
+        diag = np.full(n, self.marginal_precision, dtype=float)
+        rows: list[int] = []
+        cols: list[int] = []
+        data: list[float] = []
         if n == 1 or self.smoothness_precision == 0.0:
-            return prec
+            return sp.diags(diag, format="csr")
 
         k = min(int(self.neighbors) + 1, n)
         _, indices = cKDTree(coords).query(coords, k=k)
@@ -94,11 +102,15 @@ class FieldGaussianPrior:
                 weight = self.smoothness_precision * float(np.exp(-np.linalg.norm(scaled[i] - scaled[j])))
                 if weight == 0.0:
                     continue
-                prec[i, i] += weight
-                prec[j, j] += weight
-                prec[i, j] -= weight
-                prec[j, i] -= weight
-        return prec
+                diag[i] += weight
+                diag[j] += weight
+                rows.extend((i, j))
+                cols.extend((j, i))
+                data.extend((-weight, -weight))
+        rows.extend(range(n))
+        cols.extend(range(n))
+        data.extend(diag.tolist())
+        return sp.coo_matrix((data, (rows, cols)), shape=(n, n)).tocsr()
 
 
 def _noise_precision(observation: Observation) -> np.ndarray:
@@ -138,10 +150,10 @@ def linear_gaussian_invert(
 
     for obs in observations:
         op = registry.get(obs.kind)
-        if not op.has_adjoint():
+        if not op.is_linear:
             raise ValueError(
-                f"observation kind {obs.kind!r} has no Jacobian; linear_gaussian_invert needs a linear "
-                "(adjoint-declaring) operator for every observation."
+                f"observation kind {obs.kind!r} is not a fixed linear operator; linear_gaussian_invert needs "
+                "a fixed Jacobian for every observation. Use the Gauss-Newton path for nonlinear operators."
             )
         jac = np.atleast_2d(np.asarray(op.jacobian(grid, obs.location), dtype=float))  # (n_obs, n)
         if jac.shape != (obs.n, n):
@@ -155,6 +167,64 @@ def linear_gaussian_invert(
     return PosteriorField3D(grid=grid, mean=mean, map=mean.copy(), cov=cov)
 
 
+def sparse_linear_gaussian_invert(
+    grid: Field3D,
+    observations: list[Observation],
+    registry: ForwardOperatorRegistry,
+    prior: FieldGaussianPrior,
+    *,
+    jitter: float = 1.0e-10,
+) -> PosteriorField3D:
+    """Sparse-precision linear-Gaussian posterior over ``grid``.
+
+    This has the same model assumptions as :func:`linear_gaussian_invert`, but assembles the posterior
+    precision as a SciPy sparse matrix, factors it once, solves for the posterior mean, and stores the
+    posterior as a :class:`~mixle_pde.latent.SparsePosteriorPrecision` instead of materializing the
+    dense covariance. Marginal variances and linear derived quantities are recovered through sparse
+    covariance solves.
+    """
+    if grid.bounds is not None:
+        raise ValueError(
+            "sparse_linear_gaussian_invert requires an identity-transform field (bounds=None); use the "
+            "Gauss-Newton path for bounded fields."
+        )
+    if not observations:
+        raise ValueError("need at least one observation to invert.")
+
+    import scipy.sparse as sp
+
+    n = grid.n
+    lam = prior.precision_sparse(grid).tocsr()
+    m0 = prior.mean_vector(grid)
+    rhs = lam @ m0
+
+    for obs in observations:
+        op = registry.get(obs.kind)
+        if not op.is_linear:
+            raise ValueError(
+                f"observation kind {obs.kind!r} is not a fixed linear operator; sparse_linear_gaussian_invert "
+                "needs a fixed Jacobian for every observation."
+            )
+        jac = np.atleast_2d(np.asarray(op.jacobian(grid, obs.location), dtype=float))
+        if jac.shape != (obs.n, n):
+            raise ValueError(f"operator {obs.kind!r} Jacobian shape {jac.shape} != ({obs.n}, {n}).")
+        J = sp.csr_matrix(jac)
+        if obs.is_diagonal:
+            rinv_diag = 1.0 / obs.noise_cov
+            Rinv = sp.diags(rinv_diag, format="csr")
+            lam = lam + J.T @ Rinv @ J
+            rhs = rhs + J.T @ (rinv_diag * obs.value)
+        else:
+            rinv = _noise_precision(obs)
+            lam = lam + sp.csr_matrix(jac.T @ rinv @ jac)
+            rhs = rhs + jac.T @ rinv @ obs.value
+
+    precision = (lam + jitter * sp.eye(n, format="csr")).tocsc()
+    factor = SparsePosteriorPrecision(precision)
+    mean = factor.solve(rhs)
+    return PosteriorField3D(grid=grid, mean=mean, map=mean.copy(), precision_factor=factor)
+
+
 @dataclass
 class PosteriorPredictiveCheck:
     """Held-out fit of a fitted posterior: per-observation standardized residual and coverage."""
@@ -163,6 +233,19 @@ class PosteriorPredictiveCheck:
     standardized: np.ndarray  # residual / sqrt(noise var + predictive var), stacked
     coverage: float  # fraction of held-out points inside their 1-alpha predictive interval
     alpha: float = field(default=0.1)
+
+
+def _linear_predictive_variance(posterior: PosteriorField3D, jac: np.ndarray) -> np.ndarray:
+    """Diagonal of ``J cov J.T`` for any posterior covariance storage mode."""
+    if posterior.cov is not None:
+        return np.diag(jac @ posterior.cov @ jac.T)
+    if posterior.precision_factor is not None:
+        cov_jt = posterior.precision_factor.solve(jac.T)
+        return np.sum(jac * cov_jt.T, axis=1)
+    if posterior.low_rank is not None:
+        projected = jac @ posterior.low_rank
+        return np.sum(projected**2, axis=1) + np.sum((jac**2) * posterior.diag_var[None, :], axis=1)
+    return np.sum((jac**2) * posterior.diag_var[None, :], axis=1)
 
 
 def posterior_predictive_check(
@@ -182,7 +265,6 @@ def posterior_predictive_check(
     from scipy.special import ndtri
 
     grid = posterior.grid
-    cov = posterior.cov if posterior.cov is not None else np.diag(posterior.marginal_variance)
     z = ndtri(1.0 - alpha / 2.0)
     residuals: list[float] = []
     standardized: list[float] = []
@@ -190,9 +272,13 @@ def posterior_predictive_check(
     total = 0
     for obs in held_out:
         op = registry.get(obs.kind)
+        if not op.is_linear:
+            raise ValueError(
+                f"posterior_predictive_check currently needs fixed-linear operators; {obs.kind!r} is nonlinear."
+            )
         jac = np.atleast_2d(np.asarray(op.jacobian(grid, obs.location), dtype=float))
         predicted = jac @ posterior.mean
-        pred_var = np.diag(jac @ cov @ jac.T)
+        pred_var = _linear_predictive_variance(posterior, jac)
         noise_var = obs.noise_cov if obs.is_diagonal else np.diag(obs.noise_cov)
         total_std = np.sqrt(pred_var + noise_var)
         resid = predicted - obs.value

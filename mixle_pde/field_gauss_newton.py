@@ -89,15 +89,12 @@ def gauss_newton_invert(
     Q = prior.precision(grid)
     m0 = prior.mean_vector(grid)
 
-    jacs = {}
+    ops = {}
     for obs in observations:
         op = registry.get(obs.kind)
         if not op.has_adjoint():
             raise ValueError(f"observation kind {obs.kind!r} needs a Jacobian for Gauss-Newton inversion.")
-        J = np.atleast_2d(np.asarray(op.jacobian(grid, obs.location), dtype=float))
-        if J.shape != (obs.n, n):
-            raise ValueError(f"operator {obs.kind!r} Jacobian shape {J.shape} != ({obs.n}, {n}).")
-        jacs[id(obs)] = J
+        ops[id(obs)] = op
 
     rinvs = {id(obs): _noise_precision(obs) for obs in observations}
 
@@ -105,7 +102,8 @@ def gauss_newton_invert(
         phi = grid.from_unconstrained(u_vec)
         val = 0.5 * float((u_vec - m0) @ Q @ (u_vec - m0))
         for obs in observations:
-            resid = obs.value - jacs[id(obs)] @ phi
+            predicted = ops[id(obs)].predict_observation(grid, phi, obs)
+            resid = obs.value - predicted
             val += 0.5 * float(resid @ rinvs[id(obs)] @ resid)
         return val
 
@@ -121,11 +119,13 @@ def gauss_newton_invert(
         lam = Q.copy()
         grad = Q @ (u - m0)
         for obs in observations:
-            J = jacs[id(obs)]
+            op = ops[id(obs)]
+            predicted = op.predict_observation(grid, phi, obs)
+            J = op.local_jacobian(grid, phi, obs)
             A = J * B[None, :]  # J @ diag(B)
             at_rinv = A.T @ rinvs[id(obs)]
             lam = lam + at_rinv @ A
-            grad = grad - at_rinv @ (obs.value - J @ phi)
+            grad = grad - at_rinv @ (obs.value - predicted)
 
         # damped step; grow damping until the penalized objective actually decreases (or give up this iter)
         accepted = False
@@ -155,7 +155,7 @@ def gauss_newton_invert(
     phi = grid.from_unconstrained(u)
     misfit = 0.0
     for obs in observations:
-        resid = obs.value - jacs[id(obs)] @ phi
+        resid = obs.value - ops[id(obs)].predict_observation(grid, phi, obs)
         misfit += float(resid @ rinvs[id(obs)] @ resid)
 
     cov = np.linalg.inv(lam + jitter * np.eye(n))

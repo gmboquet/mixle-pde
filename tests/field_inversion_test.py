@@ -14,6 +14,7 @@ from mixle_pde.field_inversion import (
     FieldGaussianPrior,
     linear_gaussian_invert,
     posterior_predictive_check,
+    sparse_linear_gaussian_invert,
 )
 from mixle_pde.latent import Field3D, PosteriorField3D
 from mixle_pde.observations import (
@@ -137,6 +138,29 @@ class LinearGaussianInversionTest(unittest.TestCase):
         check = posterior_predictive_check(post, self.registry, [held], alpha=0.1)
         self.assertGreaterEqual(check.coverage, 0.7)
         self.assertLess(np.abs(check.standardized).mean(), 3.0)  # residuals are O(1) in std units
+
+    def test_sparse_inversion_matches_dense_reference_without_dense_covariance_storage(self):
+        dense = linear_gaussian_invert(self.grid, [self.gravity, self.borehole], self.registry, self.prior)
+        sparse = sparse_linear_gaussian_invert(self.grid, [self.gravity, self.borehole], self.registry, self.prior)
+
+        self.assertIsNone(sparse.cov)
+        self.assertIsNotNone(sparse.precision_factor)
+        np.testing.assert_allclose(sparse.mean, dense.mean, rtol=1.0e-8, atol=1.0e-8)
+        np.testing.assert_allclose(sparse.marginal_variance, dense.marginal_variance, rtol=1.0e-6, atol=1.0e-6)
+
+    def test_sparse_posterior_predictive_uses_precision_covariance_actions(self):
+        sparse = sparse_linear_gaussian_invert(self.grid, [self.gravity, self.borehole], self.registry, self.prior)
+        dense = linear_gaussian_invert(self.grid, [self.gravity, self.borehole], self.registry, self.prior)
+        held = Observation(
+            kind="borehole",
+            location=self.grid.coordinates[[0, 10, 20]],
+            value=self.truth[[0, 10, 20]],
+            noise_cov=np.full(3, 25.0),
+        )
+
+        sparse_check = posterior_predictive_check(sparse, self.registry, [held], alpha=0.1)
+        dense_check = posterior_predictive_check(dense, self.registry, [held], alpha=0.1)
+        np.testing.assert_allclose(sparse_check.standardized, dense_check.standardized, rtol=1.0e-6, atol=1.0e-6)
 
     def test_bounded_field_is_rejected_not_silently_linearized(self):
         bounded = Field3D(

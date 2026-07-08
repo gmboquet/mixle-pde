@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8", "pytest-xdist"]
+test = ["pytest>=8", "pytest-xdist", "torch"]
 lint = ["ruff==0.15.17"]
 docs = ["sphinx>=7", "furo", "myst-parser>=2"]
 

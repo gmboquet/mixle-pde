@@ -11,12 +11,21 @@ import numpy as np
 
 from mixle_pde.geo_observations import (
     BiostratConstraint,
+    FaciesIntervalConstraint,
     GeochemAssay,
+    GeochronologyAge,
+    MultiElementAssay,
+    StratigraphicCorrelation,
     additive_log_ratio,
     assay_log_likelihood,
     assay_posterior_predictive,
     biostrat_log_likelihood,
+    facies_interval_log_likelihood,
+    geochronology_log_likelihood,
     inverse_additive_log_ratio,
+    multi_element_assay_log_likelihood,
+    multi_element_assay_posterior_predictive,
+    stratigraphic_correlation_log_likelihood,
 )
 from mixle_pde.latent import Field3D
 
@@ -72,6 +81,81 @@ class GeochemAssayTest(unittest.TestCase):
         np.testing.assert_allclose(pred, [3.0, 7.0])
 
 
+class MultiElementAssayTest(unittest.TestCase):
+    def _assay(self, *, censored=None, detection_limit=None, batch_offset=None):
+        loc = np.array([[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]])
+        return MultiElementAssay(
+            elements=("Cu", "Mo"),
+            location=loc,
+            value=np.array([[12.0, 1.5], [8.0, 0.8]]),
+            noise_cov=np.array([[0.25, 0.04], [0.04, 0.09]]),
+            censored=censored,
+            detection_limit=detection_limit,
+            batch_offset=batch_offset,
+            units="ppm",
+            provenance={"lab": "ICP-MS", "batch": "B7"},
+        )
+
+    def test_covariance_likelihood_is_maximized_at_the_measured_vector(self):
+        assay = self._assay()
+        best = multi_element_assay_log_likelihood(assay, np.array([[12.0, 1.5], [8.0, 0.8]]))
+        worse = multi_element_assay_log_likelihood(assay, np.array([[20.0, 0.2], [2.0, 4.0]]))
+        self.assertGreater(best, worse)
+        self.assertEqual(assay.noise_cov.shape, (2, 2, 2))
+
+    def test_censored_elements_score_by_detection_limit_probability(self):
+        censored = np.array([[False, True], [False, True]])
+        detection_limit = np.array([[0.0, 1.0], [0.0, 1.0]])
+        assay = self._assay(censored=censored, detection_limit=detection_limit)
+        low = multi_element_assay_log_likelihood(assay, np.array([[12.0, 0.1], [8.0, 0.1]]))
+        high = multi_element_assay_log_likelihood(assay, np.array([[12.0, 3.0], [8.0, 3.0]]))
+        self.assertGreater(low, high)
+
+    def test_batch_offset_is_applied_to_expected_measurement(self):
+        assay = MultiElementAssay(
+            elements=("Cu", "Mo"),
+            location=np.array([[0.0, 0.0, 0.0]]),
+            value=np.array([[14.0, 0.5]]),
+            noise_cov=np.array([0.25, 0.09]),
+            batch_offset=np.array([2.0, -1.0]),
+            units="ppm",
+        )
+        true_field = multi_element_assay_log_likelihood(assay, np.array([[12.0, 1.5]]))
+        uncorrected = multi_element_assay_log_likelihood(assay, np.array([[14.0, 0.5]]))
+        self.assertGreater(true_field, uncorrected)
+
+    def test_posterior_predictive_accepts_arrays_and_element_mappings(self):
+        grid = Field3D(
+            coordinates=np.array([[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [20.0, 0.0, 0.0]]),
+            spacing=10.0,
+            units="ppm",
+            property_name="multi-element",
+            bounds=None,
+        )
+        assay = self._assay()
+        dense = np.array([[12.0, 1.5], [8.0, 0.8], [4.0, 0.4]])
+        np.testing.assert_allclose(multi_element_assay_posterior_predictive(assay, grid, dense), dense[:2])
+        mapped = {"Cu": dense[:, 0], "Mo": dense[:, 1]}
+        np.testing.assert_allclose(multi_element_assay_posterior_predictive(assay, grid, mapped), dense[:2])
+
+    def test_validation_rejects_bad_covariance_and_missing_detection_limits(self):
+        with self.assertRaises(ValueError):
+            MultiElementAssay(
+                elements=("Cu", "Mo"),
+                location=np.array([[0.0, 0.0, 0.0]]),
+                value=np.array([[1.0, 2.0]]),
+                noise_cov=np.array([[1.0, 2.0], [2.0, 1.0]]),
+            )
+        with self.assertRaises(ValueError):
+            MultiElementAssay(
+                elements=("Cu", "Mo"),
+                location=np.array([[0.0, 0.0, 0.0]]),
+                value=np.array([[1.0, 2.0]]),
+                noise_cov=np.array([1.0, 1.0]),
+                censored=np.array([[False, True]]),
+            )
+
+
 class CompositionalTransformTest(unittest.TestCase):
     def test_alr_round_trips_a_composition(self):
         comp = np.array([0.2, 0.5, 0.3])  # sums to 1
@@ -115,6 +199,78 @@ class BiostratConstraintTest(unittest.TestCase):
             BiostratConstraint(location=[0, 0, 0], taxon="T", present=True)
         with self.assertRaises(ValueError):
             BiostratConstraint(location=[0, 0, 0], taxon="T", present=False)
+
+
+class GeochronologyAgeTest(unittest.TestCase):
+    def test_age_likelihood_is_maximized_at_measured_age(self):
+        obs = GeochronologyAge(
+            location=[0.0, 0.0, -200.0],
+            age=118.0,
+            analytical_std=1.5,
+            systematic_std=0.5,
+            method="U-Pb zircon",
+            provenance={"sample": "Z-01"},
+        )
+        self.assertGreater(geochronology_log_likelihood(obs, 118.0), geochronology_log_likelihood(obs, 125.0))
+        self.assertAlmostEqual(obs.total_std, np.hypot(1.5, 0.5))
+
+    def test_age_requires_positive_uncertainty(self):
+        with self.assertRaises(ValueError):
+            GeochronologyAge(location=[0, 0, 0], age=10.0, analytical_std=0.0)
+        with self.assertRaises(ValueError):
+            GeochronologyAge(location=[0, 0, 0], age=10.0, analytical_std=1.0, systematic_std=-1.0)
+
+
+class StratigraphicCorrelationTest(unittest.TestCase):
+    def test_relative_age_constraint_scores_correct_difference(self):
+        corr = StratigraphicCorrelation(
+            location_a=[0.0, 0.0, -120.0],
+            location_b=[20.0, 0.0, -95.0],
+            age_difference=8.0,
+            std=1.0,
+            provenance={"horizon": "H2"},
+        )
+        correct = stratigraphic_correlation_log_likelihood(corr, 118.0, 110.0)
+        wrong = stratigraphic_correlation_log_likelihood(corr, 118.0, 95.0)
+        self.assertGreater(correct, wrong)
+
+    def test_relative_age_constraint_requires_positive_std(self):
+        with self.assertRaises(ValueError):
+            StratigraphicCorrelation(location_a=[0, 0, 0], location_b=[1, 0, 0], std=0.0)
+
+
+class FaciesIntervalConstraintTest(unittest.TestCase):
+    def test_present_interval_scores_inside_values_best(self):
+        facies = FaciesIntervalConstraint(
+            location=[0.0, 0.0, -50.0],
+            label="deltaic",
+            property_name="facies_score",
+            lower=3.0,
+            upper=5.0,
+            tolerance=0.5,
+            provenance={"core": "A"},
+        )
+        self.assertEqual(facies_interval_log_likelihood(facies, 4.0), 0.0)
+        self.assertLess(facies_interval_log_likelihood(facies, 8.0), 0.0)
+
+    def test_absence_interval_penalizes_values_inside_excluded_range(self):
+        absence = FaciesIntervalConstraint(
+            location=[0.0, 0.0, -50.0],
+            label="basinal_absent",
+            property_name="facies_score",
+            lower=7.0,
+            upper=9.0,
+            tolerance=0.5,
+            present=False,
+        )
+        outside = facies_interval_log_likelihood(absence, 4.0)
+        inside = facies_interval_log_likelihood(absence, 8.0)
+        self.assertEqual(outside, 0.0)
+        self.assertLess(inside, outside)
+
+    def test_interval_constraint_validates_bounds(self):
+        with self.assertRaises(ValueError):
+            FaciesIntervalConstraint(location=[0, 0, 0], label="bad", property_name="x", lower=1.0, upper=1.0)
 
 
 if __name__ == "__main__":

@@ -122,6 +122,9 @@ def derived_quantity(posterior: PosteriorField3D, weights) -> DerivedQuantity:
     mean = float(w @ posterior.mean)
     if posterior.cov is not None:
         var = float(w @ posterior.cov @ w)
+    elif posterior.precision_factor is not None:
+        cov_w = posterior.precision_factor.solve(w)
+        var = float(w @ cov_w)
     elif posterior.low_rank is not None:
         proj = posterior.low_rank.T @ w
         var = float(proj @ proj + np.sum(posterior.diag_var * w**2))

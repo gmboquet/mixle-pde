@@ -15,8 +15,16 @@ from mixle_pde.observations import (
     ForwardOperatorRegistry,
     Observation,
     borehole_forward_operator,
+    dc_resistivity_forward_operator,
     gravity_forward_operator,
 )
+
+try:
+    import torch  # noqa: F401
+
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
 
 
 def _grid(bounds):
@@ -117,6 +125,46 @@ class GaussNewtonInversionTest(unittest.TestCase):
         reg.register(ForwardOperator("borehole", predict=lambda g, f, loc: f[:1], jacobian=None))
         with self.assertRaises(ValueError):
             gauss_newton_invert(self.grid, [self.borehole], reg, self.prior)
+
+
+@unittest.skipUnless(HAS_TORCH, "requires PyTorch")
+class DCResistivityGaussNewtonTest(unittest.TestCase):
+    def test_nonlinear_dc_resistivity_operator_reduces_data_residual(self):
+        shape = (4, 4, 4)
+        idx = np.arange(np.prod(shape)).reshape(shape)
+        coords = np.array([[x, y, z] for x in range(4) for y in range(4) for z in range(4)], dtype=float)
+        grid = Field3D(coords, spacing=1.0, units="log(S/m)", property_name="log_conductivity")
+        schedule = [
+            (int(idx[1, 1, 1]), int(idx[1, 1, 2]), int(idx[2, 1, 1]), int(idx[2, 1, 2])),
+            (int(idx[1, 2, 1]), int(idx[1, 2, 2]), int(idx[2, 2, 1]), int(idx[2, 2, 2])),
+            (int(idx[1, 1, 1]), int(idx[1, 2, 1]), int(idx[2, 1, 2]), int(idx[2, 2, 2])),
+        ]
+        locations = np.array([[1.5, 1.0, 1.5], [1.5, 2.0, 1.5], [1.5, 1.5, 1.5]])
+        truth = np.zeros(grid.n)
+        truth[int(idx[2, 1, 1])] = 0.25
+        truth[int(idx[2, 2, 2])] = -0.15
+        op = dc_resistivity_forward_operator(
+            shape,
+            schedule,
+            sigma_ref=0.02,
+            log_data=True,
+            finite_difference_step=3.0e-5,
+        )
+        registry = ForwardOperatorRegistry()
+        registry.register(op)
+        observation = Observation(
+            "dc_resistivity",
+            locations,
+            op.predict(grid, truth, locations),
+            np.full(len(schedule), 0.02**2),
+        )
+        prior = FieldGaussianPrior(mean=0.0, smoothness_precision=1.0e-3, marginal_precision=5.0e-2, length_scale=2.0)
+        posterior, report = gauss_newton_invert(grid, [observation], registry, prior, max_iter=6, tol=1.0e-8)
+
+        prior_residual = np.linalg.norm(observation.value - op.predict(grid, np.zeros(grid.n), locations))
+        posterior_residual = np.linalg.norm(observation.value - op.predict(grid, posterior.mean, locations))
+        self.assertLess(posterior_residual, prior_residual)
+        self.assertTrue(np.isfinite(report.final_data_misfit))
 
 
 if __name__ == "__main__":

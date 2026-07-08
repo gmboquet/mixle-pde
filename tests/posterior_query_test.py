@@ -8,7 +8,7 @@ import unittest
 
 import numpy as np
 
-from mixle_pde.latent import Field3D, PosteriorField3D
+from mixle_pde.latent import Field3D, PosteriorField3D, SparsePosteriorPrecision
 from mixle_pde.posterior_query import (
     compress_to_low_rank,
     derived_quantity,
@@ -87,6 +87,22 @@ class DerivedQuantityTest(unittest.TestCase):
         exact = derived_quantity(post, w)
         lowrank = derived_quantity(compress_to_low_rank(post, grid.n), w)  # full rank -> exact
         self.assertAlmostEqual(exact.std, lowrank.std, places=6)
+
+    def test_derived_quantity_uses_sparse_precision_factor(self):
+        import scipy.sparse as sp
+
+        grid, post, cov = _dense_posterior()
+        precision = sp.csr_matrix(np.linalg.inv(cov))
+        sparse_post = PosteriorField3D(
+            grid=grid,
+            mean=post.mean.copy(),
+            precision_factor=SparsePosteriorPrecision(precision),
+        )
+        w = np.random.default_rng(4).normal(size=grid.n)
+        exact = derived_quantity(post, w)
+        sparse = derived_quantity(sparse_post, w)
+        self.assertAlmostEqual(sparse.mean, exact.mean, places=9)
+        self.assertAlmostEqual(sparse.std, exact.std, places=6)
 
 
 class CompressionTest(unittest.TestCase):
