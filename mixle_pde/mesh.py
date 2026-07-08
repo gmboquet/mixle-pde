@@ -23,6 +23,7 @@ __all__ = [
     "delaunay_mesh",
     "moving_mesh",
     "pipe_radial_deformation",
+    "refine_simplex_mesh",
     "space_time_mesh",
 ]
 
@@ -168,6 +169,48 @@ class SimplexMesh:
         else:
             nodes = self.nodes.copy()
         return SimplexMesh(nodes, self.simplices.copy())
+
+    def refined(self, *, levels: int = 1, mask: Any = None) -> SimplexMesh:
+        """Return a centroid-refined mesh.
+
+        Each selected simplex gets one centroid node and is split into ``dim + 1`` child simplices by
+        replacing one original vertex at a time with the centroid. With ``mask=None`` every simplex is
+        refined. With a boolean mask, only selected simplices are split and unselected simplices are
+        carried through unchanged.
+        """
+        levels = int(levels)
+        if levels < 0:
+            raise ValueError("levels must be non-negative.")
+        mesh: SimplexMesh = self
+        for _ in range(levels):
+            mesh = mesh._refined_once(mask=mask if mesh is self else None)
+        return mesh
+
+    def _refined_once(self, *, mask: Any = None) -> SimplexMesh:
+        if mask is None:
+            refine_mask = np.ones(self.n_simplices, dtype=bool)
+        else:
+            refine_mask = np.asarray(mask, dtype=bool)
+            if refine_mask.shape != (self.n_simplices,):
+                raise ValueError(f"mask must have shape ({self.n_simplices},).")
+        if not np.any(refine_mask):
+            return SimplexMesh(self.nodes.copy(), self.simplices.copy())
+
+        nodes = self.nodes.tolist()
+        simplices: list[list[int]] = []
+        for do_refine, simplex in zip(refine_mask, self.simplices, strict=True):
+            simplex_list = [int(v) for v in simplex]
+            if not do_refine:
+                simplices.append(simplex_list)
+                continue
+            centroid = np.mean(self.nodes[simplex], axis=0)
+            centroid_idx = len(nodes)
+            nodes.append(centroid.tolist())
+            for replace in range(self.dim + 1):
+                child = simplex_list.copy()
+                child[replace] = centroid_idx
+                simplices.append(child)
+        return SimplexMesh(np.asarray(nodes, dtype=float), np.asarray(simplices, dtype=int))
 
     def extrude_time(self, times: Any) -> SimplexMesh:
         """Extrude a spatial mesh through time into a space-time mesh.
@@ -437,6 +480,11 @@ def moving_mesh(
             )
 
     return MovingSimplexMesh(times, np.asarray(nodes_over_time, dtype=float), base_mesh.simplices.copy())
+
+
+def refine_simplex_mesh(mesh: SimplexMesh, *, levels: int = 1, mask: Any = None) -> SimplexMesh:
+    """Convenience wrapper for :meth:`SimplexMesh.refined`."""
+    return mesh.refined(levels=levels, mask=mask)
 
 
 def pipe_radial_deformation(

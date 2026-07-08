@@ -10,6 +10,7 @@ from mixle_pde.mesh import (
     delaunay_mesh,
     moving_mesh,
     pipe_radial_deformation,
+    refine_simplex_mesh,
     space_time_mesh,
 )
 
@@ -57,6 +58,35 @@ class SimplexMeshTest(unittest.TestCase):
         self.assertAlmostEqual(mesh.total_measure(), 120.0)
         self.assertEqual(report["n_boundary_nodes"], 16)
         self.assertTrue(report["positive_measure"])
+
+    def test_refined_3d_mesh_preserves_volume_and_splits_each_tetrahedron(self):
+        mesh = box_simplex_mesh((2, 2, 2), lengths=(2.0, 3.0, 4.0))
+        refined = mesh.refined()
+
+        self.assertEqual(refined.dim, 3)
+        self.assertEqual(refined.n_nodes, mesh.n_nodes + mesh.n_simplices)
+        self.assertEqual(refined.n_simplices, mesh.n_simplices * 4)
+        self.assertAlmostEqual(refined.total_measure(), mesh.total_measure())
+        self.assertTrue(refined.validate()["positive_measure"])
+
+    def test_refined_4d_mesh_preserves_hypervolume(self):
+        mesh = box_simplex_mesh((2, 2, 2, 2), lengths=(1.0, 2.0, 3.0, 4.0))
+        refined = refine_simplex_mesh(mesh, levels=1)
+
+        self.assertEqual(refined.dim, 4)
+        self.assertEqual(refined.n_nodes, mesh.n_nodes + mesh.n_simplices)
+        self.assertEqual(refined.n_simplices, mesh.n_simplices * 5)
+        self.assertAlmostEqual(refined.total_measure(), mesh.total_measure())
+
+    def test_selective_refinement_splits_only_marked_simplices(self):
+        mesh = box_simplex_mesh((2, 2, 2), lengths=(1.0, 1.0, 1.0))
+        mask = np.zeros(mesh.n_simplices, dtype=bool)
+        mask[[0, 2]] = True
+        refined = mesh.refined(mask=mask)
+
+        self.assertEqual(refined.n_nodes, mesh.n_nodes + int(mask.sum()))
+        self.assertEqual(refined.n_simplices, mesh.n_simplices + int(mask.sum()) * mesh.dim)
+        self.assertAlmostEqual(refined.total_measure(), mesh.total_measure())
 
     def test_extrude_3d_mesh_to_4d_space_time(self):
         spatial = box_simplex_mesh((2, 2, 2), lengths=(1.0, 1.0, 1.0))

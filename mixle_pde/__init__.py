@@ -177,6 +177,7 @@ from mixle_pde.mesh import (
     delaunay_mesh,
     moving_mesh,
     pipe_radial_deformation,
+    refine_simplex_mesh,
     space_time_mesh,
 )
 from mixle_pde.migration import born_modeling, lsrtm_step, rtm_image
@@ -381,6 +382,7 @@ __all__ = [
     "delaunay_mesh",
     "moving_mesh",
     "pipe_radial_deformation",
+    "refine_simplex_mesh",
     "space_time_mesh",
     "DiffusionOperator",
     "AdvectionOperator",

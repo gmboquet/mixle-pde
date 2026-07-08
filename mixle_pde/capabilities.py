@@ -115,8 +115,10 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "SimplexMesh.simplex_edge_lengths",
                 "MovingSimplexMesh.simplex_quality_series",
                 "MovingSimplexMesh.min_quality_series",
+                "SimplexMesh.refined",
                 "box_simplex_mesh",
                 "delaunay_mesh",
+                "refine_simplex_mesh",
                 "moving_mesh",
                 "pipe_radial_deformation",
                 "space_time_mesh",
@@ -124,7 +126,7 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
             required_dependencies=("numpy", "scipy"),
             scenario_ids=("mesh_3d_4d_measure", "mesh_moving_pipe_deformation"),
             limitations=(
-                "mesh quality diagnostics are available; adaptive remeshing and optimization remain future work",
+                "centroid refinement and mesh quality diagnostics are available; adaptive optimization remains future work",
                 "no ALE, FSI, or curved/high-order formulation yet",
             ),
         ),
@@ -678,19 +680,25 @@ def _small_registry(grid, volumes):
 
 
 def _run_mesh_3d_4d_measure() -> ScenarioResult:
-    from mixle_pde.mesh import box_simplex_mesh, space_time_mesh
+    from mixle_pde.mesh import box_simplex_mesh, refine_simplex_mesh, space_time_mesh
 
     mesh3 = box_simplex_mesh((2, 2, 2), lengths=(2.0, 3.0, 4.0))
     mesh4 = box_simplex_mesh((2, 2, 2, 2), lengths=(2.0, 3.0, 4.0, 5.0))
     space_time = space_time_mesh(box_simplex_mesh((2, 2, 2), lengths=(1.0, 1.0, 1.0)), [0.0, 0.25, 1.0])
+    refined3 = refine_simplex_mesh(mesh3)
+    refined4 = refine_simplex_mesh(mesh4)
     quality_ok = (
         mesh3.validate()["min_quality"] > 0.0
         and mesh4.validate()["min_quality"] > 0.0
         and space_time.validate()["min_quality"] > 0.0
+        and refined3.validate()["min_quality"] > 0.0
+        and refined4.validate()["min_quality"] > 0.0
     )
     err3 = abs(mesh3.total_measure() - 24.0) / 24.0
     err4 = abs(mesh4.total_measure() - 120.0) / 120.0
     err_st = abs(space_time.total_measure() - 1.0)
+    err_refined3 = abs(refined3.total_measure() - mesh3.total_measure()) / mesh3.total_measure()
+    err_refined4 = abs(refined4.total_measure() - mesh4.total_measure()) / mesh4.total_measure()
     counts_ok = (
         mesh3.dim == 3
         and mesh3.n_simplices == 6
@@ -698,9 +706,19 @@ def _run_mesh_3d_4d_measure() -> ScenarioResult:
         and mesh4.n_simplices == 24
         and space_time.dim == 4
         and space_time.n_simplices == 48
+        and refined3.n_simplices == mesh3.n_simplices * 4
+        and refined4.n_simplices == mesh4.n_simplices * 5
     )
     tol = 1.0e-12
-    passed = counts_ok and quality_ok and err3 <= tol and err4 <= tol and err_st <= tol
+    passed = (
+        counts_ok
+        and quality_ok
+        and err3 <= tol
+        and err4 <= tol
+        and err_st <= tol
+        and err_refined3 <= tol
+        and err_refined4 <= tol
+    )
     return _result(
         "mesh_3d_4d_measure",
         "mesh.simplicial_3d_4d",
@@ -709,7 +727,11 @@ def _run_mesh_3d_4d_measure() -> ScenarioResult:
             "box_3d_relative_measure_error": err3,
             "box_4d_relative_measure_error": err4,
             "space_time_relative_measure_error": err_st,
+            "refined_3d_relative_measure_error": err_refined3,
+            "refined_4d_relative_measure_error": err_refined4,
             "space_time_simplices": space_time.n_simplices,
+            "refined_3d_simplices": refined3.n_simplices,
+            "refined_4d_simplices": refined4.n_simplices,
             "box_3d_min_quality": mesh3.validate()["min_quality"],
             "box_4d_min_quality": mesh4.validate()["min_quality"],
             "space_time_min_quality": space_time.validate()["min_quality"],
