@@ -29,6 +29,7 @@ route.
    modeling-workflows
    observation-and-inversion-contract
    solver-selection-and-inversion-guide
+   release-readiness
    release-0-6-3
    changelog
    security-and-data

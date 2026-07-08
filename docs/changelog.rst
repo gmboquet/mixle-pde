@@ -17,6 +17,8 @@ Added
 * 0.6.x field-modeling guide converted into Sphinx-native docs.
 * Generated API reference for public PDE, geophysics, field-inversion, and
   assimilation modules.
+* Release-readiness checklist for manufactured solutions, inverse recovery,
+  posterior checks, numerical honesty, and optional-dependency evidence.
 
 Changed
 ~~~~~~~
