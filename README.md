@@ -143,7 +143,9 @@ sensitivities for Gauss-Newton posterior construction.
 `csem_3d_forward_operator` do the same for 1D layered, 2D TE-mode, 3D curl-curl magnetotelluric, and
 3D controlled-source EM soundings, mapping log-conductivity to real-valued geophysical observations.
 
-`PosteriorField4D`, `assimilate_4d`, and `assimilate_4d_ensemble` add a time axis through exact
+`sparse_linear_gaussian_invert` stores a linear-Gaussian posterior in sparse precision-factor form,
+using sparse covariance solves for marginals and linear derived quantities without retaining a dense
+covariance matrix. `PosteriorField4D`, `assimilate_4d`, and `assimilate_4d_ensemble` add a time axis through exact
 Kalman/RTS smoothing for linear observations and ensemble Kalman filtering for nonlinear observations,
 exposing each time slice as an ordinary `PosteriorField3D`. `FieldGaussianPrior` can
 assemble either dense or sparse CSR graph precision matrices. `depth_weights`,
@@ -161,7 +163,7 @@ mass, low-rank or diagonal Gaussian summaries, and ensemble samples. `posterior_
 synthetic-truth coverage, held-out observation fit, uncertainty inflation away from data, and
 insufficient-observation flags. Full reaction-path geochemistry,
 paleoecological/basin-process simulators, full truncated multivariate censoring for multi-element assays,
-sparse posterior factorization/storage, production-scale adjoint sensitivities, and AEM posterior-observation
+production-scale adjoint sensitivities, iterative sparse posterior solvers, and AEM posterior-observation
 operators remain future validated kernels. The ensemble 4D path is a stochastic
 Gaussian-summary reference, not a production particle/MCMC smoother.
 

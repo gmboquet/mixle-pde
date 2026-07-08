@@ -17,9 +17,11 @@ clean integration point with Mixle's probabilistic-programming surface.
    package-map
    modeling-workflows
    README
+   release-0-6-3
    0.6.x-field-modeling
    api-overview
    validation
+   troubleshooting
 
 .. toctree::
    :caption: Reference
