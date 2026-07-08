@@ -31,7 +31,7 @@ Inspect Modeling Capabilities
 
 The catalog reports dependency availability and the deterministic readiness
 scenarios associated with each modeling family. Use it to distinguish
-implemented capability from aspirational documentation.
+implemented capability from future release plans.
 
 Create An Observation Likelihood
 --------------------------------

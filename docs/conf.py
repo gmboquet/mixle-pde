@@ -22,7 +22,6 @@ release = pyproject["project"]["version"]
 version = ".".join(release.split(".")[:2])
 
 extensions = [
-    "myst_parser",
     "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",
     "sphinx.ext.intersphinx",
@@ -30,10 +29,7 @@ extensions = [
     "sphinx.ext.viewcode",
 ]
 
-source_suffix = {
-    ".rst": "restructuredtext",
-    ".md": "markdown",
-}
+source_suffix = {".rst": "restructuredtext"}
 master_doc = "index"
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 

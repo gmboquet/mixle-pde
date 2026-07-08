@@ -29,7 +29,6 @@ route.
    modeling-workflows
    observation-and-inversion-contract
    solver-selection-and-inversion-guide
-   README
    release-0-6-3
    changelog
    security-and-data
