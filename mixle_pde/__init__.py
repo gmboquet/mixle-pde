@@ -124,8 +124,10 @@ from mixle_pde.field_priors import (
 )
 from mixle_pde.fem import (
     assemble_simplex_fem_matrices,
+    assemble_simplex_load_vector,
     assemble_simplex_mass_matrix,
     assemble_simplex_stiffness_matrix,
+    solve_simplex_poisson,
     simplex_p1_gradients,
 )
 from mixle_pde.flow import NavierStokes2D
@@ -384,8 +386,10 @@ __all__ = [
     "to_diagonal",
     "to_ensemble",
     "assemble_simplex_fem_matrices",
+    "assemble_simplex_load_vector",
     "assemble_simplex_mass_matrix",
     "assemble_simplex_stiffness_matrix",
+    "solve_simplex_poisson",
     "simplex_p1_gradients",
     "SimplexMesh",
     "MovingSimplexMesh",

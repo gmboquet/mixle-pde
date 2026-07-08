@@ -122,6 +122,8 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "assemble_simplex_mass_matrix",
                 "assemble_simplex_stiffness_matrix",
                 "assemble_simplex_fem_matrices",
+                "assemble_simplex_load_vector",
+                "solve_simplex_poisson",
                 "box_simplex_mesh",
                 "delaunay_mesh",
                 "interpolate_simplex_field",
@@ -687,9 +689,15 @@ def _small_registry(grid, volumes):
 
 
 def _run_mesh_3d_4d_measure() -> ScenarioResult:
-    from mixle_pde.fem import assemble_simplex_mass_matrix, assemble_simplex_stiffness_matrix
+    from mixle_pde.fem import (
+        assemble_simplex_load_vector,
+        assemble_simplex_mass_matrix,
+        assemble_simplex_stiffness_matrix,
+        solve_simplex_poisson,
+    )
     from mixle_pde.mesh import box_simplex_mesh, refine_simplex_mesh, space_time_mesh
 
+    tol = 1.0e-12
     mesh3 = box_simplex_mesh((2, 2, 2), lengths=(2.0, 3.0, 4.0))
     mesh4 = box_simplex_mesh((2, 2, 2, 2), lengths=(2.0, 3.0, 4.0, 5.0))
     space_time = space_time_mesh(box_simplex_mesh((2, 2, 2), lengths=(1.0, 1.0, 1.0)), [0.0, 0.25, 1.0])
@@ -716,6 +724,17 @@ def _run_mesh_3d_4d_measure() -> ScenarioResult:
     linear_x = mesh3.nodes[:, 0]
     linear_energy = float(linear_x @ (stiffness3 @ linear_x))
     linear_energy_err = abs(linear_energy - mesh3.total_measure()) / mesh3.total_measure()
+    load4 = assemble_simplex_load_vector(mesh4, 2.0)
+    load4_err = abs(float(load4.sum()) - 2.0 * mesh4.total_measure()) / (2.0 * mesh4.total_measure())
+    poisson_mesh = box_simplex_mesh((3, 3, 3), lengths=(1.0, 1.0, 1.0))
+    poisson_solution = solve_simplex_poisson(poisson_mesh, 1.0)
+    poisson_boundary = poisson_mesh.boundary_nodes()
+    poisson_interior = np.setdiff1d(np.arange(poisson_mesh.n_nodes), poisson_boundary)
+    poisson_ok = (
+        bool(np.isfinite(poisson_solution).all())
+        and float(np.max(np.abs(poisson_solution[poisson_boundary]))) <= tol
+        and float(np.max(poisson_solution[poisson_interior])) > 0.0
+    )
     counts_ok = (
         mesh3.dim == 3
         and mesh3.n_simplices == 6
@@ -726,7 +745,6 @@ def _run_mesh_3d_4d_measure() -> ScenarioResult:
         and refined3.n_simplices == mesh3.n_simplices * 4
         and refined4.n_simplices == mesh4.n_simplices * 5
     )
-    tol = 1.0e-12
     passed = (
         counts_ok
         and quality_ok
@@ -739,6 +757,8 @@ def _run_mesh_3d_4d_measure() -> ScenarioResult:
         and mass4_err <= tol
         and constant_residual <= tol
         and linear_energy_err <= tol
+        and load4_err <= tol
+        and poisson_ok
     )
     return _result(
         "mesh_3d_4d_measure",
@@ -760,6 +780,8 @@ def _run_mesh_3d_4d_measure() -> ScenarioResult:
             "fem_4d_mass_relative_error": mass4_err,
             "fem_constant_stiffness_residual": constant_residual,
             "fem_linear_energy_relative_error": linear_energy_err,
+            "fem_4d_load_relative_error": load4_err,
+            "fem_poisson_center_value": float(np.max(poisson_solution[poisson_interior])),
         },
         tolerance={"relative_measure_error": tol},
         message="3D/4D simplex measures matched" if passed else "3D/4D simplex measure mismatch",

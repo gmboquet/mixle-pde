@@ -17,10 +17,12 @@ import scipy.sparse.linalg as spla
 
 __all__ = [
     "assemble_simplex_fem_matrices",
+    "assemble_simplex_load_vector",
     "assemble_simplex_mass_matrix",
     "assemble_simplex_stiffness_matrix",
     "boundary_nodes",
     "fem_poisson",
+    "solve_simplex_poisson",
     "simplex_p1_gradients",
 ]
 
@@ -123,6 +125,60 @@ def assemble_simplex_fem_matrices(
     stiffness = assemble_simplex_stiffness_matrix(mesh, diffusion=diffusion, min_measure=min_measure)
     mass = assemble_simplex_mass_matrix(mesh, lumped=lumped_mass, min_measure=min_measure)
     return stiffness, mass
+
+
+def assemble_simplex_load_vector(mesh, source, *, min_measure: float = 1.0e-14) -> np.ndarray:
+    """Assemble a P1 load vector for scalar, nodal, callable, or per-element source data."""
+    nodes = np.asarray(mesh.nodes, dtype=float)
+    simplices = np.asarray(mesh.simplices, dtype=int)
+    n_nodes = int(nodes.shape[0])
+    if callable(source):
+        nodal = np.asarray([source(point) for point in nodes], dtype=float)
+        return assemble_simplex_mass_matrix(mesh, min_measure=min_measure) @ nodal
+
+    values = np.asarray(source, dtype=float)
+    if values.ndim == 0:
+        nodal = np.full(n_nodes, float(values))
+        return assemble_simplex_mass_matrix(mesh, min_measure=min_measure) @ nodal
+    if values.shape == (n_nodes,):
+        return assemble_simplex_mass_matrix(mesh, min_measure=min_measure) @ values
+    if values.shape == (len(simplices),):
+        load = np.zeros(n_nodes, dtype=float)
+        n_local = int(nodes.shape[1]) + 1
+        for element, simplex in enumerate(simplices):
+            try:
+                measure, _ = simplex_p1_gradients(nodes[simplex])
+            except np.linalg.LinAlgError:
+                continue
+            if measure <= float(min_measure):
+                continue
+            load[simplex] += float(values[element]) * measure / n_local
+        return load
+    raise ValueError("source must be scalar, callable, shape (n_nodes,), or shape (n_simplices,).")
+
+
+def solve_simplex_poisson(
+    mesh,
+    source,
+    *,
+    diffusion=1.0,
+    dirichlet: dict[int, float] | None = None,
+    min_measure: float = 1.0e-14,
+) -> np.ndarray:
+    """Solve ``-div(diffusion grad u) = source`` with P1 elements on a simplex mesh."""
+    stiffness = assemble_simplex_stiffness_matrix(mesh, diffusion=diffusion, min_measure=min_measure).tolil()
+    rhs = assemble_simplex_load_vector(mesh, source, min_measure=min_measure)
+    if dirichlet is None:
+        if not hasattr(mesh, "boundary_nodes"):
+            raise ValueError("dirichlet is required unless mesh has boundary_nodes().")
+        bc = {int(node): 0.0 for node in mesh.boundary_nodes()}
+    else:
+        bc = {int(node): float(value) for node, value in dirichlet.items()}
+    for node, value in bc.items():
+        stiffness.rows[node] = [node]
+        stiffness.data[node] = [1.0]
+        rhs[node] = value
+    return spla.spsolve(stiffness.tocsr(), rhs)
 
 
 def fem_poisson(nodes, triangles, source, *, conductivity=1.0, dirichlet=None) -> np.ndarray:

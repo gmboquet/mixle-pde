@@ -7,10 +7,12 @@ from scipy.spatial import Delaunay
 
 from mixle_pde.fem import (
     assemble_simplex_fem_matrices,
+    assemble_simplex_load_vector,
     assemble_simplex_mass_matrix,
     assemble_simplex_stiffness_matrix,
     boundary_nodes,
     fem_poisson,
+    solve_simplex_poisson,
 )
 from mixle_pde.mesh import box_simplex_mesh
 
@@ -86,6 +88,23 @@ class FEMPoissonTest(unittest.TestCase):
         energy = float(linear_x @ (stiffness @ linear_x))
 
         self.assertAlmostEqual(energy, mesh.total_measure())
+
+    def test_simplex_load_vector_integrates_scalar_source(self):
+        mesh = box_simplex_mesh((2, 2, 2, 2), lengths=(1.0, 2.0, 3.0, 4.0))
+        load = assemble_simplex_load_vector(mesh, 2.0)
+
+        self.assertEqual(load.shape, (mesh.n_nodes,))
+        self.assertAlmostEqual(float(load.sum()), 2.0 * mesh.total_measure())
+
+    def test_simplex_poisson_solves_3d_zero_boundary_problem(self):
+        mesh = box_simplex_mesh((3, 3, 3), lengths=(1.0, 1.0, 1.0))
+        solution = solve_simplex_poisson(mesh, 1.0)
+        boundary = mesh.boundary_nodes()
+        interior = np.setdiff1d(np.arange(mesh.n_nodes), boundary)
+
+        self.assertTrue(np.all(np.isfinite(solution)))
+        np.testing.assert_allclose(solution[boundary], np.zeros(boundary.shape))
+        self.assertGreater(float(solution[interior].max()), 0.0)
 
 
 if __name__ == "__main__":
