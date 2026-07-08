@@ -7,6 +7,14 @@ geophysical forward operators, field priors, assimilation routines, and
 PDE-constrained latent models outside the core package while preserving a
 clean integration point with Mixle's probabilistic-programming surface.
 
+Start Here
+----------
+
+Start with :doc:`quickstart` for a small capability and observation-likelihood
+check. Use :doc:`modeling-workflows` for field-to-posterior data flow and
+:doc:`solver-selection-and-inversion-guide` when choosing a solver or inverse
+route.
+
 .. toctree::
    :caption: Start Here
    :hidden:
