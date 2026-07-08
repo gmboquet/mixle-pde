@@ -124,6 +124,8 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "assemble_simplex_fem_matrices",
                 "assemble_simplex_load_vector",
                 "solve_simplex_poisson",
+                "step_simplex_diffusion",
+                "simulate_simplex_diffusion",
                 "box_simplex_mesh",
                 "delaunay_mesh",
                 "interpolate_simplex_field",
@@ -297,7 +299,13 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
             category="forward-inverse",
             description="Finite-volume transient conduction for thermography and conductivity inversion.",
             equations=("rho c dT/dt = div(k grad T) + q",),
-            solver_symbols=("TransientHeat", "Differential", "DiffusionOperator"),
+            solver_symbols=(
+                "TransientHeat",
+                "Differential",
+                "DiffusionOperator",
+                "step_simplex_diffusion",
+                "simulate_simplex_diffusion",
+            ),
             required_dependencies=("numpy", "scipy", "torch", "mixle"),
             differentiable=True,
             inverse_ready=True,
@@ -694,6 +702,7 @@ def _run_mesh_3d_4d_measure() -> ScenarioResult:
         assemble_simplex_mass_matrix,
         assemble_simplex_stiffness_matrix,
         solve_simplex_poisson,
+        step_simplex_diffusion,
     )
     from mixle_pde.mesh import box_simplex_mesh, refine_simplex_mesh, space_time_mesh
 
@@ -735,6 +744,15 @@ def _run_mesh_3d_4d_measure() -> ScenarioResult:
         and float(np.max(np.abs(poisson_solution[poisson_boundary]))) <= tol
         and float(np.max(poisson_solution[poisson_interior])) > 0.0
     )
+    impulse = np.zeros(poisson_mesh.n_nodes)
+    center = int(np.argmin(np.linalg.norm(poisson_mesh.nodes - np.array([0.5, 0.5, 0.5]), axis=1)))
+    impulse[center] = 1.0
+    diffused = step_simplex_diffusion(poisson_mesh, impulse, 0.05)
+    diffusion_ok = (
+        bool(np.isfinite(diffused).all())
+        and float(diffused[center]) < 1.0
+        and float(np.max(np.abs(diffused[poisson_boundary]))) <= tol
+    )
     counts_ok = (
         mesh3.dim == 3
         and mesh3.n_simplices == 6
@@ -759,6 +777,7 @@ def _run_mesh_3d_4d_measure() -> ScenarioResult:
         and linear_energy_err <= tol
         and load4_err <= tol
         and poisson_ok
+        and diffusion_ok
     )
     return _result(
         "mesh_3d_4d_measure",
@@ -782,6 +801,7 @@ def _run_mesh_3d_4d_measure() -> ScenarioResult:
             "fem_linear_energy_relative_error": linear_energy_err,
             "fem_4d_load_relative_error": load4_err,
             "fem_poisson_center_value": float(np.max(poisson_solution[poisson_interior])),
+            "fem_diffusion_center_value": float(diffused[center]),
         },
         tolerance={"relative_measure_error": tol},
         message="3D/4D simplex measures matched" if passed else "3D/4D simplex measure mismatch",

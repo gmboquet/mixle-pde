@@ -12,7 +12,9 @@ from mixle_pde.fem import (
     assemble_simplex_stiffness_matrix,
     boundary_nodes,
     fem_poisson,
+    simulate_simplex_diffusion,
     solve_simplex_poisson,
+    step_simplex_diffusion,
 )
 from mixle_pde.mesh import box_simplex_mesh
 
@@ -105,6 +107,27 @@ class FEMPoissonTest(unittest.TestCase):
         self.assertTrue(np.all(np.isfinite(solution)))
         np.testing.assert_allclose(solution[boundary], np.zeros(boundary.shape))
         self.assertGreater(float(solution[interior].max()), 0.0)
+
+    def test_simplex_diffusion_step_damps_3d_interior_impulse(self):
+        mesh = box_simplex_mesh((3, 3, 3), lengths=(1.0, 1.0, 1.0))
+        initial = np.zeros(mesh.n_nodes)
+        center = np.where(np.all(np.isclose(mesh.nodes, np.array([0.5, 0.5, 0.5])), axis=1))[0][0]
+        initial[center] = 1.0
+
+        updated = step_simplex_diffusion(mesh, initial, 0.05)
+
+        self.assertTrue(np.all(np.isfinite(updated)))
+        self.assertLess(float(updated[center]), 1.0)
+        np.testing.assert_allclose(updated[mesh.boundary_nodes()], np.zeros(len(mesh.boundary_nodes())))
+
+    def test_simplex_diffusion_simulation_returns_time_series(self):
+        mesh = box_simplex_mesh((3, 3, 3), lengths=(1.0, 1.0, 1.0))
+        initial = np.sin(np.pi * mesh.nodes[:, 0]) * np.sin(np.pi * mesh.nodes[:, 1]) * np.sin(np.pi * mesh.nodes[:, 2])
+
+        states = simulate_simplex_diffusion(mesh, initial, [0.0, 0.05, 0.1])
+
+        self.assertEqual(states.shape, (3, mesh.n_nodes))
+        self.assertLess(float(np.linalg.norm(states[-1])), float(np.linalg.norm(states[0])))
 
 
 if __name__ == "__main__":

@@ -22,7 +22,9 @@ __all__ = [
     "assemble_simplex_stiffness_matrix",
     "boundary_nodes",
     "fem_poisson",
+    "simulate_simplex_diffusion",
     "solve_simplex_poisson",
+    "step_simplex_diffusion",
     "simplex_p1_gradients",
 ]
 
@@ -181,6 +183,75 @@ def solve_simplex_poisson(
     return spla.spsolve(stiffness.tocsr(), rhs)
 
 
+def step_simplex_diffusion(
+    mesh,
+    values,
+    dt: float,
+    *,
+    diffusion=1.0,
+    source=0.0,
+    dirichlet: dict[int, float] | None = None,
+    lumped_mass: bool = False,
+    min_measure: float = 1.0e-14,
+) -> np.ndarray:
+    """Advance ``u_t - div(diffusion grad u) = source`` one implicit Euler step."""
+    u = np.asarray(values, dtype=float).reshape(-1)
+    n_nodes = int(np.asarray(mesh.nodes).shape[0])
+    if u.shape != (n_nodes,):
+        raise ValueError(f"values must have shape ({n_nodes},).")
+    step = float(dt)
+    if step <= 0.0:
+        raise ValueError("dt must be positive.")
+
+    mass = assemble_simplex_mass_matrix(mesh, lumped=lumped_mass, min_measure=min_measure)
+    stiffness = assemble_simplex_stiffness_matrix(mesh, diffusion=diffusion, min_measure=min_measure)
+    load = assemble_simplex_load_vector(mesh, source, min_measure=min_measure)
+    lhs = (mass + step * stiffness).tolil()
+    rhs = mass @ u + step * load
+    bc = _dirichlet_map(mesh, dirichlet)
+    for node, value in bc.items():
+        lhs.rows[node] = [node]
+        lhs.data[node] = [1.0]
+        rhs[node] = value
+    return spla.spsolve(lhs.tocsr(), rhs)
+
+
+def simulate_simplex_diffusion(
+    mesh,
+    initial,
+    times,
+    *,
+    diffusion=1.0,
+    source=0.0,
+    dirichlet: dict[int, float] | None = None,
+    lumped_mass: bool = False,
+    min_measure: float = 1.0e-14,
+) -> np.ndarray:
+    """Run implicit simplex diffusion and return states with shape ``(n_times, n_nodes)``."""
+    ts = np.asarray(times, dtype=float).reshape(-1)
+    if ts.size < 1:
+        raise ValueError("times must contain at least one entry.")
+    if np.any(np.diff(ts) <= 0.0):
+        raise ValueError("times must be strictly increasing.")
+    states = np.empty((ts.size, int(np.asarray(mesh.nodes).shape[0])), dtype=float)
+    initial_values = np.asarray(initial, dtype=float).reshape(-1)
+    if initial_values.shape != (states.shape[1],):
+        raise ValueError(f"initial must have shape ({states.shape[1]},).")
+    states[0] = initial_values
+    for step in range(ts.size - 1):
+        states[step + 1] = step_simplex_diffusion(
+            mesh,
+            states[step],
+            float(ts[step + 1] - ts[step]),
+            diffusion=diffusion,
+            source=source,
+            dirichlet=dirichlet,
+            lumped_mass=lumped_mass,
+            min_measure=min_measure,
+        )
+    return states
+
+
 def fem_poisson(nodes, triangles, source, *, conductivity=1.0, dirichlet=None) -> np.ndarray:
     """Solve ``-div(kappa grad u) = source`` by P1 finite elements on a triangular mesh.
 
@@ -249,3 +320,11 @@ def _element_diffusion(diffusion, element: int, dim: int, n_elements: int):
         "diffusion must be scalar, shape (n_elements,), shape (dim, dim), "
         "or shape (n_elements, dim, dim)."
     )
+
+
+def _dirichlet_map(mesh, dirichlet: dict[int, float] | None) -> dict[int, float]:
+    if dirichlet is None:
+        if not hasattr(mesh, "boundary_nodes"):
+            raise ValueError("dirichlet is required unless mesh has boundary_nodes().")
+        return {int(node): 0.0 for node in mesh.boundary_nodes()}
+    return {int(node): float(value) for node, value in dirichlet.items()}
