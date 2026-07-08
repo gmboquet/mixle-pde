@@ -193,6 +193,10 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "PosteriorFieldSamples4D.at_time",
                 "PosteriorFieldSamples4D.posterior_predictive_draws",
                 "SampleUpdateReport",
+                "Synthetic3DInversionResult",
+                "Synthetic4DAssimilationResult",
+                "run_synthetic_3d_geochem_geophysics_inversion",
+                "run_synthetic_4d_biostrat_assimilation",
                 "geochem_assay_likelihood",
                 "biostrat_constraint_likelihood",
                 "geochronology_age_likelihood",
@@ -286,6 +290,7 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "earth_sparse_posterior_factorization",
                 "earth_posterior_extraction",
                 "earth_posterior_calibration",
+                "earth_synthetic_inversion_harnesses",
             ),
             limitations=(
                 "geochemistry and biostratigraphy are likelihoods, not full reaction-path or paleoecology simulators",
@@ -612,6 +617,13 @@ def verification_scenarios() -> tuple[VerificationScenario, ...]:
             name="Posterior calibration diagnostics",
             description="Truth coverage, held-out fit, uncertainty inflation, and insufficient-data flags are measured.",
             runner=_run_earth_posterior_calibration,
+        ),
+        VerificationScenario(
+            id="earth_synthetic_inversion_harnesses",
+            capability_id="earth.geochem_biostrat_likelihoods",
+            name="Synthetic 3D/4D Earth inversion harnesses",
+            description="Reusable 3D geophysics+geochem and 4D biostrat assimilation harnesses return posteriors.",
+            runner=_run_earth_synthetic_inversion_harnesses,
         ),
         VerificationScenario(
             id="heat_fourier_decay",
@@ -2179,6 +2191,40 @@ def _run_earth_posterior_calibration() -> ScenarioResult:
         },
         tolerance={"min_truth_coverage": 0.9, "min_uncertainty_inflation_ratio": 3.0},
         message="posterior calibration diagnostics matched" if passed else "posterior calibration check failed",
+    )
+
+
+def _run_earth_synthetic_inversion_harnesses() -> ScenarioResult:
+    from mixle_pde.earth_scenarios import (
+        run_synthetic_3d_geochem_geophysics_inversion,
+        run_synthetic_4d_biostrat_assimilation,
+    )
+
+    result3 = run_synthetic_3d_geochem_geophysics_inversion(n_samples=512, rng=np.random.default_rng(11))
+    result4 = run_synthetic_4d_biostrat_assimilation(n_samples=512, rng=np.random.default_rng(12))
+    assay_improved = result3.metrics["assay_cell_updated_error"] < result3.metrics["assay_cell_geophysical_error"]
+    time_improved = result4.metrics["biostrat_updated_final_error"] < result4.metrics["dynamics_final_error"]
+    artifacts_ok = (
+        result3.geochem_updated_posterior.samples.shape == (512, result3.grid.n)
+        and result4.biostrat_updated_posterior.samples.shape == (512, result4.times.size, result4.grid.n)
+        and result4.metrics["joint_start_final_covariance"] > 0.0
+    )
+    passed = assay_improved and time_improved and artifacts_ok
+    return _result(
+        "earth_synthetic_inversion_harnesses",
+        "earth.geochem_biostrat_likelihoods",
+        passed=passed,
+        metrics={
+            "assay_cell_geophysical_error": result3.metrics["assay_cell_geophysical_error"],
+            "assay_cell_updated_error": result3.metrics["assay_cell_updated_error"],
+            "dynamics_final_error": result4.metrics["dynamics_final_error"],
+            "biostrat_updated_final_error": result4.metrics["biostrat_updated_final_error"],
+            "joint_start_final_covariance": result4.metrics["joint_start_final_covariance"],
+        },
+        tolerance={"improvement_required": 1.0},
+        message="synthetic 3D/4D Earth inversion harnesses improved posterior metrics"
+        if passed
+        else "synthetic Earth inversion harness check failed",
     )
 
 

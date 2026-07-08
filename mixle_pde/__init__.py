@@ -93,6 +93,12 @@ from mixle_pde.env_data import (
     load_woa_argo,
     seabed_mask,
 )
+from mixle_pde.earth_scenarios import (
+    Synthetic3DInversionResult,
+    Synthetic4DAssimilationResult,
+    run_synthetic_3d_geochem_geophysics_inversion,
+    run_synthetic_4d_biostrat_assimilation,
+)
 from mixle_pde.field_assimilation import (
     ParticleAssimilationReport,
     PosteriorField4D,
@@ -356,6 +362,10 @@ __all__ = [
     "stratigraphic_correlation_log_likelihood",
     "facies_interval_log_likelihood",
     "FieldGaussianPrior",
+    "Synthetic3DInversionResult",
+    "Synthetic4DAssimilationResult",
+    "run_synthetic_3d_geochem_geophysics_inversion",
+    "run_synthetic_4d_biostrat_assimilation",
     "linear_gaussian_invert",
     "sparse_linear_gaussian_invert",
     "PosteriorPredictiveCheck",
