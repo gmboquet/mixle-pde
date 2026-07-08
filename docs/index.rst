@@ -1,0 +1,28 @@
+mixle-pde
+=========
+
+``mixle-pde`` is the PDE, ODE, field-inversion, and mechanistic simulation
+package for Mixle. It keeps physics kernels, inverse-problem utilities,
+geophysical forward operators, field priors, assimilation routines, and
+PDE-constrained latent models outside the core package while preserving a
+clean integration point with Mixle's probabilistic-programming surface.
+
+.. toctree::
+   :caption: Start Here
+   :hidden:
+   :maxdepth: 2
+
+   installation
+   overview
+   package-map
+   README
+   0.6.x-field-modeling
+   api-overview
+   validation
+
+.. toctree::
+   :caption: Reference
+   :hidden:
+   :maxdepth: 2
+
+   api/modules
