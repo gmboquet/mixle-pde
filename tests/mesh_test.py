@@ -10,6 +10,8 @@ from mixle_pde.mesh import (
     delaunay_mesh,
     interpolate_simplex_field,
     moving_mesh,
+    pipe_boundary_facets,
+    pipe_boundary_nodes,
     pipe_radial_deformation,
     pipe_simplex_mesh,
     refine_simplex_mesh,
@@ -208,6 +210,20 @@ class SimplexMeshTest(unittest.TestCase):
 
         self.assertTrue(moving.validate()["positive_measure_all_steps"])
         np.testing.assert_allclose(ratios[1], np.full(mesh.n_simplices, 1.2**2))
+
+    def test_pipe_boundary_groups_classify_nodes_and_facets(self):
+        mesh = pipe_simplex_mesh(inner_radius=0.5, outer_radius=1.0, length=2.0, n_theta=16, n_axial=3)
+        nodes = pipe_boundary_nodes(mesh, inner_radius=0.5, outer_radius=1.0, length=2.0)
+        facets = pipe_boundary_facets(mesh, inner_radius=0.5, outer_radius=1.0, length=2.0)
+
+        self.assertEqual(nodes["inner_wall"].size, 16 * 3)
+        self.assertEqual(nodes["outer_wall"].size, 16 * 3)
+        self.assertEqual(nodes["inlet"].size, 2 * 16)
+        self.assertEqual(nodes["outlet"].size, 2 * 16)
+        self.assertGreater(facets["inner_wall"].shape[0], 0)
+        self.assertGreater(facets["outer_wall"].shape[0], 0)
+        self.assertGreater(facets["inlet"].shape[0], 0)
+        self.assertGreater(facets["outlet"].shape[0], 0)
 
     def test_moving_mesh_transfers_values_between_deformed_domains(self):
         mesh = box_simplex_mesh((2, 2, 2), lengths=(1.0, 1.0, 1.0))

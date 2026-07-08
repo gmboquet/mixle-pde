@@ -23,6 +23,8 @@ __all__ = [
     "delaunay_mesh",
     "interpolate_simplex_field",
     "moving_mesh",
+    "pipe_boundary_facets",
+    "pipe_boundary_nodes",
     "pipe_radial_deformation",
     "pipe_simplex_mesh",
     "refine_simplex_mesh",
@@ -620,6 +622,69 @@ def pipe_simplex_mesh(
                         verts.append(tuple(local))
                     simplices.append([corners[vertex] for vertex in verts])
     return _orient_simplex_mesh(nodes, np.asarray(simplices, dtype=int))
+
+
+def pipe_boundary_nodes(
+    mesh: SimplexMesh,
+    *,
+    inner_radius: float,
+    outer_radius: float,
+    length: float,
+    center: Any = None,
+    axial_origin: float = 0.0,
+    axis: int | str = 2,
+    tol: float = 1.0e-8,
+) -> dict[str, np.ndarray]:
+    """Classify pipe mesh nodes into inner/outer wall and inlet/outlet boundary groups."""
+    if mesh.dim != 3:
+        raise ValueError("pipe boundary classification requires a 3D mesh.")
+    axis_index = _axis_index(axis)
+    if axis_index < 0 or axis_index > 2:
+        raise ValueError("axis must be x, y, z, or an integer in [0, 2].")
+    radial_axes = [i for i in range(3) if i != axis_index]
+    radial_center = (
+        np.zeros(2, dtype=float) if center is None else np.broadcast_to(np.asarray(center, dtype=float), (2,))
+    )
+    radial = np.linalg.norm(mesh.nodes[:, radial_axes] - radial_center[None, :], axis=1)
+    axial = mesh.nodes[:, axis_index]
+    tolerance = float(tol) * max(1.0, float(outer_radius), float(length))
+    return {
+        "inner_wall": np.flatnonzero(np.isclose(radial, float(inner_radius), atol=tolerance)),
+        "outer_wall": np.flatnonzero(np.isclose(radial, float(outer_radius), atol=tolerance)),
+        "inlet": np.flatnonzero(np.isclose(axial, float(axial_origin), atol=tolerance)),
+        "outlet": np.flatnonzero(np.isclose(axial, float(axial_origin) + float(length), atol=tolerance)),
+    }
+
+
+def pipe_boundary_facets(
+    mesh: SimplexMesh,
+    *,
+    inner_radius: float,
+    outer_radius: float,
+    length: float,
+    center: Any = None,
+    axial_origin: float = 0.0,
+    axis: int | str = 2,
+    tol: float = 1.0e-8,
+) -> dict[str, np.ndarray]:
+    """Classify pipe boundary facets into named wall and end-cap groups."""
+    groups = pipe_boundary_nodes(
+        mesh,
+        inner_radius=inner_radius,
+        outer_radius=outer_radius,
+        length=length,
+        center=center,
+        axial_origin=axial_origin,
+        axis=axis,
+        tol=tol,
+    )
+    facets = mesh.boundary_facets()
+    out: dict[str, np.ndarray] = {}
+    for name, nodes in groups.items():
+        node_set = set(int(node) for node in nodes)
+        mask = np.array([all(int(node) in node_set for node in facet) for facet in facets], dtype=bool)
+        out[name] = facets[mask]
+    return out
 
 
 def refine_simplex_mesh(mesh: SimplexMesh, *, levels: int = 1, mask: Any = None) -> SimplexMesh:

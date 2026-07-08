@@ -131,6 +131,8 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "interpolate_simplex_field",
                 "refine_simplex_mesh",
                 "moving_mesh",
+                "pipe_boundary_nodes",
+                "pipe_boundary_facets",
                 "pipe_radial_deformation",
                 "pipe_simplex_mesh",
                 "space_time_mesh",
@@ -861,9 +863,17 @@ def _run_mesh_3d_4d_measure() -> ScenarioResult:
 
 
 def _run_mesh_moving_pipe_deformation() -> ScenarioResult:
-    from mixle_pde.mesh import moving_mesh, pipe_radial_deformation, pipe_simplex_mesh
+    from mixle_pde.mesh import (
+        moving_mesh,
+        pipe_boundary_facets,
+        pipe_boundary_nodes,
+        pipe_radial_deformation,
+        pipe_simplex_mesh,
+    )
 
     base = pipe_simplex_mesh(inner_radius=0.5, outer_radius=1.0, length=2.0, n_theta=24, n_axial=3)
+    boundary_nodes = pipe_boundary_nodes(base, inner_radius=0.5, outer_radius=1.0, length=2.0)
+    boundary_facets = pipe_boundary_facets(base, inner_radius=0.5, outer_radius=1.0, length=2.0)
     motion = moving_mesh(
         base,
         [0.0, 0.5, 1.0],
@@ -879,8 +889,11 @@ def _run_mesh_moving_pipe_deformation() -> ScenarioResult:
     counts_ok = motion.dim == 3 and space_time.dim == 4 and space_time.n_simplices == base.n_simplices * 4 * 2
     health_ok = report["positive_measure_all_steps"] and report["n_inverted_or_degenerate_relative_to_reference"] == 0
     quality_ok = report["min_quality"] > 0.0 and report["n_low_quality"] == 0
+    boundary_ok = all(nodes.size > 0 for nodes in boundary_nodes.values()) and all(
+        facets.size > 0 for facets in boundary_facets.values()
+    )
     tol = 1.0e-12
-    passed = counts_ok and health_ok and quality_ok and rel_err <= tol and pipe_volume_error <= 0.02
+    passed = counts_ok and health_ok and quality_ok and boundary_ok and rel_err <= tol and pipe_volume_error <= 0.02
     return _result(
         "mesh_moving_pipe_deformation",
         "mesh.simplicial_3d_4d",
@@ -893,6 +906,8 @@ def _run_mesh_moving_pipe_deformation() -> ScenarioResult:
             "min_signed_measure_ratio": float(report["min_signed_measure_ratio"]),
             "min_quality": float(report["min_quality"]),
             "pipe_volume_relative_error": pipe_volume_error,
+            "inner_wall_nodes": float(boundary_nodes["inner_wall"].size),
+            "outer_wall_facets": float(boundary_facets["outer_wall"].shape[0]),
         },
         tolerance={"relative_volume_ratio_error": tol, "pipe_volume_relative_error": 0.02},
         message="moving pipe mesh remained valid" if passed else "moving pipe mesh deformation failed",
