@@ -13,11 +13,13 @@ geoscience data breaks that assumption in two specific, common ways this module 
   constant) are handled through the additive-log-ratio transform (:func:`additive_log_ratio`), which maps
   a simplex-constrained composition to an unconstrained vector the Gaussian machinery can model.
 
-* **Paleontology / biostratigraphy -- range zones and absence.** A fossil occurrence constrains the
-  stratigraphic age to the taxon's known range; an ABSENCE is not evidence of a specific age but a soft
-  one-sided bound (the taxon had not yet appeared / had already gone). :func:`biostrat_log_likelihood`
-  scores a predicted age against a taxon's ``[first_appearance, last_appearance]`` range for an
-  occurrence, and as a one-sided censored bound for an absence.
+* **Paleontology / biostratigraphy -- range zones, assemblages, reworking, and absence.** A fossil
+  occurrence constrains the stratigraphic age to the taxon's known range; an ABSENCE is not evidence of a
+  specific age but a soft one-sided bound (the taxon had not yet appeared / had already gone).
+  :func:`biostrat_log_likelihood` scores a predicted age against a taxon's
+  ``[first_appearance, last_appearance]`` range for an occurrence, and as a one-sided censored bound for
+  an absence. :func:`fossil_assemblage_log_likelihood` scores palynology/microfossil count assemblages
+  with detection probabilities and a reworked/background component.
 
 These are OBSERVATION LIKELIHOODS tied to provenance, units, and uncertainty -- not process simulators.
 A full geochemical reaction path or a sedimentary-basin model is a separate validated kernel; nothing
@@ -32,7 +34,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
-from scipy.special import log_ndtr
+from scipy.special import gammaln, log_ndtr
 
 
 def _gaussian_log_density(residual: np.ndarray, covariance: np.ndarray) -> float:
@@ -310,6 +312,113 @@ def biostrat_log_likelihood(constraint: BiostratConstraint, predicted_age: float
 
 
 @dataclass
+class FossilAssemblage:
+    """A palynology or microfossil assemblage count observation at one location.
+
+    ``counts`` are observed taxon counts in ``taxa`` order. ``detection_probability`` handles taxon-level
+    recovery/preservation bias and false absences by down-weighting poorly detected taxa before
+    renormalization. ``reworking_probability`` mixes the local predicted assemblage with a background
+    assemblage, representing reworked fossils transported from older material. ``concentration`` switches
+    from multinomial to Dirichlet-multinomial scoring when positive, adding overdispersion for clustered
+    or uneven counts.
+    """
+
+    taxa: Sequence[str]
+    location: np.ndarray
+    counts: np.ndarray
+    detection_probability: np.ndarray | float = 1.0
+    reworking_probability: float = 0.0
+    background_probability: np.ndarray | None = None
+    concentration: float | None = None
+    units: str = "count"
+    provenance: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.taxa = tuple(str(taxon) for taxon in self.taxa)
+        if not self.taxa:
+            raise ValueError("taxa must not be empty.")
+        if len(set(self.taxa)) != len(self.taxa):
+            raise ValueError("taxa must be unique.")
+        k = len(self.taxa)
+        self.location = np.atleast_2d(np.asarray(self.location, dtype=float))
+        if self.location.shape != (1, 3):
+            raise ValueError("location must be one (1, 3) coordinate.")
+        counts = np.asarray(self.counts, dtype=float)
+        if counts.shape != (k,):
+            raise ValueError("counts must have shape (n_taxa,).")
+        if np.any(counts < 0.0) or not np.allclose(counts, np.round(counts)):
+            raise ValueError("counts must be non-negative integer counts.")
+        if counts.sum() <= 0.0:
+            raise ValueError("counts must contain at least one fossil.")
+        self.counts = counts
+
+        detection = np.asarray(self.detection_probability, dtype=float)
+        if detection.shape == ():
+            detection = np.full(k, float(detection))
+        if detection.shape != (k,):
+            raise ValueError("detection_probability must be scalar or have shape (n_taxa,).")
+        if np.any(detection <= 0.0) or np.any(detection > 1.0):
+            raise ValueError("detection_probability entries must be in (0, 1].")
+        self.detection_probability = detection
+
+        self.reworking_probability = float(self.reworking_probability)
+        if not 0.0 <= self.reworking_probability < 1.0:
+            raise ValueError("reworking_probability must be in [0, 1).")
+        if self.background_probability is None:
+            background = np.full(k, 1.0 / k)
+        else:
+            background = np.asarray(self.background_probability, dtype=float)
+            if background.shape != (k,):
+                raise ValueError("background_probability must have shape (n_taxa,).")
+            background = _normalize_probability(background, name="background_probability")
+        self.background_probability = background
+        if self.concentration is not None:
+            self.concentration = float(self.concentration)
+            if self.concentration <= 0.0:
+                raise ValueError("concentration must be positive when supplied.")
+        self.provenance = dict(self.provenance)
+
+    @property
+    def k(self) -> int:
+        return len(self.taxa)
+
+    @property
+    def total_count(self) -> int:
+        return int(self.counts.sum())
+
+    def expected_probability(self, predicted_probability: np.ndarray, *, eps: float = 1.0e-12) -> np.ndarray:
+        """Observation probabilities after detection and reworking adjustments."""
+        local = _normalize_probability(predicted_probability, name="predicted_probability", eps=eps)
+        detected = _normalize_probability(local * self.detection_probability, name="detected_probability", eps=eps)
+        expected = (
+            (1.0 - self.reworking_probability) * detected
+            + self.reworking_probability * self.background_probability
+        )
+        return _normalize_probability(expected, name="expected_probability", eps=eps)
+
+
+def fossil_assemblage_log_likelihood(assemblage: FossilAssemblage, predicted_probability: np.ndarray) -> float:
+    """``log p(assemblage | predicted taxon probabilities)``.
+
+    The default is a multinomial count likelihood. If ``assemblage.concentration`` is supplied, the score
+    is Dirichlet-multinomial with ``alpha = concentration * expected_probability``.
+    """
+    expected = assemblage.expected_probability(predicted_probability)
+    counts = assemblage.counts
+    n = float(counts.sum())
+    if assemblage.concentration is None:
+        return float(gammaln(n + 1.0) - np.sum(gammaln(counts + 1.0)) + counts @ np.log(expected))
+    alpha = assemblage.concentration * expected
+    return float(
+        gammaln(n + 1.0)
+        - np.sum(gammaln(counts + 1.0))
+        + gammaln(assemblage.concentration)
+        - gammaln(assemblage.concentration + n)
+        + np.sum(gammaln(alpha + counts) - gammaln(alpha))
+    )
+
+
+@dataclass
 class GeochronologyAge:
     """An isotopic/geochronology age measurement at one location.
 
@@ -474,3 +583,41 @@ def multi_element_assay_posterior_predictive(
     if values.shape != (coords.shape[0], assay.k):
         raise ValueError(f"posterior_mean must have shape {(coords.shape[0], assay.k)}.")
     return values[idx, :]
+
+
+def fossil_assemblage_posterior_predictive(
+    assemblage: FossilAssemblage,
+    grid: Any,
+    posterior_probability: np.ndarray | Mapping[str, np.ndarray],
+) -> np.ndarray:
+    """Nearest-cell posterior-predictive taxon probabilities for a fossil assemblage."""
+    coords = np.asarray(grid.coordinates, dtype=float)
+    diffs = coords[None, :, :] - assemblage.location[:, None, :]
+    idx = int(np.argmin(np.sum(diffs[0] ** 2, axis=1)))
+    if isinstance(posterior_probability, Mapping):
+        values = []
+        for taxon in assemblage.taxa:
+            if taxon not in posterior_probability:
+                raise ValueError(f"posterior_probability is missing taxon {taxon!r}.")
+            taxon_values = np.asarray(posterior_probability[taxon], dtype=float)
+            if taxon_values.shape[0] != coords.shape[0]:
+                raise ValueError("posterior_probability taxon vectors must match the grid coordinate count.")
+            values.append(float(taxon_values[idx]))
+        return assemblage.expected_probability(np.asarray(values, dtype=float))
+    probs = np.asarray(posterior_probability, dtype=float)
+    if probs.shape != (coords.shape[0], assemblage.k):
+        raise ValueError(f"posterior_probability must have shape {(coords.shape[0], assemblage.k)}.")
+    return assemblage.expected_probability(probs[idx])
+
+
+def _normalize_probability(values: Any, *, name: str, eps: float = 1.0e-12) -> np.ndarray:
+    arr = np.asarray(values, dtype=float)
+    if arr.ndim != 1:
+        raise ValueError(f"{name} must be a 1-D probability vector.")
+    if np.any(arr < 0.0):
+        raise ValueError(f"{name} must be non-negative.")
+    total = float(arr.sum())
+    if total <= 0.0:
+        raise ValueError(f"{name} must have positive mass.")
+    arr = np.clip(arr / total, eps, None)
+    return arr / arr.sum()

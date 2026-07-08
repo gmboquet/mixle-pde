@@ -12,6 +12,7 @@ import numpy as np
 from mixle_pde.geo_observations import (
     BiostratConstraint,
     FaciesIntervalConstraint,
+    FossilAssemblage,
     GeochemAssay,
     GeochronologyAge,
     MultiElementAssay,
@@ -21,6 +22,8 @@ from mixle_pde.geo_observations import (
     assay_posterior_predictive,
     biostrat_log_likelihood,
     facies_interval_log_likelihood,
+    fossil_assemblage_log_likelihood,
+    fossil_assemblage_posterior_predictive,
     geochronology_log_likelihood,
     inverse_additive_log_ratio,
     multi_element_assay_log_likelihood,
@@ -199,6 +202,78 @@ class BiostratConstraintTest(unittest.TestCase):
             BiostratConstraint(location=[0, 0, 0], taxon="T", present=True)
         with self.assertRaises(ValueError):
             BiostratConstraint(location=[0, 0, 0], taxon="T", present=False)
+
+
+class FossilAssemblageTest(unittest.TestCase):
+    def _assemblage(self, **kwargs):
+        counts = kwargs.pop("counts", np.array([18, 2, 0]))
+        return FossilAssemblage(
+            taxa=("A", "B", "C"),
+            location=[0.0, 0.0, -100.0],
+            counts=counts,
+            provenance={"core": "A", "depth_m": 100.0},
+            **kwargs,
+        )
+
+    def test_assemblage_likelihood_rewards_matching_taxon_probabilities(self):
+        obs = self._assemblage()
+        matching = fossil_assemblage_log_likelihood(obs, np.array([0.85, 0.10, 0.05]))
+        wrong = fossil_assemblage_log_likelihood(obs, np.array([0.05, 0.10, 0.85]))
+
+        self.assertGreater(matching, wrong)
+        self.assertEqual(obs.units, "count")
+        self.assertEqual(obs.provenance["core"], "A")
+
+    def test_reworking_background_softens_conflicting_local_prediction(self):
+        no_rework = self._assemblage(reworking_probability=0.0)
+        reworked = self._assemblage(
+            reworking_probability=0.4,
+            background_probability=np.array([0.8, 0.1, 0.1]),
+        )
+        local_wrong = np.array([0.05, 0.10, 0.85])
+
+        self.assertGreater(
+            fossil_assemblage_log_likelihood(reworked, local_wrong),
+            fossil_assemblage_log_likelihood(no_rework, local_wrong),
+        )
+
+    def test_detection_probability_reduces_penalty_for_missing_poorly_detected_taxon(self):
+        normal_detection = self._assemblage(detection_probability=np.array([1.0, 1.0, 1.0]))
+        poor_c_detection = self._assemblage(detection_probability=np.array([1.0, 1.0, 0.05]))
+        predicts_c = np.array([0.1, 0.1, 0.8])
+
+        self.assertGreater(
+            fossil_assemblage_log_likelihood(poor_c_detection, predicts_c),
+            fossil_assemblage_log_likelihood(normal_detection, predicts_c),
+        )
+
+    def test_dirichlet_multinomial_overdispersion_is_finite(self):
+        obs = self._assemblage(concentration=20.0)
+        score = fossil_assemblage_log_likelihood(obs, np.array([0.85, 0.10, 0.05]))
+
+        self.assertTrue(np.isfinite(score))
+
+    def test_assemblage_posterior_predictive_reads_nearest_grid_cell(self):
+        grid = Field3D(
+            coordinates=np.array([[0.0, 0.0, -100.0], [10.0, 0.0, -100.0]]),
+            spacing=10.0,
+            units="probability",
+            property_name="taxon_probability",
+        )
+        obs = self._assemblage()
+        dense = np.array([[0.8, 0.1, 0.1], [0.2, 0.2, 0.6]])
+        mapped = {"A": dense[:, 0], "B": dense[:, 1], "C": dense[:, 2]}
+
+        np.testing.assert_allclose(fossil_assemblage_posterior_predictive(obs, grid, dense), dense[0])
+        np.testing.assert_allclose(fossil_assemblage_posterior_predictive(obs, grid, mapped), dense[0])
+
+    def test_assemblage_validates_counts_and_probabilities(self):
+        with self.assertRaises(ValueError):
+            self._assemblage(counts=np.array([1, -1, 0]))
+        with self.assertRaises(ValueError):
+            self._assemblage(detection_probability=np.array([1.0, 0.0, 1.0]))
+        with self.assertRaises(ValueError):
+            self._assemblage(reworking_probability=1.0)
 
 
 class GeochronologyAgeTest(unittest.TestCase):

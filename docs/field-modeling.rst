@@ -44,7 +44,8 @@ Capability Map
      - Kalman/RTS smoothing for linear observations and ensemble filtering for
        nonlinear evolving fields.
    * - Geoscience likelihoods
-     - assay, biostratigraphy, geochronology, correlation, and facies helpers
+     - assay, assemblage, biostratigraphy, geochronology, correlation, and
+       facies helpers
      - Evidence surfaces for domain observations, not full geologic process
        simulators.
    * - Posterior queries

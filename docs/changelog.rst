@@ -4,8 +4,8 @@ Changelog
 This changelog records documentation-visible release changes for
 ``mixle-pde``.
 
-Current Release Branch
-----------------------
+Unreleased
+----------
 
 See :doc:`release-notes` for scope, validation evidence, and known risks.
 
@@ -16,6 +16,8 @@ Added
   contracts, solver selection, validation, and troubleshooting.
 * field-modeling guide converted into Sphinx-native docs.
 * Mesh-backed ``Field3D`` and time-indexed ``Field4D`` latent object contracts.
+* Fossil/palynology assemblage likelihoods with detection and reworking
+  uncertainty.
 * Moving-domain simplex mesh primitives for 3D deformation and 4D space-time
   geometry.
 * Full-time-axis 4D posterior arrays, intervals, samples, and interpolated

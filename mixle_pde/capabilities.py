@@ -141,6 +141,7 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "geochemical censored-assay likelihoods",
                 "multi-element assay covariance and batch-offset likelihoods",
                 "biostratigraphic range-zone likelihoods",
+                "palynology/microfossil assemblage likelihoods with reworking",
                 "geochronology age likelihoods",
                 "stratigraphic age-difference likelihoods",
                 "facies/environment interval likelihoods",
@@ -170,6 +171,9 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "multi_element_assay_log_likelihood",
                 "multi_element_assay_posterior_predictive",
                 "BiostratConstraint",
+                "FossilAssemblage",
+                "fossil_assemblage_log_likelihood",
+                "fossil_assemblage_posterior_predictive",
                 "GeochronologyAge",
                 "StratigraphicCorrelation",
                 "FaciesIntervalConstraint",
@@ -698,6 +702,7 @@ def _run_earth_observation_likelihoods() -> ScenarioResult:
     from mixle_pde.geo_observations import (
         BiostratConstraint,
         FaciesIntervalConstraint,
+        FossilAssemblage,
         GeochemAssay,
         GeochronologyAge,
         MultiElementAssay,
@@ -706,6 +711,7 @@ def _run_earth_observation_likelihoods() -> ScenarioResult:
         assay_log_likelihood,
         biostrat_log_likelihood,
         facies_interval_log_likelihood,
+        fossil_assemblage_log_likelihood,
         geochronology_log_likelihood,
         inverse_additive_log_ratio,
         multi_element_assay_log_likelihood,
@@ -749,6 +755,18 @@ def _run_earth_observation_likelihoods() -> ScenarioResult:
         provenance={"core": "synthetic-1"},
     )
     bio_gap = biostrat_log_likelihood(bio, 108.0) - biostrat_log_likelihood(bio, 70.0)
+    assemblage = FossilAssemblage(
+        taxa=("A", "B", "C"),
+        location=np.array([[0.0, 0.0, -100.0]]),
+        counts=np.array([18, 2, 0]),
+        detection_probability=np.array([1.0, 0.8, 0.2]),
+        reworking_probability=0.1,
+        background_probability=np.array([0.6, 0.2, 0.2]),
+        provenance={"core": "synthetic-1", "kind": "palynology"},
+    )
+    assemblage_gap = fossil_assemblage_log_likelihood(
+        assemblage, np.array([0.8, 0.15, 0.05])
+    ) - fossil_assemblage_log_likelihood(assemblage, np.array([0.05, 0.15, 0.8]))
     geochron = GeochronologyAge(
         location=np.array([[0.0, 0.0, -120.0]]),
         age=118.0,
@@ -782,6 +800,7 @@ def _run_earth_observation_likelihoods() -> ScenarioResult:
         assay_gap > 0.0
         and multi_assay_gap > 0.0
         and bio_gap > 0.0
+        and assemblage_gap > 0.0
         and geochron_gap > 0.0
         and strat_gap > 0.0
         and facies_gap > 0.0
@@ -795,6 +814,7 @@ def _run_earth_observation_likelihoods() -> ScenarioResult:
             "assay_log_likelihood_gap": assay_gap,
             "multi_element_assay_log_likelihood_gap": multi_assay_gap,
             "biostrat_log_likelihood_gap": bio_gap,
+            "fossil_assemblage_log_likelihood_gap": assemblage_gap,
             "geochronology_log_likelihood_gap": geochron_gap,
             "stratigraphic_log_likelihood_gap": strat_gap,
             "facies_log_likelihood_gap": facies_gap,
@@ -1261,7 +1281,7 @@ def _run_earth_4d_assimilation() -> ScenarioResult:
     artifacts_ok = (
         field4d.n == times.size * grid.n
         and field4d.coordinates.shape == (times.size * grid.n, 4)
-        posterior.mean_array.shape == (times.size, grid.n)
+        and posterior.mean_array.shape == (times.size, grid.n)
         and posterior.marginal_std.shape == (times.size, grid.n)
         and ci_lo.shape == (times.size, grid.n)
         and ci_hi.shape == (times.size, grid.n)
