@@ -71,6 +71,29 @@ class SimplexMesh:
         """Length / area / volume / hypervolume of every simplex."""
         return np.abs(self.simplex_signed_measures())
 
+    def simplex_edge_lengths(self) -> np.ndarray:
+        """All edge lengths per simplex; shape ``(n_simplices, (dim + 1) * dim / 2)``."""
+        n_edges = self.dim * (self.dim + 1) // 2
+        lengths = np.empty((self.n_simplices, n_edges), dtype=float)
+        for i, simplex in enumerate(self.simplices):
+            coords = self.nodes[simplex]
+            for j, (a, b) in enumerate(combinations(range(self.dim + 1), 2)):
+                lengths[i, j] = float(np.linalg.norm(coords[a] - coords[b]))
+        return lengths
+
+    def simplex_quality(self) -> np.ndarray:
+        """Dimensionless simplex quality from edge-length spread.
+
+        ``1`` means all simplex edges have equal length. Values near ``0`` flag collapsed or strongly
+        stretched elements that are unsafe for PDE assembly.
+        """
+        lengths = self.simplex_edge_lengths()
+        if lengths.size == 0:
+            return np.array([], dtype=float)
+        min_edge = np.min(lengths, axis=1)
+        max_edge = np.max(lengths, axis=1)
+        return np.divide(min_edge, max_edge, out=np.zeros_like(min_edge), where=max_edge > 0.0)
+
     def simplex_signed_measures(self) -> np.ndarray:
         """Signed simplex measures using the stored vertex ordering."""
         measures = np.empty(self.n_simplices, dtype=float)
@@ -108,9 +131,10 @@ class SimplexMesh:
             return np.array([], dtype=int)
         return np.unique(facets.ravel())
 
-    def validate(self, *, min_measure: float = 1.0e-14) -> dict[str, Any]:
+    def validate(self, *, min_measure: float = 1.0e-14, min_quality: float = 1.0e-8) -> dict[str, Any]:
         """Return structural validation metrics for the mesh."""
         measures = self.simplex_measures()
+        quality = self.simplex_quality()
         return {
             "dim": self.dim,
             "n_nodes": self.n_nodes,
@@ -120,6 +144,9 @@ class SimplexMesh:
             "min_measure": float(measures.min()) if len(measures) else 0.0,
             "max_measure": float(measures.max()) if len(measures) else 0.0,
             "total_measure": float(measures.sum()),
+            "min_quality": float(quality.min()) if len(quality) else 0.0,
+            "mean_quality": float(quality.mean()) if len(quality) else 0.0,
+            "n_low_quality": int(np.count_nonzero(quality < float(min_quality))),
             "n_boundary_facets": int(len(self.boundary_facets())),
             "n_boundary_nodes": int(len(self.boundary_nodes())),
         }
@@ -257,6 +284,17 @@ class MovingSimplexMesh:
         ref = measures[int(reference_step)]
         return np.divide(measures, ref, out=np.full_like(measures, np.nan), where=ref > 0.0)
 
+    def simplex_quality_series(self) -> np.ndarray:
+        """Per-simplex quality with shape ``(n_times, n_simplices)``."""
+        return np.vstack([self.at_step(step).simplex_quality() for step in range(self.n_steps)])
+
+    def min_quality_series(self) -> np.ndarray:
+        """Minimum simplex quality at each time step."""
+        quality = self.simplex_quality_series()
+        if quality.size == 0:
+            return np.zeros(self.n_steps)
+        return np.min(quality, axis=1)
+
     def simplex_signed_measure_ratios(self, *, reference_step: int = 0) -> np.ndarray:
         """Signed measure ratios; negative values flag element inversion relative to the reference."""
         signed = np.vstack([self.at_step(step).simplex_signed_measures() for step in range(self.n_steps)])
@@ -282,9 +320,10 @@ class MovingSimplexMesh:
                     simplices.append(bottom + top)
         return SimplexMesh(nodes, np.asarray(simplices, dtype=int))
 
-    def validate(self, *, min_measure: float = 1.0e-14) -> dict[str, Any]:
+    def validate(self, *, min_measure: float = 1.0e-14, min_quality: float = 1.0e-8) -> dict[str, Any]:
         """Return moving-domain mesh health metrics across all time steps."""
         measures = self.simplex_measure_series()
+        quality = self.simplex_quality_series()
         signed_ratios = self.simplex_signed_measure_ratios()
         finite = bool(np.isfinite(self.nodes_over_time).all())
         positive = bool(np.all(measures > float(min_measure))) if measures.size else False
@@ -300,6 +339,9 @@ class MovingSimplexMesh:
             "max_measure": float(measures.max()) if measures.size else 0.0,
             "measure_min": float(self.measure_series().min()),
             "measure_max": float(self.measure_series().max()),
+            "min_quality": float(np.min(quality)) if quality.size else 0.0,
+            "mean_quality": float(np.mean(quality)) if quality.size else 0.0,
+            "n_low_quality": int(np.count_nonzero(quality < float(min_quality))),
             "min_signed_measure_ratio": float(np.nanmin(signed_ratios)) if signed_ratios.size else 0.0,
             "n_inverted_or_degenerate_relative_to_reference": inverted,
         }

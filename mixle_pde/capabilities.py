@@ -111,6 +111,10 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
             solver_symbols=(
                 "SimplexMesh",
                 "MovingSimplexMesh",
+                "SimplexMesh.simplex_quality",
+                "SimplexMesh.simplex_edge_lengths",
+                "MovingSimplexMesh.simplex_quality_series",
+                "MovingSimplexMesh.min_quality_series",
                 "box_simplex_mesh",
                 "delaunay_mesh",
                 "moving_mesh",
@@ -120,7 +124,7 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
             required_dependencies=("numpy", "scipy"),
             scenario_ids=("mesh_3d_4d_measure", "mesh_moving_pipe_deformation"),
             limitations=(
-                "no adaptive remeshing or mesh-quality optimization yet",
+                "mesh quality diagnostics are available; adaptive remeshing and optimization remain future work",
                 "no ALE, FSI, or curved/high-order formulation yet",
             ),
         ),
@@ -674,6 +678,11 @@ def _run_mesh_3d_4d_measure() -> ScenarioResult:
     mesh3 = box_simplex_mesh((2, 2, 2), lengths=(2.0, 3.0, 4.0))
     mesh4 = box_simplex_mesh((2, 2, 2, 2), lengths=(2.0, 3.0, 4.0, 5.0))
     space_time = space_time_mesh(box_simplex_mesh((2, 2, 2), lengths=(1.0, 1.0, 1.0)), [0.0, 0.25, 1.0])
+    quality_ok = (
+        mesh3.validate()["min_quality"] > 0.0
+        and mesh4.validate()["min_quality"] > 0.0
+        and space_time.validate()["min_quality"] > 0.0
+    )
     err3 = abs(mesh3.total_measure() - 24.0) / 24.0
     err4 = abs(mesh4.total_measure() - 120.0) / 120.0
     err_st = abs(space_time.total_measure() - 1.0)
@@ -686,7 +695,7 @@ def _run_mesh_3d_4d_measure() -> ScenarioResult:
         and space_time.n_simplices == 48
     )
     tol = 1.0e-12
-    passed = counts_ok and err3 <= tol and err4 <= tol and err_st <= tol
+    passed = counts_ok and quality_ok and err3 <= tol and err4 <= tol and err_st <= tol
     return _result(
         "mesh_3d_4d_measure",
         "mesh.simplicial_3d_4d",
@@ -696,6 +705,9 @@ def _run_mesh_3d_4d_measure() -> ScenarioResult:
             "box_4d_relative_measure_error": err4,
             "space_time_relative_measure_error": err_st,
             "space_time_simplices": space_time.n_simplices,
+            "box_3d_min_quality": mesh3.validate()["min_quality"],
+            "box_4d_min_quality": mesh4.validate()["min_quality"],
+            "space_time_min_quality": space_time.validate()["min_quality"],
         },
         tolerance={"relative_measure_error": tol},
         message="3D/4D simplex measures matched" if passed else "3D/4D simplex measure mismatch",
@@ -718,8 +730,9 @@ def _run_mesh_moving_pipe_deformation() -> ScenarioResult:
     rel_err = abs(final_ratio - expected_ratio) / expected_ratio
     counts_ok = motion.dim == 3 and space_time.dim == 4 and space_time.n_simplices == base.n_simplices * 4 * 2
     health_ok = report["positive_measure_all_steps"] and report["n_inverted_or_degenerate_relative_to_reference"] == 0
+    quality_ok = report["min_quality"] > 0.0 and report["n_low_quality"] == 0
     tol = 1.0e-12
-    passed = counts_ok and health_ok and rel_err <= tol
+    passed = counts_ok and health_ok and quality_ok and rel_err <= tol
     return _result(
         "mesh_moving_pipe_deformation",
         "mesh.simplicial_3d_4d",
@@ -730,6 +743,7 @@ def _run_mesh_moving_pipe_deformation() -> ScenarioResult:
             "relative_volume_ratio_error": rel_err,
             "space_time_simplices": space_time.n_simplices,
             "min_signed_measure_ratio": float(report["min_signed_measure_ratio"]),
+            "min_quality": float(report["min_quality"]),
         },
         tolerance={"relative_volume_ratio_error": tol},
         message="moving pipe mesh remained valid" if passed else "moving pipe mesh deformation failed",

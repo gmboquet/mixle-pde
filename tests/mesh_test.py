@@ -5,6 +5,7 @@ import unittest
 import numpy as np
 
 from mixle_pde.mesh import (
+    SimplexMesh,
     box_simplex_mesh,
     delaunay_mesh,
     moving_mesh,
@@ -25,6 +26,26 @@ class SimplexMeshTest(unittest.TestCase):
         self.assertEqual(report["n_boundary_facets"], 12)
         self.assertEqual(report["n_boundary_nodes"], 8)
         self.assertTrue(report["positive_measure"])
+        self.assertGreater(report["min_quality"], 0.0)
+        self.assertEqual(report["n_low_quality"], 0)
+
+    def test_simplex_quality_detects_collapsed_elements(self):
+        mesh = SimplexMesh(
+            nodes=np.array(
+                [
+                    [0.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0],
+                ]
+            ),
+            simplices=np.array([[0, 1, 2, 3]]),
+        )
+        report = mesh.validate(min_quality=0.1)
+
+        self.assertFalse(report["positive_measure"])
+        self.assertEqual(report["min_quality"], 0.0)
+        self.assertEqual(report["n_low_quality"], 1)
 
     def test_box_simplex_mesh_4d_hypervolume(self):
         mesh = box_simplex_mesh((2, 2, 2, 2), lengths=(2.0, 3.0, 4.0, 5.0))
@@ -70,6 +91,22 @@ class SimplexMeshTest(unittest.TestCase):
         self.assertEqual(space_time.n_simplices, mesh.n_simplices * 4)
         self.assertAlmostEqual(mid.total_measure(), 1.5)
         self.assertTrue(moving.validate()["positive_measure_all_steps"])
+
+    def test_moving_mesh_quality_series_flags_degenerate_step(self):
+        mesh = box_simplex_mesh((2, 2, 2), lengths=(1.0, 1.0, 1.0))
+        moving = moving_mesh(
+            mesh,
+            [0.0, 1.0],
+            map_fn=lambda nodes, t: nodes * np.array([1.0 - t, 1.0, 1.0]),
+        )
+        quality = moving.simplex_quality_series()
+        report = moving.validate(min_quality=0.1)
+
+        self.assertEqual(quality.shape, (2, mesh.n_simplices))
+        self.assertGreater(moving.min_quality_series()[0], 0.0)
+        self.assertEqual(moving.min_quality_series()[1], 0.0)
+        self.assertFalse(report["positive_measure_all_steps"])
+        self.assertGreater(report["n_low_quality"], 0)
 
     def test_pipe_radial_deformation_scales_cross_section_volume(self):
         mesh = box_simplex_mesh((2, 2, 3), lengths=(1.0, 1.0, 2.0), origin=(-0.5, -0.5, 0.0))
