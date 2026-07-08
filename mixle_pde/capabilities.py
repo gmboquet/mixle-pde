@@ -139,6 +139,7 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "small-reference MCMC empirical posterior validation",
                 "Kalman/RTS random-walk 4D assimilation",
                 "ensemble Kalman nonlinear 4D assimilation",
+                "particle-filter 4D sampled posterior assimilation",
                 "geochemical censored-assay likelihoods",
                 "multi-element assay covariance and batch-offset likelihoods",
                 "biostratigraphic range-zone likelihoods",
@@ -168,6 +169,9 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "PosteriorField4D.sample",
                 "PosteriorField4D.at_time(interpolate=True)",
                 "PosteriorField4D.posterior_predictive_draws",
+                "PosteriorFieldSamples4D",
+                "PosteriorFieldSamples4D.at_time",
+                "PosteriorFieldSamples4D.posterior_predictive_draws",
                 "Observation",
                 "ForwardOperatorRegistry",
                 "ForwardOperator.capability_report",
@@ -194,6 +198,8 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "MCMCReport",
                 "assimilate_4d",
                 "assimilate_4d_ensemble",
+                "particle_assimilate_4d",
+                "ParticleAssimilationReport",
                 "dc_resistivity_forward_operator",
                 "aem_layered_forward_operator",
                 "layered_mt_forward_operator",
@@ -234,6 +240,7 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "earth_csem_3d_nonlinear_observation",
                 "earth_4d_assimilation",
                 "earth_ensemble_4d_nonlinear_assimilation",
+                "earth_particle_4d_nonlinear_assimilation",
                 "earth_prior_coupling",
                 "earth_sparse_prior_precision",
                 "earth_sparse_posterior_factorization",
@@ -245,6 +252,7 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "multi-element censored assays use marginal censoring terms rather than a full truncated multivariate normal integral",
                 "sparse posterior factorization stores precision-form Gaussian posteriors; production-scale preconditioned iterative solvers remain future work",
                 "ensemble 4D assimilation is a stochastic Gaussian-summary reference, not a particle/MCMC smoother",
+                "particle 4D assimilation is a sampled reference path for small nonlinear problems, not a production smoother",
                 "Random-Walk Metropolis field inversion is a small-reference validation path, not a production-scale sampler",
                 "DC/ERT posterior observations use finite-difference local sensitivities; production-scale adjoints remain future work",
                 "MT, AEM, and CSEM observations use finite-difference local sensitivities; production-scale adjoints remain future work",
@@ -494,6 +502,13 @@ def verification_scenarios() -> tuple[VerificationScenario, ...]:
             name="Ensemble nonlinear 4D assimilation",
             description="Ensemble assimilation tracks nonlinear observations without a fixed Jacobian.",
             runner=_run_earth_ensemble_4d_nonlinear_assimilation,
+        ),
+        VerificationScenario(
+            id="earth_particle_4d_nonlinear_assimilation",
+            capability_id="earth.geochem_biostrat_likelihoods",
+            name="Particle nonlinear 4D sampled assimilation",
+            description="Particle assimilation returns sampled 4D trajectories for nonlinear observations.",
+            runner=_run_earth_particle_4d_nonlinear_assimilation,
         ),
         VerificationScenario(
             id="earth_prior_coupling",
@@ -1453,6 +1468,81 @@ def _run_earth_ensemble_4d_nonlinear_assimilation() -> ScenarioResult:
         message="ensemble nonlinear 4D assimilation reduced residual"
         if passed
         else "ensemble nonlinear assimilation check failed",
+    )
+
+
+def _run_earth_particle_4d_nonlinear_assimilation() -> ScenarioResult:
+    from mixle_pde.field_assimilation import particle_assimilate_4d
+    from mixle_pde.field_inversion import FieldGaussianPrior
+    from mixle_pde.latent import Field3D
+    from mixle_pde.observations import ForwardOperator, ForwardOperatorRegistry, Observation
+
+    grid = Field3D(np.array([[0.0, 0.0, -10.0]]), spacing=1.0, units="state", property_name="nonlinear_state")
+    times = np.array([0.0, 1.0, 2.0])
+    truth = np.array([1.0, 1.35, 1.7])
+    registry = ForwardOperatorRegistry()
+
+    def predict(grid, field_values, obs_locations):
+        return np.full(obs_locations.shape[0], float(field_values[0] ** 2))
+
+    registry.register(ForwardOperator("square_sensor", predict=predict))
+    observations = [
+        [
+            Observation(
+                "square_sensor",
+                np.array([[0.0, 0.0, -10.0]]),
+                np.array([value**2]),
+                np.array([0.04**2]),
+                time=time,
+            )
+        ]
+        for time, value in zip(times, truth, strict=True)
+    ]
+    prior = FieldGaussianPrior(mean=0.9, smoothness_precision=0.0, marginal_precision=9.0, length_scale=1.0)
+    posterior, report = particle_assimilate_4d(
+        grid,
+        times,
+        observations,
+        registry,
+        prior,
+        process_var=0.08,
+        n_particles=500,
+        rng=np.random.default_rng(1234),
+    )
+    held = Observation(
+        "square_sensor",
+        np.array([[0.0, 0.0, -10.0]]),
+        np.array([0.0]),
+        np.array([0.04**2]),
+        time=2.0,
+    )
+    prior_error = abs(0.9 - float(truth[-1]))
+    posterior_error = abs(float(posterior.mean_array[-1, 0]) - float(truth[-1]))
+    pred_error = float(abs(posterior.predict_observation(registry, held)[0] - truth[-1] ** 2))
+    draws = posterior.posterior_predictive_draws(registry, held, n=16, rng=np.random.default_rng(4321))
+    passed = (
+        posterior_error < prior_error
+        and posterior_error < 0.3
+        and pred_error < 0.7
+        and posterior.samples.shape == (500, times.size, grid.n)
+        and draws.shape == (16, 1)
+        and all(ess > 0.0 for ess in report.effective_sample_size)
+    )
+    return _result(
+        "earth_particle_4d_nonlinear_assimilation",
+        "earth.geochem_biostrat_likelihoods",
+        passed=passed,
+        metrics={
+            "prior_final_error": prior_error,
+            "posterior_final_error": posterior_error,
+            "nonlinear_predictive_error": pred_error,
+            "min_effective_sample_size": float(min(report.effective_sample_size)),
+            "posterior_predictive_draws": float(draws.shape[0]),
+        },
+        tolerance={"posterior_final_error": 0.3, "nonlinear_predictive_error": 0.7},
+        message="particle nonlinear 4D assimilation produced sampled trajectories"
+        if passed
+        else "particle nonlinear assimilation check failed",
     )
 
 

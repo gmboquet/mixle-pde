@@ -93,7 +93,14 @@ from mixle_pde.env_data import (
     load_woa_argo,
     seabed_mask,
 )
-from mixle_pde.field_assimilation import PosteriorField4D, assimilate_4d, assimilate_4d_ensemble
+from mixle_pde.field_assimilation import (
+    ParticleAssimilationReport,
+    PosteriorField4D,
+    PosteriorFieldSamples4D,
+    assimilate_4d,
+    assimilate_4d_ensemble,
+    particle_assimilate_4d,
+)
 from mixle_pde.field_gauss_newton import GaussNewtonReport, gauss_newton_invert
 from mixle_pde.field_inversion import (
     FieldGaussianPrior,
@@ -281,6 +288,7 @@ __all__ = [
     "PosteriorFieldSamples3D",
     "SparsePosteriorPrecision",
     "PosteriorField4D",
+    "PosteriorFieldSamples4D",
     "Observation",
     "ForwardOperator",
     "ForwardOperatorRegistry",
@@ -323,8 +331,10 @@ __all__ = [
     "MCMCReport",
     "field_log_posterior_kernel",
     "metropolis_field_invert",
+    "ParticleAssimilationReport",
     "assimilate_4d",
     "assimilate_4d_ensemble",
+    "particle_assimilate_4d",
     "CrossPropertyPrior",
     "SpatioTemporalGaussianPrior",
     "depth_weights",
