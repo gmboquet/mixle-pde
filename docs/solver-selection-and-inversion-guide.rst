@@ -23,6 +23,12 @@ Choose the solver family from the physics and numerical contract:
     Use for transport and fluid-style examples. Document conservation checks,
     boundary fluxes, and any numerical diffusion assumptions.
 
+``gas_dynamics``
+    Use for compressible shock-tube references and zero-dimensional reactive
+    chamber studies. The combustion helper models fuel depletion, heat
+    release, pressure rise, and prescribed piston/cylinder volume, not
+    turbulent flame propagation or detailed chemistry.
+
 ``elastic`` and ``elastic_aniso``
     Use when vector displacement or anisotropic material behavior matters.
     Record material parameter bounds and symmetry assumptions.

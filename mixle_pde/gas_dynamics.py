@@ -20,11 +20,24 @@ Computational Physics* 27 (1978).
 """
 
 import math
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 
 State = tuple[float, float, float]  # (rho, u, p)
+
+
+@dataclass(frozen=True)
+class CombustionResult:
+    """Time history from a zero-dimensional ideal-gas combustion chamber."""
+
+    time: np.ndarray
+    temperature: np.ndarray
+    pressure: np.ndarray
+    fuel_fraction: np.ndarray
+    volume: np.ndarray
+    heat_release_rate: np.ndarray
 
 
 def _wave_function(p: float, rho_k: float, p_k: float, a_k: float, gamma: float) -> float:
@@ -197,3 +210,134 @@ def solve_euler_1d(
         t += dt
     pr = np.array([_to_primitive(u[:, i], gamma) for i in range(n)])
     return pr[:, 0], pr[:, 1], pr[:, 2]
+
+
+def engine_cylinder_volume(
+    time: Any,
+    *,
+    clearance_volume: float,
+    swept_volume: float,
+    rpm: float,
+    phase: float = 0.0,
+) -> np.ndarray:
+    """Approximate piston/cylinder volume history from a sinusoidal crank motion.
+
+    ``clearance_volume`` is the top-dead-centre volume and ``swept_volume`` is the displacement volume.
+    The returned volume oscillates between ``clearance_volume`` and
+    ``clearance_volume + swept_volume``. This is the lightweight moving-volume input needed by the
+    zero-dimensional combustion model; detailed crank/rod kinematics can replace it later without
+    changing the combustion API.
+    """
+
+    t = np.asarray(time, dtype=float)
+    theta = 2.0 * math.pi * float(rpm) / 60.0 * t + float(phase)
+    return float(clearance_volume) + 0.5 * float(swept_volume) * (1.0 - np.cos(theta))
+
+
+def simulate_zero_d_combustion(
+    time: Any,
+    *,
+    initial_temperature: float,
+    initial_pressure: float,
+    initial_fuel_fraction: float = 1.0,
+    volume: Any = 1.0,
+    gamma: float = 1.35,
+    gas_constant: float = 287.0,
+    heat_release: float = 4.4e7,
+    pre_exponential: float = 50.0,
+    activation_temperature: float = 8000.0,
+    reaction_order: float = 1.0,
+    wall_temperature: float | None = None,
+    heat_loss_coefficient: float = 0.0,
+    surface_area: float = 0.0,
+) -> CombustionResult:
+    """Integrate a zero-dimensional reactive ideal-gas chamber.
+
+    The state is temperature ``T`` and fuel mass fraction ``Y`` in a closed chamber. Pressure is computed
+    from the ideal-gas law using the initial mass. The model includes Arrhenius one-step fuel depletion,
+    heat release, optional wall heat loss, and ``-p dV`` work from a prescribed volume history. It is a
+    fast simulator kernel for engine-cylinder and explosion studies, not a substitute for turbulent CFD or
+    detailed chemistry.
+    """
+
+    t = np.asarray(time, dtype=float).reshape(-1)
+    if t.size < 2:
+        raise ValueError("time must contain at least two entries.")
+    if np.any(np.diff(t) <= 0.0):
+        raise ValueError("time must be strictly increasing.")
+    if initial_temperature <= 0.0 or initial_pressure <= 0.0:
+        raise ValueError("initial_temperature and initial_pressure must be positive.")
+    if initial_fuel_fraction < 0.0:
+        raise ValueError("initial_fuel_fraction must be nonnegative.")
+    if gamma <= 1.0 or gas_constant <= 0.0:
+        raise ValueError("gamma must exceed one and gas_constant must be positive.")
+    if pre_exponential < 0.0 or activation_temperature < 0.0 or reaction_order <= 0.0:
+        raise ValueError("reaction parameters must be nonnegative and reaction_order must be positive.")
+
+    vol = _volume_history(volume, t)
+    if np.any(vol <= 0.0):
+        raise ValueError("volume must be positive at every time.")
+    dvol_dt = np.gradient(vol, t)
+    cv = float(gas_constant) / (float(gamma) - 1.0)
+    mass = float(initial_pressure) * vol[0] / (float(gas_constant) * float(initial_temperature))
+    wall_t = float(initial_temperature) if wall_temperature is None else float(wall_temperature)
+    h_area = float(heat_loss_coefficient) * float(surface_area)
+
+    temp = np.empty_like(t)
+    fuel = np.empty_like(t)
+    temp[0] = float(initial_temperature)
+    fuel[0] = float(initial_fuel_fraction)
+
+    def rhs(time_i: float, state: np.ndarray) -> np.ndarray:
+        temperature = max(float(state[0]), 1.0)
+        fuel_fraction = max(float(state[1]), 0.0)
+        volume_i = float(np.interp(time_i, t, vol))
+        dvolume_i = float(np.interp(time_i, t, dvol_dt))
+        pressure_i = mass * float(gas_constant) * temperature / volume_i
+        rate = float(pre_exponential) * math.exp(-float(activation_temperature) / temperature)
+        burn = rate * (fuel_fraction ** float(reaction_order))
+        heat_loss = h_area * (temperature - wall_t) / mass
+        dtemperature = (float(heat_release) * burn - pressure_i * dvolume_i / mass - heat_loss) / cv
+        return np.array([dtemperature, -burn], dtype=float)
+
+    for i in range(t.size - 1):
+        dt = float(t[i + 1] - t[i])
+        state = np.array([temp[i], fuel[i]], dtype=float)
+        k1 = rhs(float(t[i]), state)
+        k2 = rhs(float(t[i] + 0.5 * dt), state + 0.5 * dt * k1)
+        k3 = rhs(float(t[i] + 0.5 * dt), state + 0.5 * dt * k2)
+        k4 = rhs(float(t[i + 1]), state + dt * k3)
+        next_state = state + dt / 6.0 * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+        temp[i + 1] = max(float(next_state[0]), 1.0)
+        fuel[i + 1] = min(max(float(next_state[1]), 0.0), float(initial_fuel_fraction))
+
+    pressure = mass * float(gas_constant) * temp / vol
+    burn_rate = np.asarray(
+        [
+            float(pre_exponential)
+            * math.exp(-float(activation_temperature) / max(float(temp_i), 1.0))
+            * (max(float(fuel_i), 0.0) ** float(reaction_order))
+            for temp_i, fuel_i in zip(temp, fuel, strict=True)
+        ],
+        dtype=float,
+    )
+    heat_release_rate = mass * float(heat_release) * burn_rate
+    return CombustionResult(
+        time=t,
+        temperature=temp,
+        pressure=pressure,
+        fuel_fraction=fuel,
+        volume=vol,
+        heat_release_rate=heat_release_rate,
+    )
+
+
+def _volume_history(volume: Any, time: np.ndarray) -> np.ndarray:
+    if callable(volume):
+        return np.asarray([volume(float(ti)) for ti in time], dtype=float)
+    vol = np.asarray(volume, dtype=float)
+    if vol.ndim == 0:
+        return np.full_like(time, float(vol), dtype=float)
+    if vol.shape != time.shape:
+        raise ValueError("volume must be a scalar, callable, or array with the same shape as time.")
+    return vol

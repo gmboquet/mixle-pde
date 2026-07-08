@@ -85,6 +85,7 @@ DEFAULT_REQUIRED_CAPABILITIES = (
     "earth.geochem_biostrat_likelihoods",
     "pde.state_space",
     "pde.transient_heat",
+    "gas.reactive_combustion",
     "geophysics.potential_fields",
     "reasoning.mechanistic_field",
     "wave.acoustic_2d",
@@ -98,11 +99,26 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
             id="mesh.simplicial_3d_4d",
             name="3D/4D simplex meshes",
             category="mesh",
-            description="Tetrahedral 3D meshes, direct 4D simplex meshes, and 3D-to-4D space-time extrusion.",
-            equations=("3D tetrahedral finite elements", "4D space-time simplex meshes"),
-            solver_symbols=("SimplexMesh", "box_simplex_mesh", "delaunay_mesh", "space_time_mesh"),
+            description=(
+                "Tetrahedral 3D meshes, direct 4D simplex meshes, static and moving 3D-to-4D "
+                "space-time extrusion, and pipe/cylinder deformation helpers."
+            ),
+            equations=(
+                "3D tetrahedral finite elements",
+                "4D space-time simplex meshes",
+                "moving-domain simplicial meshes",
+            ),
+            solver_symbols=(
+                "SimplexMesh",
+                "MovingSimplexMesh",
+                "box_simplex_mesh",
+                "delaunay_mesh",
+                "moving_mesh",
+                "pipe_radial_deformation",
+                "space_time_mesh",
+            ),
             required_dependencies=("numpy", "scipy"),
-            scenario_ids=("mesh_3d_4d_measure",),
+            scenario_ids=("mesh_3d_4d_measure", "mesh_moving_pipe_deformation"),
             limitations=(
                 "no adaptive remeshing or mesh-quality optimization yet",
                 "no ALE, FSI, or curved/high-order formulation yet",
@@ -143,6 +159,9 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "Field3D",
                 "PosteriorField3D",
                 "PosteriorField4D",
+                "PosteriorField4D.credible_interval",
+                "PosteriorField4D.sample",
+                "PosteriorField4D.at_time(interpolate=True)",
                 "Observation",
                 "ForwardOperatorRegistry",
                 "GeochemAssay",
@@ -237,6 +256,37 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
             limitations=("explicit time step requires conduction CFL stability"),
         ),
         ModelingCapability(
+            id="gas.reactive_combustion",
+            name="Reactive gas and engine-cylinder combustion",
+            category="forward-inverse",
+            description=(
+                "Compressible Euler reference solvers plus a zero-dimensional ideal-gas combustion "
+                "chamber with fuel depletion, heat release, wall loss, and moving piston volume."
+            ),
+            equations=(
+                "1D compressible Euler",
+                "closed ideal-gas energy balance",
+                "Arrhenius one-step fuel burn",
+                "engine-cylinder p dV work",
+            ),
+            solver_symbols=(
+                "exact_riemann_solution",
+                "solve_euler_1d",
+                "engine_cylinder_volume",
+                "simulate_zero_d_combustion",
+                "CombustionResult",
+            ),
+            required_dependencies=("numpy",),
+            differentiable=False,
+            inverse_ready=False,
+            scenario_ids=("gas_zero_d_combustion_pressure_rise",),
+            limitations=(
+                "zero-dimensional combustion kernel only; no turbulent CFD, flame fronts, detonation, "
+                "or detailed chemistry yet",
+                "moving-volume coupling is prescribed rather than solved as fluid-structure interaction",
+            ),
+        ),
+        ModelingCapability(
             id="geophysics.potential_fields",
             name="Potential-field geophysics",
             category="forward-inverse",
@@ -325,6 +375,13 @@ def verification_scenarios() -> tuple[VerificationScenario, ...]:
             name="3D/4D simplex measure",
             description="Box tetrahedralization, 4D simplex meshing, and 3D-to-4D extrusion preserve measure.",
             runner=_run_mesh_3d_4d_measure,
+        ),
+        VerificationScenario(
+            id="mesh_moving_pipe_deformation",
+            capability_id="mesh.simplicial_3d_4d",
+            name="Moving pipe deformation",
+            description="A radially deforming 3D pipe/cylinder mesh remains positive and extrudes to 4D.",
+            runner=_run_mesh_moving_pipe_deformation,
         ),
         VerificationScenario(
             id="earth_observation_likelihoods",
@@ -451,6 +508,13 @@ def verification_scenarios() -> tuple[VerificationScenario, ...]:
             name="Diffusion Fourier decay",
             description="Exact-transition diffusion decays a Fourier mode at the discrete analytical rate.",
             runner=_run_heat_fourier_decay,
+        ),
+        VerificationScenario(
+            id="gas_zero_d_combustion_pressure_rise",
+            capability_id="gas.reactive_combustion",
+            name="Zero-dimensional combustion pressure rise",
+            description="Constant-volume fuel burn increases temperature and pressure while depleting fuel.",
+            runner=_run_gas_zero_d_combustion_pressure_rise,
         ),
         VerificationScenario(
             id="state_space_diffusion_forecast",
@@ -592,6 +656,40 @@ def _run_mesh_3d_4d_measure() -> ScenarioResult:
         },
         tolerance={"relative_measure_error": tol},
         message="3D/4D simplex measures matched" if passed else "3D/4D simplex measure mismatch",
+    )
+
+
+def _run_mesh_moving_pipe_deformation() -> ScenarioResult:
+    from mixle_pde.mesh import box_simplex_mesh, moving_mesh, pipe_radial_deformation
+
+    base = box_simplex_mesh((2, 2, 3), lengths=(1.0, 1.0, 2.0), origin=(-0.5, -0.5, 0.0))
+    motion = moving_mesh(
+        base,
+        [0.0, 0.5, 1.0],
+        pipe_radial_deformation(axis="z", radial_strain=lambda t: 0.1 * t),
+    )
+    report = motion.validate()
+    final_ratio = float(motion.measure_series()[-1] / motion.measure_series()[0])
+    expected_ratio = 1.1**2
+    space_time = motion.to_space_time_mesh()
+    rel_err = abs(final_ratio - expected_ratio) / expected_ratio
+    counts_ok = motion.dim == 3 and space_time.dim == 4 and space_time.n_simplices == base.n_simplices * 4 * 2
+    health_ok = report["positive_measure_all_steps"] and report["n_inverted_or_degenerate_relative_to_reference"] == 0
+    tol = 1.0e-12
+    passed = counts_ok and health_ok and rel_err <= tol
+    return _result(
+        "mesh_moving_pipe_deformation",
+        "mesh.simplicial_3d_4d",
+        passed=passed,
+        metrics={
+            "final_volume_ratio": final_ratio,
+            "expected_volume_ratio": expected_ratio,
+            "relative_volume_ratio_error": rel_err,
+            "space_time_simplices": space_time.n_simplices,
+            "min_signed_measure_ratio": float(report["min_signed_measure_ratio"]),
+        },
+        tolerance={"relative_volume_ratio_error": tol},
+        message="moving pipe mesh remained valid" if passed else "moving pipe mesh deformation failed",
     )
 
 
@@ -1154,14 +1252,31 @@ def _run_earth_4d_assimilation() -> ScenarioResult:
     lower = np.minimum(posterior.at_time(0.0).mean, posterior.at_time(2.0).mean) - 1.0e-6
     upper = np.maximum(posterior.at_time(0.0).mean, posterior.at_time(2.0).mean) + 1.0e-6
     bracketed = float(np.mean((mid >= lower) & (mid <= upper)))
-    passed = final_err < start_err and bracketed >= 0.75 and len(posterior.means) == len(times)
+    ci_lo, ci_hi = posterior.credible_interval(0.1)
+    samples = posterior.sample(4, np.random.default_rng(42))
+    interpolated = posterior.at_time(0.5, interpolate=True).mean
+    artifacts_ok = (
+        posterior.mean_array.shape == (times.size, grid.n)
+        and posterior.marginal_std.shape == (times.size, grid.n)
+        and ci_lo.shape == (times.size, grid.n)
+        and ci_hi.shape == (times.size, grid.n)
+        and samples.shape == (4, times.size, grid.n)
+        and interpolated.shape == (grid.n,)
+    )
+    passed = final_err < start_err and bracketed >= 0.75 and len(posterior.means) == len(times) and artifacts_ok
     return _result(
         "earth_4d_assimilation",
         "earth.geochem_biostrat_likelihoods",
         passed=passed,
-        metrics={"prior_final_error": start_err, "posterior_final_error": final_err, "mid_bracket_fraction": bracketed},
+        metrics={
+            "prior_final_error": start_err,
+            "posterior_final_error": final_err,
+            "mid_bracket_fraction": bracketed,
+            "sample_count": float(samples.shape[0]),
+            "time_count": float(posterior.mean_array.shape[0]),
+        },
         tolerance={"posterior_error_lt_prior": 1.0},
-        message="4D assimilation produced posterior time slices" if passed else "4D assimilation check failed",
+        message="4D assimilation produced posterior artifacts" if passed else "4D assimilation check failed",
     )
 
 
@@ -1487,6 +1602,38 @@ def _run_heat_fourier_decay() -> ScenarioResult:
         metrics={"relative_error": rel_error, "measured_amplitude": measured_amp, "expected_amplitude": expected_amp},
         tolerance={"relative_error": tol},
         message="diffusion Fourier decay matched" if rel_error <= tol else "diffusion decay mismatch",
+    )
+
+
+def _run_gas_zero_d_combustion_pressure_rise() -> ScenarioResult:
+    from mixle_pde.gas_dynamics import simulate_zero_d_combustion
+
+    time = np.linspace(0.0, 0.05, 101)
+    result = simulate_zero_d_combustion(
+        time,
+        initial_temperature=1200.0,
+        initial_pressure=101325.0,
+        initial_fuel_fraction=0.02,
+        volume=1.0e-3,
+        heat_release=4.0e7,
+        pre_exponential=800.0,
+        activation_temperature=6000.0,
+    )
+    pressure_ratio = float(result.pressure[-1] / result.pressure[0])
+    fuel_burned = float(result.fuel_fraction[0] - result.fuel_fraction[-1])
+    finite = bool(
+        np.isfinite(result.temperature).all()
+        and np.isfinite(result.pressure).all()
+        and np.isfinite(result.fuel_fraction).all()
+    )
+    passed = finite and pressure_ratio > 1.05 and fuel_burned > 0.0 and np.all(result.fuel_fraction >= 0.0)
+    return _result(
+        "gas_zero_d_combustion_pressure_rise",
+        "gas.reactive_combustion",
+        passed=passed,
+        metrics={"pressure_ratio": pressure_ratio, "fuel_burned": fuel_burned},
+        tolerance={"min_pressure_ratio": 1.05, "min_fuel_burned": 0.0},
+        message="zero-dimensional combustion pressure rose" if passed else "zero-dimensional combustion failed",
     )
 
 

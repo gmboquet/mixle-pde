@@ -1,11 +1,11 @@
-0.6.x Field Modeling Capabilities
-=================================
+Field Modeling Capabilities
+===========================
 
-The 0.6.x PDE branch adds posterior modeling for gridded physical fields. It
-complements forward solvers with typed field artifacts, observation contracts,
-linear and nonlinear inversion paths, 4D assimilation, geoscience likelihoods,
-posterior query utilities, calibration diagnostics, mesh helpers, and readiness
-checks.
+The field-modeling surface adds posterior modeling for gridded physical fields.
+It complements forward solvers with typed field artifacts, observation
+contracts, linear and nonlinear inversion paths, 4D assimilation, geoscience
+likelihoods, posterior query utilities, calibration diagnostics, mesh helpers,
+and readiness checks.
 
 Package Boundary
 ----------------
@@ -51,6 +51,11 @@ Capability Map
      - ``marginal_at_points``, ``section``, ``region_summary``,
        ``derived_quantity``
      - Query and compact posterior field artifacts.
+   * - 3D/4D meshes
+     - ``SimplexMesh``, ``MovingSimplexMesh``, ``moving_mesh``,
+       ``pipe_radial_deformation``
+     - Static and moving simplicial geometry for 3D domains and 4D
+       space-time extrusion.
    * - Readiness
      - ``readiness_report``, ``run_required_modeling_checks``
      - Cheap verification scenarios for applications and CI.
@@ -126,6 +131,25 @@ the prior, process model, and neighboring observations.
 ``assimilate_4d_ensemble`` is the nonlinear reference path. It pushes ensemble
 members through registered forward operators and returns Gaussian summaries
 estimated from the ensemble at each time.
+
+``PosteriorField4D`` exposes whole-time-axis arrays through ``mean_array``,
+``marginal_std``, ``credible_interval()``, and ``sample()``. Samples are
+per-time marginal draws because the stored artifact keeps one covariance per
+time slice rather than a full cross-time covariance.
+
+Moving Meshes
+-------------
+
+Use ``moving_mesh`` when a domain has fixed connectivity but time-varying node
+coordinates, such as a deforming pipe, piston/cylinder volume, or evolving
+geologic block model. The result can be interpolated at arbitrary times,
+checked for volume changes and inverted cells, or extruded into a 4D
+space-time simplex mesh.
+
+``pipe_radial_deformation`` supplies a simple cylindrical displacement law for
+radial and axial strain. It is geometry plumbing for moving-domain solvers; it
+does not replace ALE transport, fluid-structure coupling, combustion chemistry,
+or adaptive remeshing.
 
 Posterior Queries And Calibration
 ---------------------------------

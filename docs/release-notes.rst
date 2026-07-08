@@ -1,5 +1,5 @@
-0.6.3 Release Notes
-===================
+Release Notes
+=============
 
 ``mixle-pde`` is the mechanistic modeling and inverse-problem package for the
 0.6.3 family. Its documentation now covers solver families, field modeling,
@@ -11,6 +11,12 @@ Included
 * Sphinx manual with modeling workflows, package map, API overview, validation,
   and troubleshooting pages.
 * 3D/4D field-modeling guide for the release branch.
+* Moving-domain simplex meshes with 3D pipe/cylinder deformation and 4D
+  space-time extrusion.
+* 4D posterior artifacts with full-time mean, marginal uncertainty, credible
+  intervals, marginal samples, and interpolated time slices.
+* Zero-dimensional reactive gas/engine-cylinder combustion kernel with fuel
+  depletion, heat release, pressure rise, and prescribed piston volume.
 * Generated API pages for public modules.
 * Documentation extra in package metadata.
 * ``docs/_build`` ignore rule for local builds.
@@ -35,3 +41,7 @@ Known Risks
   production particle/MCMC smoother.
 * Geoscience likelihood helpers are evidence surfaces, not complete geologic
   process simulators.
+* Moving meshes are geometry support; they do not yet provide ALE transport,
+  fluid-structure interaction, or adaptive remeshing.
+* The combustion kernel is a chamber model, not turbulent CFD, detonation, or
+  detailed chemical kinetics.

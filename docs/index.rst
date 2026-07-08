@@ -30,10 +30,10 @@ route.
    observation-and-inversion-contract
    solver-selection-and-inversion-guide
    release-readiness
-   release-0-6-3
+   release-notes
    changelog
    security-and-data
-   0.6.x-field-modeling
+   field-modeling
    api-overview
    validation
    troubleshooting

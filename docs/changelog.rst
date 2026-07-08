@@ -4,17 +4,22 @@ Changelog
 This changelog records documentation-visible release changes for
 ``mixle-pde``.
 
-0.6.3 Release Branch
---------------------
+Current Release Branch
+----------------------
 
-See :doc:`release-0-6-3` for scope, validation evidence, and known risks.
+See :doc:`release-notes` for scope, validation evidence, and known risks.
 
 Added
 ~~~~~
 
 * Sphinx manual for PDE/ODE solvers, field modeling, observation and inversion
   contracts, solver selection, validation, and troubleshooting.
-* 0.6.x field-modeling guide converted into Sphinx-native docs.
+* field-modeling guide converted into Sphinx-native docs.
+* Moving-domain simplex mesh primitives for 3D deformation and 4D space-time
+  geometry.
+* Full-time-axis 4D posterior arrays, intervals, samples, and interpolated
+  query slices.
+* Zero-dimensional reactive gas/engine-cylinder combustion simulator kernel.
 * Generated API reference for public PDE, geophysics, field-inversion, and
   assimilation modules.
 * Release-readiness checklist for manufactured solutions, inverse recovery,

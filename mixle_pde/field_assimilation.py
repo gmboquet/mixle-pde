@@ -46,16 +46,92 @@ class PosteriorField4D:
     means: list[np.ndarray]
     covs: list[np.ndarray]
 
+    def __post_init__(self) -> None:
+        times = np.asarray(self.times, dtype=float).reshape(-1)
+        if times.size == 0:
+            raise ValueError("times must be a non-empty 1-D array.")
+        if np.any(np.diff(times) <= 0.0):
+            raise ValueError("times must be strictly increasing.")
+        if len(self.means) != times.size or len(self.covs) != times.size:
+            raise ValueError("means and covs must have one entry per time.")
+
+        means = [np.asarray(mean, dtype=float) for mean in self.means]
+        covs = [np.asarray(cov, dtype=float) for cov in self.covs]
+        for mean in means:
+            if mean.shape != (self.grid.n,):
+                raise ValueError(f"each mean must have shape ({self.grid.n},).")
+        for cov in covs:
+            if cov.shape != (self.grid.n, self.grid.n):
+                raise ValueError(f"each covariance must have shape ({self.grid.n}, {self.grid.n}).")
+        self.times = times
+        self.means = means
+        self.covs = covs
+
     def _index_of(self, time: float, tol: float = 1e-9) -> int:
         matches = np.flatnonzero(np.isclose(self.times, time, atol=tol))
         if matches.size == 0:
             raise KeyError(f"time {time!r} is not an assimilated time; have {self.times.tolist()}.")
         return int(matches[0])
 
-    def at_time(self, time: float) -> PosteriorField3D:
-        """The posterior field slice at an assimilated ``time`` as a static :class:`PosteriorField3D`."""
-        i = self._index_of(time)
-        return PosteriorField3D(grid=self.grid, mean=self.means[i], map=self.means[i].copy(), cov=self.covs[i])
+    @property
+    def mean_array(self) -> np.ndarray:
+        """Posterior mean as a ``(n_times, n_grid)`` array."""
+        return np.vstack(self.means)
+
+    @property
+    def marginal_variance(self) -> np.ndarray:
+        """Per-time, per-node posterior variance as a ``(n_times, n_grid)`` array."""
+        return np.vstack([np.clip(np.diag(cov), 0.0, None) for cov in self.covs])
+
+    @property
+    def marginal_std(self) -> np.ndarray:
+        """Per-time, per-node posterior standard deviation."""
+        return np.sqrt(self.marginal_variance)
+
+    def at_time(self, time: float, *, interpolate: bool = False) -> PosteriorField3D:
+        """The posterior field slice at ``time`` as a static :class:`PosteriorField3D`.
+
+        By default ``time`` must be one of the assimilated times. With ``interpolate=True``, the method
+        linearly interpolates the marginal Gaussian summaries between adjacent assimilated times. The
+        interpolation is a query convenience, not a replacement for storing full cross-time covariance.
+        """
+        if not interpolate:
+            i = self._index_of(time)
+            return PosteriorField3D(grid=self.grid, mean=self.means[i], map=self.means[i].copy(), cov=self.covs[i])
+        t = float(time)
+        if t < self.times[0] or t > self.times[-1]:
+            raise ValueError("time is outside the posterior time range.")
+        right = int(np.searchsorted(self.times, t, side="left"))
+        if right < len(self.times) and np.isclose(t, self.times[right]):
+            return self.at_time(float(self.times[right]))
+        if right == 0:
+            return self.at_time(float(self.times[0]))
+        if right >= len(self.times):
+            return self.at_time(float(self.times[-1]))
+        left = right - 1
+        weight = (t - self.times[left]) / (self.times[right] - self.times[left])
+        mean = (1.0 - weight) * self.means[left] + weight * self.means[right]
+        cov = (1.0 - weight) * self.covs[left] + weight * self.covs[right]
+        return PosteriorField3D(grid=self.grid, mean=mean, map=mean.copy(), cov=cov)
+
+    def credible_interval(self, alpha: float = 0.1) -> tuple[np.ndarray, np.ndarray]:
+        """Per-time central credible intervals as ``(n_times, n_grid)`` arrays."""
+        lows: list[np.ndarray] = []
+        highs: list[np.ndarray] = []
+        for time in self.times:
+            lo, hi = self.at_time(float(time)).credible_interval(alpha)
+            lows.append(lo)
+            highs.append(hi)
+        return np.vstack(lows), np.vstack(highs)
+
+    def sample(self, n: int, rng: np.random.Generator) -> np.ndarray:
+        """Draw per-time marginal posterior samples with shape ``(n, n_times, n_grid)``.
+
+        The stored posterior contains marginal covariances at each time, not the full cross-time
+        covariance, so samples are independent across time slices.
+        """
+        samples = [self.at_time(float(time)).sample(n, rng) for time in self.times]
+        return np.stack(samples, axis=1)
 
     def predict_observation(self, registry: ForwardOperatorRegistry, observation: Observation) -> np.ndarray:
         """Posterior-predictive mean of ``observation`` at its own time (posterior-predictive check hook)."""

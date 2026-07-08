@@ -129,6 +129,13 @@ from mixle_pde.geo_observations import (
     multi_element_assay_posterior_predictive,
     stratigraphic_correlation_log_likelihood,
 )
+from mixle_pde.gas_dynamics import (
+    CombustionResult,
+    engine_cylinder_volume,
+    exact_riemann_solution,
+    simulate_zero_d_combustion,
+    solve_euler_1d,
+)
 from mixle_pde.geophysics import (
     cross_gradient,
     dc_resistivity,
@@ -147,7 +154,15 @@ from mixle_pde.induced_polarization import apparent_conductivity, cole_cole_cond
 from mixle_pde.inverse import Differential
 from mixle_pde.latent import Field3D, PosteriorField3D, SparsePosteriorPrecision
 from mixle_pde.maxwell import Maxwell3D
-from mixle_pde.mesh import SimplexMesh, box_simplex_mesh, delaunay_mesh, space_time_mesh
+from mixle_pde.mesh import (
+    MovingSimplexMesh,
+    SimplexMesh,
+    box_simplex_mesh,
+    delaunay_mesh,
+    moving_mesh,
+    pipe_radial_deformation,
+    space_time_mesh,
+)
 from mixle_pde.migration import born_modeling, lsrtm_step, rtm_image
 from mixle_pde.misfit import envelope_misfit, hilbert_envelope, misfit, wasserstein1d_misfit, xcorr_traveltime_misfit
 from mixle_pde.multiphysics import CoupledPDESystem, solve_poisson
@@ -317,8 +332,11 @@ __all__ = [
     "to_diagonal",
     "to_ensemble",
     "SimplexMesh",
+    "MovingSimplexMesh",
     "box_simplex_mesh",
     "delaunay_mesh",
+    "moving_mesh",
+    "pipe_radial_deformation",
     "space_time_mesh",
     "DiffusionOperator",
     "AdvectionOperator",
@@ -327,6 +345,11 @@ __all__ = [
     "make_operator",
     "register_dynamics_operator",
     "available_dynamics_operators",
+    "CombustionResult",
+    "engine_cylinder_volume",
+    "exact_riemann_solution",
+    "simulate_zero_d_combustion",
+    "solve_euler_1d",
     "NavierStokes2D",
     "WaveEquation2D",
     "WaveEquation3D",

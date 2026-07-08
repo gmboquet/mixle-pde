@@ -114,6 +114,26 @@ class Assimilation4DTest(unittest.TestCase):
             lo, hi = s.credible_interval(0.1)
             self.assertTrue(np.all(hi >= lo))
 
+    def test_4d_posterior_exposes_time_axis_artifacts(self):
+        post = self._assimilate()
+        lo, hi = post.credible_interval(0.1)
+        samples = post.sample(8, self.rng)
+
+        self.assertEqual(post.mean_array.shape, (self.times.size, self.grid.n))
+        self.assertEqual(post.marginal_std.shape, (self.times.size, self.grid.n))
+        self.assertEqual(lo.shape, (self.times.size, self.grid.n))
+        self.assertEqual(hi.shape, (self.times.size, self.grid.n))
+        self.assertEqual(samples.shape, (8, self.times.size, self.grid.n))
+        self.assertTrue(np.all(hi >= lo))
+
+    def test_4d_posterior_interpolates_between_assimilated_times(self):
+        post = self._assimilate()
+        interp = post.at_time(1.5, interpolate=True)
+
+        expected = 0.5 * (post.at_time(1.0).mean + post.at_time(2.0).mean)
+        self.assertIsInstance(interp, PosteriorField3D)
+        np.testing.assert_allclose(interp.mean, expected)
+
     def test_posterior_predictive_observation_at_multiple_times(self):
         post = self._assimilate()
         for t in (0, 3):
@@ -139,6 +159,8 @@ class Assimilation4DTest(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             assimilate_4d(bounded, self.times, self.obs_by_time, self.registry, self.prior, process_var=1.0)
+        with self.assertRaises(ValueError):
+            PosteriorField4D(self.grid, np.array([0.0, 0.0]), [np.zeros(self.grid.n)], [np.eye(self.grid.n)])
 
 
 class EnsembleAssimilation4DTest(unittest.TestCase):
