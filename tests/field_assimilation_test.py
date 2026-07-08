@@ -15,6 +15,7 @@ from mixle_pde.field_assimilation import (
     PosteriorFieldSamples4D,
     assimilate_4d,
     assimilate_4d_ensemble,
+    assimilate_4d_joint_linear_dynamics,
     assimilate_4d_linear_dynamics,
     particle_assimilate_4d,
 )
@@ -228,6 +229,39 @@ class LinearDynamicsAssimilation4DTest(unittest.TestCase):
         self.assertIsInstance(post, PosteriorField4D)
         np.testing.assert_allclose(means, np.array([1.0, 2.0, 4.0]), atol=0.08)
         self.assertLess(post.marginal_std[-1, 0], post.marginal_std[0, 0])
+
+    def test_joint_linear_dynamics_posterior_keeps_cross_time_covariance(self):
+        grid = Field3D(
+            coordinates=np.array([[0.0, 0.0, 0.0]]),
+            spacing=1.0,
+            units="state",
+            property_name="growth_state",
+        )
+        registry = ForwardOperatorRegistry()
+        registry.register(borehole_forward_operator())
+        times = np.array([0.0, 1.0, 2.0])
+        observations = [
+            [],
+            [],
+            [Observation("borehole", grid.coordinates, np.array([4.0]), np.array([0.01]), time=2.0)],
+        ]
+        prior = FieldGaussianPrior(mean=0.0, smoothness_precision=0.0, marginal_precision=1.0)
+
+        post = assimilate_4d_joint_linear_dynamics(
+            grid,
+            times,
+            observations,
+            registry,
+            prior,
+            transitions=np.array([[[2.0]], [[2.0]]]),
+            process_cov=1.0e-4,
+        )
+        draws = post.sample(16, np.random.default_rng(13))
+
+        self.assertEqual(post.joint_cov.shape, (3, 3))
+        self.assertGreater(float(post.cross_covariance(0.0, 2.0)[0, 0]), 0.0)
+        np.testing.assert_allclose(post.mean_array[:, 0], np.array([1.0, 2.0, 4.0]), atol=0.08)
+        self.assertEqual(draws.shape, (16, 3, 1))
 
     def test_linear_transition_validation_rejects_bad_shapes(self):
         grid = Field3D(

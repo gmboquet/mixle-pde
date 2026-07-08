@@ -99,6 +99,7 @@ from mixle_pde.field_assimilation import (
     PosteriorFieldSamples4D,
     assimilate_4d,
     assimilate_4d_ensemble,
+    assimilate_4d_joint_linear_dynamics,
     assimilate_4d_linear_dynamics,
     particle_assimilate_4d,
 )
@@ -367,6 +368,7 @@ __all__ = [
     "ParticleAssimilationReport",
     "assimilate_4d",
     "assimilate_4d_ensemble",
+    "assimilate_4d_joint_linear_dynamics",
     "assimilate_4d_linear_dynamics",
     "particle_assimilate_4d",
     "CrossPropertyPrior",

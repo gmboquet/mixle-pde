@@ -187,6 +187,7 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "PosteriorField4D.credible_interval",
                 "PosteriorField4D.sample",
                 "PosteriorField4D.at_time(interpolate=True)",
+                "PosteriorField4D.cross_covariance",
                 "PosteriorField4D.posterior_predictive_draws",
                 "PosteriorFieldSamples4D",
                 "PosteriorFieldSamples4D.at_time",
@@ -227,6 +228,7 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "MCMCReport",
                 "assimilate_4d",
                 "assimilate_4d_linear_dynamics",
+                "assimilate_4d_joint_linear_dynamics",
                 "assimilate_4d_ensemble",
                 "particle_assimilate_4d",
                 "ParticleAssimilationReport",
@@ -276,6 +278,7 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "earth_csem_3d_nonlinear_observation",
                 "earth_4d_assimilation",
                 "earth_linear_dynamics_4d_assimilation",
+                "earth_joint_4d_posterior",
                 "earth_ensemble_4d_nonlinear_assimilation",
                 "earth_particle_4d_nonlinear_assimilation",
                 "earth_prior_coupling",
@@ -553,6 +556,13 @@ def verification_scenarios() -> tuple[VerificationScenario, ...]:
             name="Linear-dynamics 4D assimilation",
             description="Supplied state-transition matrices propagate observations through time.",
             runner=_run_earth_linear_dynamics_4d_assimilation,
+        ),
+        VerificationScenario(
+            id="earth_joint_4d_posterior",
+            capability_id="earth.geochem_biostrat_likelihoods",
+            name="Joint 4D posterior covariance",
+            description="Joint linear-dynamics assimilation stores full cross-time covariance.",
+            runner=_run_earth_joint_4d_posterior,
         ),
         VerificationScenario(
             id="earth_ensemble_4d_nonlinear_assimilation",
@@ -1687,6 +1697,53 @@ def _run_earth_linear_dynamics_4d_assimilation() -> ScenarioResult:
         message="linear-dynamics 4D assimilation propagated observations"
         if passed
         else "linear-dynamics 4D assimilation failed",
+    )
+
+
+def _run_earth_joint_4d_posterior() -> ScenarioResult:
+    from mixle_pde.field_assimilation import assimilate_4d_joint_linear_dynamics
+    from mixle_pde.field_inversion import FieldGaussianPrior
+    from mixle_pde.latent import Field3D
+    from mixle_pde.observations import ForwardOperatorRegistry, Observation, borehole_forward_operator
+
+    grid = Field3D(np.array([[0.0, 0.0, 0.0]]), spacing=1.0, units="state", property_name="growth_state")
+    times = np.array([0.0, 1.0, 2.0])
+    registry = ForwardOperatorRegistry()
+    registry.register(borehole_forward_operator())
+    observations = [
+        [],
+        [],
+        [Observation("borehole", grid.coordinates, np.array([4.0]), np.array([0.01]), time=2.0)],
+    ]
+    prior = FieldGaussianPrior(mean=0.0, smoothness_precision=0.0, marginal_precision=1.0)
+    posterior = assimilate_4d_joint_linear_dynamics(
+        grid,
+        times,
+        observations,
+        registry,
+        prior,
+        transitions=np.array([[[2.0]], [[2.0]]]),
+        process_cov=1.0e-4,
+    )
+    draws = posterior.sample(8, np.random.default_rng(13))
+    means = posterior.mean_array[:, 0]
+    expected = np.array([1.0, 2.0, 4.0])
+    max_error = float(np.max(np.abs(means - expected)))
+    cross_cov = float(posterior.cross_covariance(0.0, 2.0)[0, 0])
+    passed = (
+        posterior.joint_cov is not None
+        and posterior.joint_cov.shape == (3, 3)
+        and cross_cov > 0.0
+        and draws.shape == (8, 3, 1)
+        and max_error <= 0.08
+    )
+    return _result(
+        "earth_joint_4d_posterior",
+        "earth.geochem_biostrat_likelihoods",
+        passed=passed,
+        metrics={"max_trajectory_error": max_error, "start_final_cross_covariance": cross_cov},
+        tolerance={"max_trajectory_error": 0.08},
+        message="joint 4D posterior covariance stored" if passed else "joint 4D posterior check failed",
     )
 
 

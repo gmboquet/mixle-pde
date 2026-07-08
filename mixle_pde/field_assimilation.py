@@ -39,12 +39,14 @@ class PosteriorField4D:
     """A Gaussian posterior over an evolving field at a sequence of times.
 
     ``means[t]`` / ``covs[t]`` are the smoothed posterior mean and dense covariance at ``times[t]``.
+    ``joint_cov`` optionally stores the full ``(n_times * grid.n, n_times * grid.n)`` covariance.
     """
 
     grid: Field3D
     times: np.ndarray
     means: list[np.ndarray]
     covs: list[np.ndarray]
+    joint_cov: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         times = np.asarray(self.times, dtype=float).reshape(-1)
@@ -63,6 +65,12 @@ class PosteriorField4D:
         for cov in covs:
             if cov.shape != (self.grid.n, self.grid.n):
                 raise ValueError(f"each covariance must have shape ({self.grid.n}, {self.grid.n}).")
+        if self.joint_cov is not None:
+            joint = np.asarray(self.joint_cov, dtype=float)
+            size = times.size * self.grid.n
+            if joint.shape != (size, size):
+                raise ValueError(f"joint_cov must have shape ({size}, {size}).")
+            self.joint_cov = joint
         self.times = times
         self.means = means
         self.covs = covs
@@ -77,6 +85,11 @@ class PosteriorField4D:
     def mean_array(self) -> np.ndarray:
         """Posterior mean as a ``(n_times, n_grid)`` array."""
         return np.vstack(self.means)
+
+    @property
+    def mean_vector(self) -> np.ndarray:
+        """Posterior mean flattened as one 4D object vector."""
+        return self.mean_array.reshape(-1)
 
     @property
     def marginal_variance(self) -> np.ndarray:
@@ -114,6 +127,15 @@ class PosteriorField4D:
         cov = (1.0 - weight) * self.covs[left] + weight * self.covs[right]
         return PosteriorField3D(grid=self.grid, mean=mean, map=mean.copy(), cov=cov)
 
+    def cross_covariance(self, time_a: float, time_b: float) -> np.ndarray:
+        """Cross-time covariance block between two assimilated times."""
+        if self.joint_cov is None:
+            raise ValueError("joint_cov is not stored for this posterior.")
+        ia = self._index_of(time_a)
+        ib = self._index_of(time_b)
+        n = self.grid.n
+        return self.joint_cov[ia * n : (ia + 1) * n, ib * n : (ib + 1) * n].copy()
+
     def credible_interval(self, alpha: float = 0.1) -> tuple[np.ndarray, np.ndarray]:
         """Per-time central credible intervals as ``(n_times, n_grid)`` arrays."""
         lows: list[np.ndarray] = []
@@ -130,6 +152,11 @@ class PosteriorField4D:
         The stored posterior contains marginal covariances at each time, not the full cross-time
         covariance, so samples are independent across time slices.
         """
+        if self.joint_cov is not None:
+            size = self.times.size * self.grid.n
+            chol = np.linalg.cholesky(self.joint_cov + 1.0e-12 * np.eye(size))
+            unconstrained = self.mean_vector[None, :] + rng.standard_normal((n, size)) @ chol.T
+            return self.grid.from_unconstrained(unconstrained.reshape(n, self.times.size, self.grid.n))
         samples = [self.at_time(float(time)).sample(n, rng) for time in self.times]
         return np.stack(samples, axis=1)
 
@@ -473,6 +500,78 @@ def assimilate_4d_linear_dynamics(
         sm_cov[t] = filt_cov[t] + C @ (sm_cov[t + 1] - pred_cov[t + 1]) @ C.T
 
     return PosteriorField4D(grid=grid, times=times, means=list(sm_mean), covs=list(sm_cov))
+
+
+def assimilate_4d_joint_linear_dynamics(
+    grid: Field3D,
+    times,
+    observations_by_time,
+    registry: ForwardOperatorRegistry,
+    prior: FieldGaussianPrior,
+    *,
+    transitions,
+    process_cov,
+    jitter: float = 1.0e-10,
+) -> PosteriorField4D:
+    """Exact joint Gaussian posterior over the full 4D field for linear dynamics and observations."""
+    if grid.bounds is not None:
+        raise ValueError("assimilate_4d_joint_linear_dynamics requires an identity-transform field (bounds=None).")
+    times = np.asarray(times, dtype=float)
+    if times.ndim != 1 or times.size == 0:
+        raise ValueError("times must be a non-empty 1-D array.")
+    if np.any(np.diff(times) <= 0.0):
+        raise ValueError("times must be strictly increasing.")
+    if len(observations_by_time) != times.size:
+        raise ValueError("observations_by_time must have one entry (list) per time.")
+    if jitter < 0.0:
+        raise ValueError("jitter must be non-negative.")
+
+    n = grid.n
+    n_times = int(times.size)
+    n_steps = n_times - 1
+    transition_mats = _coerce_transition_matrices(transitions, n_steps, n)
+    process_covs = _coerce_process_covariances(process_cov, n_steps, n)
+    size = n_times * n
+    precision = np.zeros((size, size), dtype=float)
+    rhs = np.zeros(size, dtype=float)
+
+    prior_precision = prior.precision(grid)
+    prior_mean = prior.mean_vector(grid)
+    precision[:n, :n] += prior_precision
+    rhs[:n] += prior_precision @ prior_mean
+
+    for step in range(n_steps):
+        A = transition_mats[step]
+        q_inv = np.linalg.inv(process_covs[step])
+        lo = step * n
+        hi = (step + 1) * n
+        precision[lo : lo + n, lo : lo + n] += A.T @ q_inv @ A
+        precision[lo : lo + n, hi : hi + n] += -A.T @ q_inv
+        precision[hi : hi + n, lo : lo + n] += -q_inv @ A
+        precision[hi : hi + n, hi : hi + n] += q_inv
+
+    for ti, obs_list in enumerate(observations_by_time):
+        offset = ti * n
+        for obs in obs_list:
+            if obs.time is not None and not np.isclose(obs.time, times[ti]):
+                raise ValueError(f"observation time {obs.time!r} does not match assimilation time {times[ti]!r}.")
+            op = registry.get(obs.kind)
+            if not op.is_linear:
+                raise ValueError(
+                    f"observation kind {obs.kind!r} needs a fixed Jacobian for joint linear assimilation."
+                )
+            jac = np.atleast_2d(np.asarray(op.jacobian(grid, obs.location), dtype=float))
+            if jac.shape != (obs.n, n):
+                raise ValueError(f"operator {obs.kind!r} Jacobian shape {jac.shape} != ({obs.n}, {n}).")
+            jt_rinv = jac.T @ _noise_precision(obs)
+            precision[offset : offset + n, offset : offset + n] += jt_rinv @ jac
+            rhs[offset : offset + n] += jt_rinv @ obs.value
+
+    cov = np.linalg.inv(precision + float(jitter) * np.eye(size))
+    mean = cov @ rhs
+    means = [mean[ti * n : (ti + 1) * n].copy() for ti in range(n_times)]
+    covs = [cov[ti * n : (ti + 1) * n, ti * n : (ti + 1) * n].copy() for ti in range(n_times)]
+    return PosteriorField4D(grid=grid, times=times, means=means, covs=covs, joint_cov=cov)
 
 
 def _ensemble_covariance(ensemble: np.ndarray, *, jitter: float) -> np.ndarray:
