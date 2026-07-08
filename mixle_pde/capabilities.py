@@ -155,6 +155,7 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "bounded-field Gauss-Newton MAP/Laplace inversion",
                 "small-reference MCMC empirical posterior validation",
                 "Kalman/RTS random-walk 4D assimilation",
+                "Kalman/RTS linear-dynamics 4D assimilation",
                 "ensemble Kalman nonlinear 4D assimilation",
                 "particle-filter 4D sampled posterior assimilation",
                 "geochemical censored-assay likelihoods",
@@ -217,6 +218,7 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "metropolis_field_invert",
                 "MCMCReport",
                 "assimilate_4d",
+                "assimilate_4d_linear_dynamics",
                 "assimilate_4d_ensemble",
                 "particle_assimilate_4d",
                 "ParticleAssimilationReport",
@@ -265,6 +267,7 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "earth_mt_3d_nonlinear_observation",
                 "earth_csem_3d_nonlinear_observation",
                 "earth_4d_assimilation",
+                "earth_linear_dynamics_4d_assimilation",
                 "earth_ensemble_4d_nonlinear_assimilation",
                 "earth_particle_4d_nonlinear_assimilation",
                 "earth_prior_coupling",
@@ -535,6 +538,13 @@ def verification_scenarios() -> tuple[VerificationScenario, ...]:
             name="4D assimilation and smoothing",
             description="Time-ordered observations produce posterior slices at observed and unobserved times.",
             runner=_run_earth_4d_assimilation,
+        ),
+        VerificationScenario(
+            id="earth_linear_dynamics_4d_assimilation",
+            capability_id="earth.geochem_biostrat_likelihoods",
+            name="Linear-dynamics 4D assimilation",
+            description="Supplied state-transition matrices propagate observations through time.",
+            runner=_run_earth_linear_dynamics_4d_assimilation,
         ),
         VerificationScenario(
             id="earth_ensemble_4d_nonlinear_assimilation",
@@ -1627,6 +1637,57 @@ def _run_earth_4d_assimilation() -> ScenarioResult:
         },
         tolerance={"posterior_error_lt_prior": 1.0},
         message="4D assimilation produced posterior artifacts" if passed else "4D assimilation check failed",
+    )
+
+
+def _run_earth_linear_dynamics_4d_assimilation() -> ScenarioResult:
+    from mixle_pde.field_assimilation import assimilate_4d_linear_dynamics
+    from mixle_pde.field_inversion import FieldGaussianPrior
+    from mixle_pde.latent import Field3D
+    from mixle_pde.observations import ForwardOperatorRegistry, Observation, borehole_forward_operator
+
+    grid = Field3D(
+        coordinates=np.array([[0.0, 0.0, 0.0]]),
+        spacing=1.0,
+        units="state",
+        property_name="growth_state",
+    )
+    times = np.array([0.0, 1.0, 2.0])
+    registry = ForwardOperatorRegistry()
+    registry.register(borehole_forward_operator())
+    observations = [
+        [],
+        [],
+        [Observation("borehole", grid.coordinates, np.array([4.0]), np.array([0.01]), time=2.0)],
+    ]
+    prior = FieldGaussianPrior(mean=0.0, smoothness_precision=0.0, marginal_precision=1.0)
+    posterior = assimilate_4d_linear_dynamics(
+        grid,
+        times,
+        observations,
+        registry,
+        prior,
+        transitions=np.array([[[2.0]], [[2.0]]]),
+        process_cov=1.0e-4,
+    )
+    means = posterior.mean_array[:, 0]
+    expected = np.array([1.0, 2.0, 4.0])
+    max_error = float(np.max(np.abs(means - expected)))
+    passed = max_error <= 0.08 and posterior.marginal_std[-1, 0] < posterior.marginal_std[0, 0]
+    return _result(
+        "earth_linear_dynamics_4d_assimilation",
+        "earth.geochem_biostrat_likelihoods",
+        passed=passed,
+        metrics={
+            "max_trajectory_error": max_error,
+            "start_mean": float(means[0]),
+            "mid_mean": float(means[1]),
+            "final_mean": float(means[2]),
+        },
+        tolerance={"max_trajectory_error": 0.08},
+        message="linear-dynamics 4D assimilation propagated observations"
+        if passed
+        else "linear-dynamics 4D assimilation failed",
     )
 
 

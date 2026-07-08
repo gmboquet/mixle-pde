@@ -299,6 +299,61 @@ def _update(mean_pred: np.ndarray, cov_pred: np.ndarray, obs_list, grid, registr
     return cov_upd @ rhs, cov_upd
 
 
+def _coerce_transition_matrices(transitions, n_steps: int, n_state: int) -> list[np.ndarray]:
+    if callable(transitions):
+        mats = [np.asarray(transitions(step), dtype=float) for step in range(n_steps)]
+    else:
+        arr = np.asarray(transitions, dtype=float)
+        if arr.shape == (n_state, n_state):
+            mats = [arr.copy() for _ in range(n_steps)]
+        elif arr.shape == (n_steps, n_state, n_state):
+            mats = [arr[step].copy() for step in range(n_steps)]
+        else:
+            mats = [np.asarray(mat, dtype=float) for mat in transitions]
+    if len(mats) != n_steps:
+        raise ValueError(f"transitions must contain {n_steps} matrices.")
+    for mat in mats:
+        if mat.shape != (n_state, n_state):
+            raise ValueError(f"each transition matrix must have shape ({n_state}, {n_state}).")
+    return mats
+
+
+def _coerce_process_covariances(process_cov, n_steps: int, n_state: int) -> list[np.ndarray]:
+    arr = np.asarray(process_cov, dtype=float)
+    if arr.ndim == 0:
+        if float(arr) <= 0.0:
+            raise ValueError("process_cov scalar must be positive.")
+        return [float(arr) * np.eye(n_state) for _ in range(n_steps)]
+    if arr.shape == (n_state,):
+        if np.any(arr <= 0.0):
+            raise ValueError("process_cov diagonal entries must be positive.")
+        return [np.diag(arr) for _ in range(n_steps)]
+    if arr.shape == (n_state, n_state):
+        _validate_covariance(arr, "process_cov")
+        return [arr.copy() for _ in range(n_steps)]
+    if arr.shape == (n_steps, n_state):
+        if np.any(arr <= 0.0):
+            raise ValueError("process_cov diagonal entries must be positive.")
+        return [np.diag(arr[step]) for step in range(n_steps)]
+    if arr.shape == (n_steps, n_state, n_state):
+        covs = [arr[step].copy() for step in range(n_steps)]
+        for cov in covs:
+            _validate_covariance(cov, "process_cov")
+        return covs
+    raise ValueError(
+        "process_cov must be scalar, shape (n,), shape (n,n), shape (n_steps,n), "
+        "or shape (n_steps,n,n)."
+    )
+
+
+def _validate_covariance(matrix: np.ndarray, name: str) -> None:
+    if not np.allclose(matrix, matrix.T):
+        raise ValueError(f"{name} must be symmetric.")
+    sign, _ = np.linalg.slogdet(matrix)
+    if sign <= 0.0:
+        raise ValueError(f"{name} must be positive definite.")
+
+
 def assimilate_4d(
     grid: Field3D,
     times,
@@ -355,6 +410,65 @@ def assimilate_4d(
     sm_cov[-1] = filt_cov[-1]
     for t in range(times.size - 2, -1, -1):
         C = filt_cov[t] @ np.linalg.inv(pred_cov[t + 1])
+        sm_mean[t] = filt_mean[t] + C @ (sm_mean[t + 1] - pred_mean[t + 1])
+        sm_cov[t] = filt_cov[t] + C @ (sm_cov[t + 1] - pred_cov[t + 1]) @ C.T
+
+    return PosteriorField4D(grid=grid, times=times, means=list(sm_mean), covs=list(sm_cov))
+
+
+def assimilate_4d_linear_dynamics(
+    grid: Field3D,
+    times,
+    observations_by_time,
+    registry: ForwardOperatorRegistry,
+    prior: FieldGaussianPrior,
+    *,
+    transitions,
+    process_cov,
+) -> PosteriorField4D:
+    """Kalman-filter + RTS-smooth an evolving field with supplied linear dynamics matrices."""
+    if grid.bounds is not None:
+        raise ValueError("assimilate_4d_linear_dynamics requires an identity-transform field (bounds=None).")
+    times = np.asarray(times, dtype=float)
+    if times.ndim != 1 or times.size == 0:
+        raise ValueError("times must be a non-empty 1-D array.")
+    if np.any(np.diff(times) <= 0.0):
+        raise ValueError("times must be strictly increasing.")
+    if len(observations_by_time) != times.size:
+        raise ValueError("observations_by_time must have one entry (list) per time.")
+
+    n = grid.n
+    n_transitions = int(times.size - 1)
+    transition_mats = _coerce_transition_matrices(transitions, n_transitions, n)
+    process_covs = _coerce_process_covariances(process_cov, n_transitions, n)
+
+    filt_mean: list[np.ndarray] = []
+    filt_cov: list[np.ndarray] = []
+    pred_mean: list[np.ndarray] = []
+    pred_cov: list[np.ndarray] = []
+    m_prev = prior.mean_vector(grid)
+    P_prev = np.linalg.inv(prior.precision(grid))
+    for t in range(times.size):
+        if t == 0:
+            m_pred, P_pred = m_prev, P_prev
+        else:
+            A = transition_mats[t - 1]
+            m_pred = A @ m_prev
+            P_pred = A @ P_prev @ A.T + process_covs[t - 1]
+        pred_mean.append(m_pred)
+        pred_cov.append(P_pred)
+        m_upd, P_upd = _update(m_pred, P_pred, observations_by_time[t], grid, registry)
+        filt_mean.append(m_upd)
+        filt_cov.append(P_upd)
+        m_prev, P_prev = m_upd, P_upd
+
+    sm_mean = [None] * times.size
+    sm_cov = [None] * times.size
+    sm_mean[-1] = filt_mean[-1]
+    sm_cov[-1] = filt_cov[-1]
+    for t in range(times.size - 2, -1, -1):
+        A = transition_mats[t]
+        C = filt_cov[t] @ A.T @ np.linalg.inv(pred_cov[t + 1])
         sm_mean[t] = filt_mean[t] + C @ (sm_mean[t + 1] - pred_mean[t + 1])
         sm_cov[t] = filt_cov[t] + C @ (sm_cov[t + 1] - pred_cov[t + 1]) @ C.T
 

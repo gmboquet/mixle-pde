@@ -15,6 +15,7 @@ from mixle_pde.field_assimilation import (
     PosteriorFieldSamples4D,
     assimilate_4d,
     assimilate_4d_ensemble,
+    assimilate_4d_linear_dynamics,
     particle_assimilate_4d,
 )
 from mixle_pde.field_inversion import FieldGaussianPrior
@@ -185,6 +186,70 @@ class Assimilation4DTest(unittest.TestCase):
             assimilate_4d(bounded, self.times, self.obs_by_time, self.registry, self.prior, process_var=1.0)
         with self.assertRaises(ValueError):
             PosteriorField4D(self.grid, np.array([0.0, 0.0]), [np.zeros(self.grid.n)], [np.eye(self.grid.n)])
+
+
+class LinearDynamicsAssimilation4DTest(unittest.TestCase):
+    def test_linear_transition_smoother_propagates_future_observation_backward(self):
+        grid = Field3D(
+            coordinates=np.array([[0.0, 0.0, 0.0]]),
+            spacing=1.0,
+            units="state",
+            property_name="growth_state",
+        )
+        registry = ForwardOperatorRegistry()
+        registry.register(borehole_forward_operator())
+        times = np.array([0.0, 1.0, 2.0])
+        observations = [
+            [],
+            [],
+            [
+                Observation(
+                    "borehole",
+                    grid.coordinates,
+                    value=np.array([4.0]),
+                    noise_cov=np.array([0.01]),
+                    time=2.0,
+                )
+            ],
+        ]
+        prior = FieldGaussianPrior(mean=0.0, smoothness_precision=0.0, marginal_precision=1.0)
+
+        post = assimilate_4d_linear_dynamics(
+            grid,
+            times,
+            observations,
+            registry,
+            prior,
+            transitions=np.array([[[2.0]], [[2.0]]]),
+            process_cov=1.0e-4,
+        )
+
+        means = post.mean_array[:, 0]
+        self.assertIsInstance(post, PosteriorField4D)
+        np.testing.assert_allclose(means, np.array([1.0, 2.0, 4.0]), atol=0.08)
+        self.assertLess(post.marginal_std[-1, 0], post.marginal_std[0, 0])
+
+    def test_linear_transition_validation_rejects_bad_shapes(self):
+        grid = Field3D(
+            coordinates=np.array([[0.0, 0.0, 0.0]]),
+            spacing=1.0,
+            units="state",
+            property_name="growth_state",
+        )
+        registry = ForwardOperatorRegistry()
+        registry.register(borehole_forward_operator())
+        prior = FieldGaussianPrior(mean=0.0, smoothness_precision=0.0, marginal_precision=1.0)
+
+        with self.assertRaises(ValueError):
+            assimilate_4d_linear_dynamics(
+                grid,
+                np.array([0.0, 1.0]),
+                [[], []],
+                registry,
+                prior,
+                transitions=np.ones((2, 2)),
+                process_cov=1.0e-3,
+            )
 
 
 class EnsembleAssimilation4DTest(unittest.TestCase):
