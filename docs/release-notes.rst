@@ -19,12 +19,6 @@ Included
 * Forward-operator capability reports that distinguish fixed Jacobians,
   finite-difference fallbacks, differentiable paths, and true adjoint support.
 * Sparse spatiotemporal Gaussian prior over ``Field4D`` objects.
-* Small-reference Random-Walk Metropolis inversion with empirical posterior
-  artifacts for nonlinear/non-Gaussian validation problems.
-* Sampled posterior-query support for empirical marginals, derived quantities,
-  region mass, and ensemble export.
-* Posterior-predictive draws on static, sampled, and 4D field posterior
-  artifacts.
 * 4D posterior artifacts with full-time mean, marginal uncertainty, credible
   intervals, marginal samples, and interpolated time slices.
 * Zero-dimensional reactive gas/engine-cylinder combustion kernel with fuel
@@ -51,8 +45,6 @@ Known Risks
   presented as interchangeable.
 * Ensemble 4D assimilation is a reference Gaussian-summary path, not a full
   production particle/MCMC smoother.
-* ``metropolis_field_invert`` is a small validation sampler and is not a
-  production-scale 3D/4D MCMC engine.
 * Geoscience likelihood helpers are evidence surfaces, not complete geologic
   process simulators.
 * Moving meshes provide geometry support only. ALE transport, fluid-structure

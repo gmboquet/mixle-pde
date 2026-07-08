@@ -27,7 +27,7 @@ Capability Map
    * - Fields
      - ``Field3D``, ``Field4D``, ``PosteriorField3D``
      - Grid or simplex-mesh geometry, time axes, units, bounds, posterior
-       covariance, samples, intervals, slices, and posterior-predictive draws.
+       covariance, samples, intervals, and slices.
    * - Observations
      - ``Observation``, ``ForwardOperator``, ``ForwardOperatorRegistry``
      - Common measurement contract and registry-based prediction path.
@@ -42,11 +42,6 @@ Capability Map
    * - Bounded inversion
      - ``gauss_newton_invert``, ``GaussNewtonReport``
      - MAP plus Laplace covariance for bounded or nonlinear-transform fields.
-   * - Sampled validation
-     - ``metropolis_field_invert``, ``PosteriorFieldSamples3D``,
-       ``MCMCReport``
-     - Small-reference empirical posteriors for nonlinear or non-Gaussian
-       likelihood checks.
    * - 4D assimilation
      - ``PosteriorField4D``, ``assimilate_4d``, ``assimilate_4d_ensemble``
      - Kalman/RTS smoothing for linear observations and ensemble filtering for
@@ -58,8 +53,8 @@ Capability Map
        simulators.
    * - Posterior queries
      - ``marginal_at_points``, ``section``, ``region_summary``,
-       ``derived_quantity``, ``sampled_derived_quantity``
-     - Query and compact Gaussian or sampled posterior field artifacts.
+       ``derived_quantity``
+     - Query and compact posterior field artifacts.
    * - 3D/4D meshes
      - ``SimplexMesh``, ``MovingSimplexMesh``, ``moving_mesh``,
        ``pipe_radial_deformation``
@@ -134,21 +129,6 @@ Every posterior sample and interval endpoint maps back through the field
 transform, so bounded inversions should not report physically impossible
 values.
 
-Sampled Validation
-------------------
-
-``metropolis_field_invert`` provides a small Random-Walk Metropolis reference
-path when a likelihood is nonlinear, non-Gaussian, or lacks a Jacobian. It uses
-the same ``Field3D``, ``FieldGaussianPrior``, ``Observation``, and
-``ForwardOperatorRegistry`` contracts as the other inversion paths, but returns
-``PosteriorFieldSamples3D`` rather than a Gaussian covariance artifact.
-
-The sampled artifact exposes empirical means, MAP samples, marginal
-uncertainty, credible intervals, slices, physical-unit resampling, and
-posterior-predictive draws. It is for validation and small reference problems;
-large 3D/4D production inversions still need sparse, adjoint, ensemble,
-variational, or problem-specific samplers.
-
 4D Assimilation
 ---------------
 
@@ -165,8 +145,6 @@ estimated from the ensemble at each time.
 ``marginal_std``, ``credible_interval()``, and ``sample()``. Samples are
 per-time marginal draws because the stored artifact keeps one covariance per
 time slice rather than a full cross-time covariance.
-``posterior_predictive_draws()`` draws model-space predictions for a
-time-stamped observation from the corresponding posterior slice.
 
 Moving Meshes
 -------------
@@ -187,9 +165,7 @@ Posterior Queries And Calibration
 
 Use posterior query helpers after inversion or assimilation for point
 marginals, sections, region summaries, linear derived quantities, low-rank
-summaries, diagonal summaries, and ensemble exports. Gaussian posteriors use
-closed-form derived quantities where possible; sampled posteriors use
-empirical derived draws so non-Gaussian shape is not collapsed away.
+summaries, diagonal summaries, and ensemble exports.
 
 Use calibration diagnostics before promotion:
 
