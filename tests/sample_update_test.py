@@ -7,13 +7,23 @@ import numpy as np
 from mixle_pde.field_assimilation import PosteriorFieldSamples4D
 from mixle_pde.geo_observations import (
     BiostratConstraint,
+    FaciesIntervalConstraint,
     GeochemAssay,
-    assay_log_likelihood,
-    assay_posterior_predictive,
-    biostrat_log_likelihood,
+    GeochronologyAge,
+    StratigraphicCorrelation,
 )
 from mixle_pde.latent import Field3D, PosteriorFieldSamples3D
-from mixle_pde.sample_update import update_sampled_field_posterior, update_sampled_field_posterior_4d
+from mixle_pde.sample_update import (
+    biostrat_constraint_likelihood,
+    facies_interval_likelihood,
+    geochem_assay_likelihood,
+    geochronology_age_likelihood,
+    stratigraphic_correlation_likelihood,
+    timed_likelihood,
+    update_sampled_field_posterior,
+    update_sampled_field_posterior_4d,
+    update_sampled_field_posterior_with_observations,
+)
 
 
 class SampledPosteriorUpdateTest(unittest.TestCase):
@@ -36,13 +46,9 @@ class SampledPosteriorUpdateTest(unittest.TestCase):
             units="ppm",
         )
 
-        def likelihood(field_values):
-            predicted = assay_posterior_predictive(assay, grid, field_values)
-            return assay_log_likelihood(assay, predicted)
-
-        updated, report = update_sampled_field_posterior(
+        updated, report = update_sampled_field_posterior_with_observations(
             posterior,
-            [likelihood],
+            [geochem_assay_likelihood(assay, grid)],
             n_samples=64,
             rng=np.random.default_rng(5),
         )
@@ -80,14 +86,9 @@ class SampledPosteriorUpdateTest(unittest.TestCase):
             tolerance=1.0,
         )
 
-        def likelihood(field_values, time):
-            if not np.isclose(time, 1.0):
-                return 0.0
-            return biostrat_log_likelihood(occurrence, float(field_values[0]))
-
         updated, report = update_sampled_field_posterior_4d(
             posterior,
-            [[], [likelihood]],
+            [[], [timed_likelihood(biostrat_constraint_likelihood(occurrence, grid), 1.0)]],
             n_samples=32,
             rng=np.random.default_rng(7),
         )
@@ -96,6 +97,41 @@ class SampledPosteriorUpdateTest(unittest.TestCase):
         self.assertEqual(report.likelihood_count, 1)
         self.assertLess(report.effective_sample_size, posterior.n_samples)
         self.assertTrue(np.all((updated.physical_samples[:, 1, 0] >= 50.0) & (updated.physical_samples[:, 1, 0] <= 60.0)))
+
+    def test_typed_age_facies_and_stratigraphic_likelihood_factories(self):
+        grid = Field3D(
+            coordinates=np.array([[0.0, 0.0, -10.0], [10.0, 0.0, -20.0]]),
+            spacing=10.0,
+            units="Ma",
+            property_name="age",
+        )
+        good = np.array([40.0, 55.0])
+        bad = np.array([70.0, 20.0])
+        age = GeochronologyAge(location=grid.coordinates[[0]], age=40.0, analytical_std=1.0)
+        facies = FaciesIntervalConstraint(
+            location=grid.coordinates[[1]],
+            label="marine",
+            property_name="age",
+            lower=50.0,
+            upper=60.0,
+            tolerance=2.0,
+        )
+        strat = StratigraphicCorrelation(
+            location_a=grid.coordinates[[1]],
+            location_b=grid.coordinates[[0]],
+            age_difference=15.0,
+            std=1.0,
+        )
+        likelihoods = [
+            geochronology_age_likelihood(age, grid),
+            facies_interval_likelihood(facies, grid),
+            stratigraphic_correlation_likelihood(strat, grid),
+        ]
+
+        good_score = sum(fn(good) for fn in likelihoods)
+        bad_score = sum(fn(bad) for fn in likelihoods)
+
+        self.assertGreater(good_score, bad_score)
 
 
 if __name__ == "__main__":

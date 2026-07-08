@@ -29,6 +29,73 @@ class SampleUpdateReport:
     likelihood_count: int
 
 
+def geochem_assay_likelihood(assay, grid) -> LogLikelihood3D:
+    """Return a sampled-posterior likelihood callback for a :class:`GeochemAssay`."""
+    from mixle_pde.geo_observations import assay_log_likelihood, assay_posterior_predictive
+
+    def _likelihood(field_values: np.ndarray) -> float:
+        predicted = assay_posterior_predictive(assay, grid, field_values)
+        return assay_log_likelihood(assay, predicted)
+
+    return _likelihood
+
+
+def biostrat_constraint_likelihood(constraint, grid) -> LogLikelihood3D:
+    """Return a sampled-posterior likelihood callback for a :class:`BiostratConstraint` age field."""
+    from mixle_pde.geo_observations import biostrat_log_likelihood
+
+    def _likelihood(field_values: np.ndarray) -> float:
+        value = float(_nearest_values(grid, field_values, constraint.location)[0])
+        return biostrat_log_likelihood(constraint, value)
+
+    return _likelihood
+
+
+def geochronology_age_likelihood(observation, grid) -> LogLikelihood3D:
+    """Return a sampled-posterior likelihood callback for a :class:`GeochronologyAge` field."""
+    from mixle_pde.geo_observations import geochronology_log_likelihood
+
+    def _likelihood(field_values: np.ndarray) -> float:
+        value = float(_nearest_values(grid, field_values, observation.location)[0])
+        return geochronology_log_likelihood(observation, value)
+
+    return _likelihood
+
+
+def stratigraphic_correlation_likelihood(constraint, grid) -> LogLikelihood3D:
+    """Return a likelihood callback for relative-age constraints between two field locations."""
+    from mixle_pde.geo_observations import stratigraphic_correlation_log_likelihood
+
+    def _likelihood(field_values: np.ndarray) -> float:
+        age_a = float(_nearest_values(grid, field_values, constraint.location_a)[0])
+        age_b = float(_nearest_values(grid, field_values, constraint.location_b)[0])
+        return stratigraphic_correlation_log_likelihood(constraint, age_a, age_b)
+
+    return _likelihood
+
+
+def facies_interval_likelihood(constraint, grid) -> LogLikelihood3D:
+    """Return a likelihood callback for a scalar facies/environment interval constraint."""
+    from mixle_pde.geo_observations import facies_interval_log_likelihood
+
+    def _likelihood(field_values: np.ndarray) -> float:
+        value = float(_nearest_values(grid, field_values, constraint.location)[0])
+        return facies_interval_log_likelihood(constraint, value)
+
+    return _likelihood
+
+
+def timed_likelihood(likelihood: LogLikelihood3D, time: float, *, atol: float = 1.0e-9) -> LogLikelihood4D:
+    """Adapt a 3D likelihood callback to one time slice of a sampled 4D posterior."""
+
+    def _likelihood(field_values: np.ndarray, observed_time: float) -> float:
+        if not np.isclose(float(observed_time), float(time), atol=float(atol)):
+            return 0.0
+        return likelihood(field_values)
+
+    return _likelihood
+
+
 def update_sampled_field_posterior(
     posterior: PosteriorFieldSamples3D,
     log_likelihoods: Sequence[LogLikelihood3D],
@@ -68,6 +135,24 @@ def update_sampled_field_posterior(
         },
     )
     return out, report
+
+
+def update_sampled_field_posterior_with_observations(
+    posterior: PosteriorFieldSamples3D,
+    likelihoods: Sequence[LogLikelihood3D],
+    *,
+    n_samples: int | None = None,
+    rng: np.random.Generator | None = None,
+    resample: bool = True,
+) -> tuple[PosteriorFieldSamples3D, SampleUpdateReport]:
+    """Alias for observation-driven updates; accepts callbacks from the typed likelihood factories."""
+    return update_sampled_field_posterior(
+        posterior,
+        likelihoods,
+        n_samples=n_samples,
+        rng=rng,
+        resample=resample,
+    )
 
 
 def update_sampled_field_posterior_4d(
@@ -161,3 +246,14 @@ def _update_samples(
         likelihood_count=int(likelihood_count),
     )
     return {"samples": updated_samples, "log_posterior": updated_logp, "map": samples[best].copy()}, report
+
+
+def _nearest_values(grid, field_values: np.ndarray, locations: np.ndarray) -> np.ndarray:
+    values = np.asarray(field_values, dtype=float)
+    if values.shape != (grid.n,):
+        raise ValueError(f"field_values must have shape ({grid.n},).")
+    coords = np.asarray(grid.coordinates, dtype=float)
+    loc = np.atleast_2d(np.asarray(locations, dtype=float))
+    diffs = coords[None, :, :] - loc[:, None, :]
+    idx = np.argmin(np.sum(diffs**2, axis=2), axis=1)
+    return values[idx]

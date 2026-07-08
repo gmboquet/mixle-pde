@@ -192,8 +192,15 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "PosteriorFieldSamples4D.at_time",
                 "PosteriorFieldSamples4D.posterior_predictive_draws",
                 "SampleUpdateReport",
+                "geochem_assay_likelihood",
+                "biostrat_constraint_likelihood",
+                "geochronology_age_likelihood",
+                "stratigraphic_correlation_likelihood",
+                "facies_interval_likelihood",
+                "timed_likelihood",
                 "update_sampled_field_posterior",
                 "update_sampled_field_posterior_4d",
+                "update_sampled_field_posterior_with_observations",
                 "Observation",
                 "ForwardOperatorRegistry",
                 "ForwardOperator.capability_report",
@@ -1197,12 +1204,15 @@ def _run_earth_sampled_domain_likelihood_update() -> ScenarioResult:
     from mixle_pde.geo_observations import (
         BiostratConstraint,
         GeochemAssay,
-        assay_log_likelihood,
-        assay_posterior_predictive,
-        biostrat_log_likelihood,
     )
     from mixle_pde.latent import Field3D, PosteriorFieldSamples3D
-    from mixle_pde.sample_update import update_sampled_field_posterior, update_sampled_field_posterior_4d
+    from mixle_pde.sample_update import (
+        biostrat_constraint_likelihood,
+        geochem_assay_likelihood,
+        timed_likelihood,
+        update_sampled_field_posterior_4d,
+        update_sampled_field_posterior_with_observations,
+    )
 
     assay_grid = Field3D(
         coordinates=np.array([[0.0, 0.0, 0.0]]),
@@ -1222,13 +1232,9 @@ def _run_earth_sampled_domain_likelihood_update() -> ScenarioResult:
         units="ppm",
     )
 
-    def assay_likelihood(field_values):
-        predicted = assay_posterior_predictive(assay, assay_grid, field_values)
-        return assay_log_likelihood(assay, predicted)
-
-    updated_3d, report_3d = update_sampled_field_posterior(
+    updated_3d, report_3d = update_sampled_field_posterior_with_observations(
         assay_posterior,
-        [assay_likelihood],
+        [geochem_assay_likelihood(assay, assay_grid)],
         n_samples=64,
         rng=np.random.default_rng(5),
     )
@@ -1253,14 +1259,9 @@ def _run_earth_sampled_domain_likelihood_update() -> ScenarioResult:
         tolerance=1.0,
     )
 
-    def bio_likelihood(field_values, time):
-        if not np.isclose(time, 1.0):
-            return 0.0
-        return biostrat_log_likelihood(bio, float(field_values[0]))
-
     updated_4d, report_4d = update_sampled_field_posterior_4d(
         age_posterior,
-        [[], [bio_likelihood]],
+        [[], [timed_likelihood(biostrat_constraint_likelihood(bio, age_grid), 1.0)]],
         n_samples=32,
         rng=np.random.default_rng(7),
     )

@@ -265,8 +265,15 @@ from mixle_pde.refractivity import duct_layers, modified_refractivity, standard_
 from mixle_pde.rock_physics import fluid_substitute, gassmann_kdry, gassmann_ksat
 from mixle_pde.sample_update import (
     SampleUpdateReport,
+    biostrat_constraint_likelihood,
+    facies_interval_likelihood,
+    geochem_assay_likelihood,
+    geochronology_age_likelihood,
+    stratigraphic_correlation_likelihood,
+    timed_likelihood,
     update_sampled_field_posterior,
     update_sampled_field_posterior_4d,
+    update_sampled_field_posterior_with_observations,
 )
 from mixle_pde.shape import level_set_material, shape_optimize
 
@@ -384,6 +391,12 @@ __all__ = [
     "SampledDerivedQuantity",
     "PosteriorEnsemble",
     "SampleUpdateReport",
+    "biostrat_constraint_likelihood",
+    "facies_interval_likelihood",
+    "geochem_assay_likelihood",
+    "geochronology_age_likelihood",
+    "stratigraphic_correlation_likelihood",
+    "timed_likelihood",
     "marginal_at_points",
     "marginal_time_series",
     "section",
@@ -399,6 +412,7 @@ __all__ = [
     "to_ensemble",
     "update_sampled_field_posterior",
     "update_sampled_field_posterior_4d",
+    "update_sampled_field_posterior_with_observations",
     "assemble_simplex_fem_matrices",
     "assemble_simplex_load_vector",
     "assemble_simplex_mass_matrix",
