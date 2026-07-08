@@ -261,6 +261,11 @@ from mixle_pde.ray_scattering import knife_edge_diffraction, multipath_power, po
 from mixle_pde.reasoning import JointPotentialField, MechanisticFieldReasoner, SpatialFieldStore
 from mixle_pde.refractivity import duct_layers, modified_refractivity, standard_refractivity_profile
 from mixle_pde.rock_physics import fluid_substitute, gassmann_kdry, gassmann_ksat
+from mixle_pde.sample_update import (
+    SampleUpdateReport,
+    update_sampled_field_posterior,
+    update_sampled_field_posterior_4d,
+)
 from mixle_pde.shape import level_set_material, shape_optimize
 
 # new inverse-PDE families (wave 3): Smoluchowski diffusion-limited on-rates, time-domain constant-Q viscoacoustic
@@ -375,6 +380,7 @@ __all__ = [
     "DerivedTimeSeries",
     "SampledDerivedQuantity",
     "PosteriorEnsemble",
+    "SampleUpdateReport",
     "marginal_at_points",
     "marginal_time_series",
     "section",
@@ -388,6 +394,8 @@ __all__ = [
     "compress_to_low_rank",
     "to_diagonal",
     "to_ensemble",
+    "update_sampled_field_posterior",
+    "update_sampled_field_posterior_4d",
     "assemble_simplex_fem_matrices",
     "assemble_simplex_load_vector",
     "assemble_simplex_mass_matrix",

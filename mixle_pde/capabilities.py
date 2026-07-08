@@ -189,6 +189,9 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "PosteriorFieldSamples4D",
                 "PosteriorFieldSamples4D.at_time",
                 "PosteriorFieldSamples4D.posterior_predictive_draws",
+                "SampleUpdateReport",
+                "update_sampled_field_posterior",
+                "update_sampled_field_posterior_4d",
                 "Observation",
                 "ForwardOperatorRegistry",
                 "ForwardOperator.capability_report",
@@ -254,6 +257,7 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "earth_static_linear_inversion",
                 "earth_bounded_gauss_newton",
                 "earth_mcmc_reference_posterior",
+                "earth_sampled_domain_likelihood_update",
                 "earth_dc_resistivity_nonlinear_inversion",
                 "earth_aem_layered_nonlinear_observation",
                 "earth_layered_mt_nonlinear_inversion",
@@ -475,6 +479,13 @@ def verification_scenarios() -> tuple[VerificationScenario, ...]:
             name="Small-reference sampled posterior",
             description="Random-Walk Metropolis samples a one-cell posterior against a closed-form reference.",
             runner=_run_earth_mcmc_reference_posterior,
+        ),
+        VerificationScenario(
+            id="earth_sampled_domain_likelihood_update",
+            capability_id="earth.geochem_biostrat_likelihoods",
+            name="Sampled domain-likelihood posterior update",
+            description="Geochemical and biostratigraphic likelihoods reweight sampled 3D/4D posteriors.",
+            runner=_run_earth_sampled_domain_likelihood_update,
         ),
         VerificationScenario(
             id="earth_dc_resistivity_nonlinear_inversion",
@@ -1170,6 +1181,105 @@ def _run_earth_mcmc_reference_posterior() -> ScenarioResult:
         },
         tolerance={"posterior_mean_error": 0.2, "posterior_variance_error": 0.15},
         message="MCMC reference posterior matched" if passed else "MCMC reference posterior check failed",
+    )
+
+
+def _run_earth_sampled_domain_likelihood_update() -> ScenarioResult:
+    from mixle_pde.field_assimilation import PosteriorFieldSamples4D
+    from mixle_pde.geo_observations import (
+        BiostratConstraint,
+        GeochemAssay,
+        assay_log_likelihood,
+        assay_posterior_predictive,
+        biostrat_log_likelihood,
+    )
+    from mixle_pde.latent import Field3D, PosteriorFieldSamples3D
+    from mixle_pde.sample_update import update_sampled_field_posterior, update_sampled_field_posterior_4d
+
+    assay_grid = Field3D(
+        coordinates=np.array([[0.0, 0.0, 0.0]]),
+        spacing=1.0,
+        units="ppm",
+        property_name="Cu",
+    )
+    assay_posterior = PosteriorFieldSamples3D(
+        grid=assay_grid,
+        samples=np.array([[1.0], [4.0], [8.0], [11.5], [12.0], [12.5]]),
+    )
+    assay = GeochemAssay(
+        element="Cu",
+        location=np.array([[0.0, 0.0, 0.0]]),
+        value=np.array([12.0]),
+        noise_std=np.array([0.25]),
+        units="ppm",
+    )
+
+    def assay_likelihood(field_values):
+        predicted = assay_posterior_predictive(assay, assay_grid, field_values)
+        return assay_log_likelihood(assay, predicted)
+
+    updated_3d, report_3d = update_sampled_field_posterior(
+        assay_posterior,
+        [assay_likelihood],
+        n_samples=64,
+        rng=np.random.default_rng(5),
+    )
+
+    age_grid = Field3D(
+        coordinates=np.array([[0.0, 0.0, -100.0]]),
+        spacing=1.0,
+        units="Ma",
+        property_name="age",
+    )
+    age_posterior = PosteriorFieldSamples4D(
+        grid=age_grid,
+        times=np.array([0.0, 1.0]),
+        samples=np.array([[[20.0], [35.0]], [[20.0], [55.0]], [[20.0], [65.0]], [[20.0], [90.0]]]),
+    )
+    bio = BiostratConstraint(
+        location=np.array([[0.0, 0.0, -100.0]]),
+        taxon="Zone-A",
+        present=True,
+        first_appearance=60.0,
+        last_appearance=50.0,
+        tolerance=1.0,
+    )
+
+    def bio_likelihood(field_values, time):
+        if not np.isclose(time, 1.0):
+            return 0.0
+        return biostrat_log_likelihood(bio, float(field_values[0]))
+
+    updated_4d, report_4d = update_sampled_field_posterior_4d(
+        age_posterior,
+        [[], [bio_likelihood]],
+        n_samples=32,
+        rng=np.random.default_rng(7),
+    )
+    age_samples = updated_4d.physical_samples[:, 1, 0]
+    passed = (
+        updated_3d.samples.shape == (64, 1)
+        and float(updated_3d.physical_samples.mean()) > 10.0
+        and np.isclose(updated_3d.map[0], 12.0)
+        and report_3d.effective_sample_size < assay_posterior.samples.shape[0]
+        and updated_4d.samples.shape == (32, 2, 1)
+        and report_4d.effective_sample_size < age_posterior.n_samples
+        and bool(np.all((age_samples >= 50.0) & (age_samples <= 60.0)))
+    )
+    return _result(
+        "earth_sampled_domain_likelihood_update",
+        "earth.geochem_biostrat_likelihoods",
+        passed=passed,
+        metrics={
+            "geochem_updated_mean": float(updated_3d.physical_samples.mean()),
+            "geochem_effective_sample_size": report_3d.effective_sample_size,
+            "biostrat_effective_sample_size": report_4d.effective_sample_size,
+            "biostrat_mean_age": float(age_samples.mean()),
+        },
+        tolerance={"geochem_updated_mean_gt": 10.0, "biostrat_age_range": [50.0, 60.0]},
+        message="sampled domain likelihood update moved posteriors"
+        if passed
+        else "sampled domain likelihood update failed",
     )
 
 
