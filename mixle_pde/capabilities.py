@@ -166,6 +166,8 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "PosteriorField4D.at_time(interpolate=True)",
                 "Observation",
                 "ForwardOperatorRegistry",
+                "ForwardOperator.capability_report",
+                "ForwardOperatorRegistry.capability_report",
                 "GeochemAssay",
                 "MultiElementAssay",
                 "multi_element_assay_log_likelihood",
@@ -865,13 +867,19 @@ def _run_earth_forward_operator_contract() -> ScenarioResult:
     ll += gaussian_log_likelihood(
         magnetic, registry.get("magnetics").predict_observation(grid, values / 10000.0, magnetic)
     )
+    report = registry.capability_report()
     shapes_ok = all(registry.get(kind).has_adjoint() for kind in ("gravity", "magnetics", "borehole"))
-    passed = shapes_ok and np.isfinite(ll)
+    metadata_ok = (
+        report["gravity"]["jacobian_kind"] == "fixed"
+        and report["magnetics"]["has_fixed_jacobian"]
+        and report["borehole"]["differentiable"]
+    )
+    passed = shapes_ok and metadata_ok and np.isfinite(ll)
     return _result(
         "earth_forward_operator_contract",
         "earth.geochem_biostrat_likelihoods",
         passed=passed,
-        metrics={"joint_log_likelihood": ll, "registered_operator_count": 3.0},
+        metrics={"joint_log_likelihood": ll, "registered_operator_count": float(len(report))},
         tolerance={},
         message="forward operators shared the registry contract" if passed else "forward operator contract failed",
     )

@@ -18,6 +18,8 @@ Added
 * Mesh-backed ``Field3D`` and time-indexed ``Field4D`` latent object contracts.
 * Fossil/palynology assemblage likelihoods with detection and reworking
   uncertainty.
+* Forward-operator capability reports for Jacobian, finite-difference,
+  differentiable, and adjoint metadata.
 * Moving-domain simplex mesh primitives for 3D deformation and 4D space-time
   geometry.
 * Full-time-axis 4D posterior arrays, intervals, samples, and interpolated

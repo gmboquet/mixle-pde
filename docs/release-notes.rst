@@ -16,6 +16,8 @@ Included
 * Mesh-backed ``Field3D`` and time-indexed ``Field4D`` latent object contracts.
 * Fossil/palynology assemblage likelihoods with detection probability,
   reworking/background mixture, and overdispersion support.
+* Forward-operator capability reports that distinguish fixed Jacobians,
+  finite-difference fallbacks, differentiable paths, and true adjoint support.
 * 4D posterior artifacts with full-time mean, marginal uncertainty, credible
   intervals, marginal samples, and interpolated time slices.
 * Zero-dimensional reactive gas/engine-cylinder combustion kernel with fuel

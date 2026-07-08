@@ -65,6 +65,12 @@ Register Observations
 ``(n, n)`` covariance matrix. The observation validates location shape, value
 shape, positive diagonal variances, and full-covariance symmetry.
 
+``registry.capability_report()`` records whether each operator exposes a fixed
+Jacobian, state-dependent local Jacobian, finite-difference fallback,
+differentiable path, or true adjoint. This metadata is part of the inversion
+contract; examples should not imply an adjoint exists when a finite-difference
+fallback is being used.
+
 Score A Field
 -------------
 
@@ -183,4 +189,3 @@ When adding an observation or inversion route, include:
 * posterior predictive or held-out fit evidence;
 * clear docs naming whether the posterior is exact, sparse-exact,
   linearized, ensemble-based, or sampled.
-

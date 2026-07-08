@@ -116,6 +116,31 @@ class ForwardOperator:
     jacobian: Callable[[Field3D, np.ndarray], np.ndarray] | None = None
     jacobian_at_values: Callable[[Field3D, np.ndarray, np.ndarray], np.ndarray] | None = None
     differentiable: bool = False
+    jacobian_kind: str | None = None
+    has_true_adjoint: bool = False
+    finite_difference_step: float | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.jacobian is not None and self.jacobian_at_values is not None:
+            raise ValueError("provide either jacobian or jacobian_at_values, not both.")
+        if self.jacobian_kind is None:
+            if self.jacobian is not None:
+                self.jacobian_kind = "fixed"
+            elif self.jacobian_at_values is not None:
+                self.jacobian_kind = "state_dependent"
+            else:
+                self.jacobian_kind = "none"
+        allowed = {"none", "fixed", "state_dependent", "finite_difference", "autodiff", "adjoint"}
+        if self.jacobian_kind not in allowed:
+            raise ValueError(f"jacobian_kind must be one of {sorted(allowed)}.")
+        if self.jacobian_kind == "none" and self.has_adjoint():
+            raise ValueError("jacobian_kind='none' is inconsistent with a supplied Jacobian.")
+        if self.finite_difference_step is not None and self.finite_difference_step <= 0.0:
+            raise ValueError("finite_difference_step must be positive when supplied.")
+        if self.jacobian_kind == "finite_difference" and self.finite_difference_step is None:
+            raise ValueError("finite_difference Jacobians must record finite_difference_step.")
+        self.metadata = dict(self.metadata)
 
     def has_adjoint(self) -> bool:
         return self.jacobian is not None or self.jacobian_at_values is not None
@@ -123,6 +148,20 @@ class ForwardOperator:
     @property
     def is_linear(self) -> bool:
         return self.jacobian is not None and self.jacobian_at_values is None
+
+    def capability_report(self) -> dict[str, Any]:
+        """Machine-readable declaration of derivative and fallback support."""
+        return {
+            "kind": self.kind,
+            "is_linear": self.is_linear,
+            "has_fixed_jacobian": self.jacobian is not None,
+            "has_local_jacobian": self.has_adjoint(),
+            "jacobian_kind": self.jacobian_kind,
+            "has_true_adjoint": bool(self.has_true_adjoint),
+            "differentiable": bool(self.differentiable),
+            "finite_difference_step": self.finite_difference_step,
+            "metadata": dict(self.metadata),
+        }
 
     def predict_observation(self, grid: Field3D, field_values: np.ndarray, observation: Observation) -> np.ndarray:
         if observation.kind != self.kind:
@@ -174,6 +213,10 @@ class ForwardOperatorRegistry:
 
     def __contains__(self, kind: str) -> bool:
         return kind in self._ops
+
+    def capability_report(self) -> dict[str, dict[str, Any]]:
+        """Return derivative/fallback declarations for all registered operators."""
+        return {kind: op.capability_report() for kind, op in sorted(self._ops.items())}
 
     def log_likelihood(self, grid: Field3D, field_values: np.ndarray, observation: Observation) -> float:
         """Resolve ``observation.kind`` to its operator, predict, and score -- the one-call path."""
@@ -328,6 +371,8 @@ def dc_resistivity_forward_operator(
         predict,
         jacobian_at_values=jacobian_at_values,
         differentiable=True,
+        jacobian_kind="finite_difference",
+        finite_difference_step=finite_difference_step,
     )
 
 
@@ -417,7 +462,14 @@ def layered_mt_forward_operator(
             jac[:, i] = (_predict_array(plus) - _predict_array(minus)) / (2.0 * step)
         return jac
 
-    return ForwardOperator(kind, predict, jacobian_at_values=jacobian_at_values, differentiable=True)
+    return ForwardOperator(
+        kind,
+        predict,
+        jacobian_at_values=jacobian_at_values,
+        differentiable=True,
+        jacobian_kind="finite_difference",
+        finite_difference_step=finite_difference_step,
+    )
 
 
 def aem_layered_forward_operator(
@@ -507,7 +559,14 @@ def aem_layered_forward_operator(
             jac[:, i] = (_predict_array(plus) - _predict_array(minus)) / (2.0 * step)
         return jac
 
-    return ForwardOperator(kind, predict, jacobian_at_values=jacobian_at_values, differentiable=True)
+    return ForwardOperator(
+        kind,
+        predict,
+        jacobian_at_values=jacobian_at_values,
+        differentiable=True,
+        jacobian_kind="finite_difference",
+        finite_difference_step=finite_difference_step,
+    )
 
 
 def mt_2d_te_forward_operator(
@@ -600,7 +659,14 @@ def mt_2d_te_forward_operator(
             jac[:, i] = (_predict_array(plus) - _predict_array(minus)) / (2.0 * step)
         return jac
 
-    return ForwardOperator(kind, predict, jacobian_at_values=jacobian_at_values, differentiable=True)
+    return ForwardOperator(
+        kind,
+        predict,
+        jacobian_at_values=jacobian_at_values,
+        differentiable=True,
+        jacobian_kind="finite_difference",
+        finite_difference_step=finite_difference_step,
+    )
 
 
 def mt_3d_forward_operator(
@@ -704,7 +770,14 @@ def mt_3d_forward_operator(
             jac[:, i] = (_predict_array(plus) - _predict_array(minus)) / (2.0 * step)
         return jac
 
-    return ForwardOperator(kind, predict, jacobian_at_values=jacobian_at_values, differentiable=True)
+    return ForwardOperator(
+        kind,
+        predict,
+        jacobian_at_values=jacobian_at_values,
+        differentiable=True,
+        jacobian_kind="finite_difference",
+        finite_difference_step=finite_difference_step,
+    )
 
 
 def csem_3d_forward_operator(
@@ -823,4 +896,11 @@ def csem_3d_forward_operator(
             jac[:, i] = (_predict_array(plus) - _predict_array(minus)) / (2.0 * step)
         return jac
 
-    return ForwardOperator(kind, predict, jacobian_at_values=jacobian_at_values, differentiable=True)
+    return ForwardOperator(
+        kind,
+        predict,
+        jacobian_at_values=jacobian_at_values,
+        differentiable=True,
+        jacobian_kind="finite_difference",
+        finite_difference_step=finite_difference_step,
+    )

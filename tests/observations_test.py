@@ -630,6 +630,28 @@ class RegistryMultiKindFusionTest(unittest.TestCase):
         ll_wrong = registry.total_log_likelihood(grid, wrong_field, observations)
         self.assertGreater(ll_true, ll_wrong)
 
+    def test_registry_reports_operator_derivative_capabilities(self):
+        cells = _grid()
+        volumes = np.full(len(cells), 1000.0)
+        registry = ForwardOperatorRegistry()
+        registry.register(gravity_forward_operator(cells, volumes))
+        registry.register(borehole_forward_operator())
+        report = registry.capability_report()
+
+        self.assertEqual(report["gravity"]["jacobian_kind"], "fixed")
+        self.assertTrue(report["gravity"]["has_fixed_jacobian"])
+        self.assertFalse(report["gravity"]["has_true_adjoint"])
+        self.assertEqual(report["borehole"]["jacobian_kind"], "fixed")
+        self.assertTrue(report["borehole"]["differentiable"])
+
+    def test_finite_difference_operator_reports_fallback_step(self):
+        op = dc_resistivity_forward_operator((2, 2, 2), [(0, 1, 2, 3)], finite_difference_step=1.0e-5)
+        report = op.capability_report()
+
+        self.assertEqual(report["jacobian_kind"], "finite_difference")
+        self.assertEqual(report["finite_difference_step"], 1.0e-5)
+        self.assertTrue(report["has_local_jacobian"])
+
 
 if __name__ == "__main__":
     unittest.main()
