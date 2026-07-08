@@ -139,9 +139,10 @@ performs exact linear-Gaussian inversion, and `gauss_newton_invert` adds bounded
 properties such as porosity, susceptibility, or concentration. `dc_resistivity_forward_operator` wraps the
 existing DC/ERT forward as a nonlinear log-conductivity observation with local finite-difference
 sensitivities for Gauss-Newton posterior construction.
-`layered_mt_forward_operator`, `mt_2d_te_forward_operator`, `mt_3d_forward_operator`, and
-`csem_3d_forward_operator` do the same for 1D layered, 2D TE-mode, 3D curl-curl magnetotelluric, and
-3D controlled-source EM soundings, mapping log-conductivity to real-valued geophysical observations.
+`layered_mt_forward_operator`, `aem_layered_forward_operator`, `mt_2d_te_forward_operator`,
+`mt_3d_forward_operator`, and `csem_3d_forward_operator` do the same for 1D layered MT/AEM, 2D
+TE-mode, 3D curl-curl magnetotelluric, and 3D controlled-source EM soundings, mapping
+log-conductivity to real-valued geophysical observations.
 
 `sparse_linear_gaussian_invert` stores a linear-Gaussian posterior in sparse precision-factor form,
 using sparse covariance solves for marginals and linear derived quantities without retaining a dense
@@ -163,8 +164,8 @@ mass, low-rank or diagonal Gaussian summaries, and ensemble samples. `posterior_
 synthetic-truth coverage, held-out observation fit, uncertainty inflation away from data, and
 insufficient-observation flags. Full reaction-path geochemistry,
 paleoecological/basin-process simulators, full truncated multivariate censoring for multi-element assays,
-production-scale adjoint sensitivities, iterative sparse posterior solvers, and AEM posterior-observation
-operators remain future validated kernels. The ensemble 4D path is a stochastic
+production-scale adjoint sensitivities, iterative sparse posterior solvers, and full airborne loop/flight-line
+AEM geometry remain future validated kernels. The ensemble 4D path is a stochastic
 Gaussian-summary reference, not a production particle/MCMC smoother.
 
 ### Inverse and inference layer
