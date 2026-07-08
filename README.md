@@ -32,6 +32,10 @@ release-facing 3D/4D field modeling guide.
 make -C docs html
 ```
 
+Release notes and the current changelog are in
+[`docs/release-0-6-3.rst`](docs/release-0-6-3.rst) and
+[CHANGELOG.md](CHANGELOG.md).
+
 ## Quickstart
 
 ### Recover a hidden driver from a dynamical system
