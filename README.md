@@ -29,11 +29,11 @@ package map, solver/API navigation, validation guidance, generated API reference
 release-facing 3D/4D field modeling guide.
 
 ```bash
-make -C docs html
+make -C docs html SPHINXOPTS="-W --keep-going"
 ```
 
 Release notes and the current changelog are in
-[`docs/release-0-6-3.rst`](docs/release-0-6-3.rst) and
+[`docs/release-notes.rst`](docs/release-notes.rst) and
 [CHANGELOG.md](CHANGELOG.md).
 
 ## Quickstart

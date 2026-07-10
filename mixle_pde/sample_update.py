@@ -1,4 +1,11 @@
-"""Importance updates for sampled 3D/4D field posteriors."""
+"""Importance updates for sampled 3D/4D field posteriors.
+
+The functions in this module attach new geoscience likelihood terms to existing
+sampled posterior fields, report effective sample size, and resample when the
+weighted sample set becomes too degenerate. They are review helpers for
+posterior-update workflows; callers should still record the observation model,
+grid assumptions, likelihood, and validation evidence that justify the update.
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,11 @@
-"""Reusable synthetic 3D/4D Earth inversion harnesses."""
+"""Reusable synthetic 3D/4D Earth inversion harnesses.
+
+These compact scenarios combine geophysical, geochemical, and biostratigraphic
+evidence with field priors and sampled posterior updates. They are designed as
+deterministic release fixtures and demo inputs, not as real exploration
+recommendations. Public reports should preserve their synthetic-data status,
+package revisions, metrics, and uncertainty limitations.
+"""
 
 from __future__ import annotations
 
