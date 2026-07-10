@@ -12,7 +12,10 @@ The package metadata declares Python 3.10 and newer with core ``mixle``,
 NumPy, and SciPy as base dependencies. Optional Torch, sparse, or accelerator
 paths should remain guarded and should record their tested versions when used.
 
-Solver And Inversion Gates
+Because new development is paused, release readiness should focus on preserving
+and accurately documenting the current surface rather than expanding scope.
+
+Solver and Inversion Gates
 --------------------------
 
 For changed PDE, ODE, geophysics, or inversion behavior, record at least one
@@ -39,3 +42,20 @@ Documentation Gates
 The solver selection guide, modeling workflow, observation/inversion contract,
 field-modeling guide, and API reference should match the shipped modules.
 Build Sphinx with warnings as errors and from a clean archive before release.
+
+Blocking Conditions
+-------------------
+
+Block release when a solver has no numerical check, an inverse workflow lacks a
+synthetic or reference recovery path, optional dependencies change results
+without documentation, or generated artifacts omit units, coordinates,
+provenance, or limitations. A physics package can import cleanly while still
+being scientifically under-documented.
+
+Scope Freeze Gate
+-----------------
+
+Do not add a new solver, inverse workflow, or geoscience claim during the docs
+release pass unless the accompanying validation evidence already exists. If a
+page references a capability that is only planned, label it as planned or remove
+it from the public release surface.

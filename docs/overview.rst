@@ -32,3 +32,31 @@ Importing ``mixle_pde`` registers PDE-specific composition hooks with Mixle
 without requiring the core package to depend on this repository. Local docs and
 tests need the core package importable, either from an installed distribution
 or from the sibling workspace path.
+
+Typical Workflow Shape
+----------------------
+
+A reviewable modeling workflow should name each stage explicitly:
+
+* construct a grid, mesh, or low-dimensional field representation;
+* choose a forward operator and boundary/source assumptions;
+* attach observations with a stated noise model;
+* choose a prior or regularization policy;
+* run a forward, inverse, or assimilation routine;
+* summarize the posterior or fitted field; and
+* record validation evidence and known limitations.
+
+The package provides small numerical kernels and contract objects for those
+steps, but it does not make a scientific conclusion by itself. A downstream
+demo or notebook must still state the data source, units, calibration
+standard, and interpretation limits.
+
+Numerical Expectations
+----------------------
+
+Solver examples should prefer explicit tolerances, deterministic seeds where
+sampling is involved, and documented grid or mesh assumptions. Inverse
+workflows should report misfit, posterior uncertainty, and any regularization
+or prior that materially affects the result. When an optional dependency
+changes the solver path, the release evidence should say which implementation
+was used.

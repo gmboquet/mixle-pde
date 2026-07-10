@@ -9,7 +9,7 @@ Focused field-modeling validation:
 
 .. code-block:: console
 
-   PYTHONPATH=/Users/grantboquet/mixle/mixle python -m pytest \
+   PYTHONPATH=../mixle python -m pytest \
        tests/latent_test.py \
        tests/observations_test.py \
        tests/field_inversion_test.py \
@@ -25,6 +25,10 @@ Focused field-modeling validation:
 The local workspace needs the core Mixle package on ``PYTHONPATH`` unless
 ``mixle`` is installed into the active environment.
 
+For this docs pass, validation language should preserve existing behavior. Do
+not add new solver claims without the matching test command and expected
+evidence.
+
 Run the full suite from the package root with:
 
 .. code-block:: console
@@ -36,7 +40,7 @@ Strict Documentation Gate
 
 .. code-block:: console
 
-   python -m sphinx -W -b html docs docs/_build/html
+   make -C docs html SPHINXOPTS="-W --keep-going"
 
 Clean-Archive Documentation Gate
 --------------------------------
@@ -47,8 +51,8 @@ Before public release, also build the docs from tracked files only:
 
    tmp=$(mktemp -d)
    git archive HEAD | tar -x -C "$tmp"
-   PYTHONPATH="$tmp:/Users/grantboquet/mixle/mixle" \
-     python -m sphinx -q -W --keep-going -b html "$tmp/docs" "$tmp/docs/_build/html"
+   PYTHONPATH="$tmp:${MIXLE_CORE_CHECKOUT:?set MIXLE_CORE_CHECKOUT to a core mixle checkout}" \
+     make -C "$tmp/docs" html SPHINXOPTS="-W --keep-going"
 
 Use an installed core ``mixle`` package instead of the workspace path when
 validating published artifacts.
@@ -66,3 +70,20 @@ these were exercised:
 * uncertainty calibration or coverage;
 * stability check for zero, constant, or bounded states;
 * optional dependency behavior for SciPy, Torch, or sparse backends.
+
+Evidence Notes
+--------------
+
+For inverse and posterior workflows, keep the observation model, noise
+assumptions, prior or regularization policy, grid/mesh shape, units, and
+validation metric with the test record. Numerical evidence is much easier to
+review when the modeling assumptions are recorded beside the command that
+produced the result.
+
+Paused-Development Review
+-------------------------
+
+When reviewing documentation during the pause, classify each change as
+clarification, correction, API-reference coverage, or validation guidance. Any
+change that sounds like a new capability should be backed by committed tests or
+rewritten as a limitation.

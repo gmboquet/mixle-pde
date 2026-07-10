@@ -56,6 +56,6 @@ intersphinx_mapping = {
 }
 
 html_theme = "furo"
-html_title = f"mixle-pde {release}"
+html_title = "mixle-pde"
 html_static_path = []
 todo_include_todos = False

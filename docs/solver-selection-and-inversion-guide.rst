@@ -1,4 +1,4 @@
-Solver Selection And Inversion Guide
+Solver Selection and Inversion Guide
 ====================================
 
 ``mixle-pde`` provides mechanistic forward solvers, inverse-problem utilities,
@@ -58,7 +58,7 @@ An inverse problem should be documented as a dataflow:
 The docs and examples should name which of those steps are real and which are
 mocked or synthetic.
 
-Uncertainty And Calibration
+Uncertainty and Calibration
 ---------------------------
 
 PDE workflows often fail quietly when uncertainty is treated as decoration.

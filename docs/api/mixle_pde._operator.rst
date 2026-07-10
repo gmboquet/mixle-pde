@@ -1,6 +1,6 @@
-mixle\_pde.pde\_solve module
+mixle\_pde.\_operator module
 ============================
 
-.. automodule:: mixle_pde.pde_solve
+.. automodule:: mixle_pde._operator
    :members:
    :show-inheritance:

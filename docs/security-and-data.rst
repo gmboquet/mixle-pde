@@ -1,4 +1,4 @@
-Security And Data Handling
+Security and Data Handling
 ==========================
 
 ``mixle-pde`` works with physical simulations, geophysical observations, and
@@ -43,3 +43,20 @@ Before release:
 * inspect generated artifacts for private paths or coordinates;
 * document optional dependencies used for validation;
 * build docs with warnings as errors.
+
+Coordinate and Unit Review
+--------------------------
+
+Subsurface examples can expose sensitive location information even when the
+field values are synthetic. Review coordinate systems, well identifiers, mesh
+metadata, file names, and plotted annotations before committing generated
+figures or reports. Public examples should use synthetic or deliberately
+coarsened coordinates unless a public dataset license permits more detail.
+
+Interpretation Boundary
+-----------------------
+
+A PDE solve, inverse update, or posterior field is evidence for a numerical
+workflow, not an operational recommendation by itself. Downstream demos and
+reports should keep uncertainty, assumptions, and validation status attached to
+any map, section, or ranked region derived from these modules.

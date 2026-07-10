@@ -4,10 +4,19 @@ Changelog
 This changelog records documentation-visible release changes for
 ``mixle-pde``.
 
-Unreleased
-----------
+0.7.0 - 2026-07-10
+------------------
+
+Version bumped to 0.7.0 to track the mixle 0.7.0 family release. Verified that
+the PDE/ODE solver and inversion surface imports and runs against
+``mixle==0.7.0`` (the plugin depends on ``mixle.ppl`` and ``mixle.inference``);
+no runtime API changes were required.
 
 See :doc:`release-notes` for scope, validation evidence, and known risks.
+
+Development status: new PDE feature development is paused. Documentation
+updates should clarify the current surface, validation expectations, and known
+limits rather than introducing new runtime claims.
 
 Added
 ~~~~~
@@ -44,3 +53,20 @@ Release Gate
 A public release is not complete until solver/inverse tests, synthetic
 recovery checks, optional-dependency behavior, strict Sphinx docs, packaging
 checks, and the coordinated family manifest all refer to the same commit.
+
+Reviewer Notes
+~~~~~~~~~~~~~~
+
+Documentation should preserve the difference between a small solver example, a
+field-inversion workflow, and a scientific claim. When a page introduces a new
+physics module, it should name the governing assumptions, input units,
+boundary or mesh requirements, validation evidence, and limitations needed to
+interpret the result.
+
+Maintenance Notes
+~~~~~~~~~~~~~~~~~
+
+While development is paused, prefer documentation corrections, API reference
+coverage, and validation instructions over new examples. A new example should
+only land when it exercises already-reviewed code and includes the corresponding
+numerical evidence.

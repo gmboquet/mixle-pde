@@ -1,4 +1,4 @@
-Observation And Inversion Contract
+Observation and Inversion Contract
 ==================================
 
 ``mixle-pde`` connects physical fields to observations through one explicit
@@ -8,7 +8,7 @@ observations; a ``ForwardOperatorRegistry`` resolves observation kind to
 operator. Inversion and assimilation code use that registry instead of
 branching on every measurement type.
 
-Define A Field
+Define a Field
 --------------
 
 .. code-block:: python
@@ -71,7 +71,7 @@ differentiable path, or true adjoint. This metadata is part of the inversion
 contract; examples should not imply an adjoint exists when a finite-difference
 fallback is being used.
 
-Score A Field
+Score a Field
 -------------
 
 .. code-block:: python
@@ -83,7 +83,7 @@ Score A Field
 Every observation kind shares the same Gaussian likelihood calculation. The
 operator supplies predictions; the observation supplies the noise model.
 
-Invert A Static Field
+Invert a Static Field
 ---------------------
 
 .. code-block:: python
@@ -143,7 +143,7 @@ After fitting, evaluate held-out observations:
 Release-quality examples should report held-out fit, not only posterior mean
 or MAP fields.
 
-Assimilate A 4D Field
+Assimilate a 4D Field
 ---------------------
 
 ``assimilate_4d`` uses the same observation and registry contract for an

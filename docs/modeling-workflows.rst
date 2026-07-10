@@ -5,7 +5,7 @@ Modeling Workflows
 application workflows without moving physics kernels into core ``mixle``. This
 page maps the common workflow from field definition to posterior validation.
 
-Define The Field
+Define the Field
 ----------------
 
 Start with the physical quantity and geometry:
@@ -35,7 +35,7 @@ nonlinear.
 The concrete ``Observation`` and ``ForwardOperatorRegistry`` contract is shown
 in :doc:`observation-and-inversion-contract`.
 
-Choose The Inference Route
+Choose the Inference Route
 --------------------------
 
 ``linear_gaussian_invert``
@@ -53,7 +53,7 @@ Choose The Inference Route
 ``Differential``
     Differentiable forward callbacks integrated with the PPL surface.
 
-Validate The Posterior
+Validate the Posterior
 ----------------------
 
 Do not stop at a MAP field. Record:
@@ -65,7 +65,7 @@ Do not stop at a MAP field. Record:
 * identifiability flags when observations are too sparse;
 * physical sanity checks such as conservation, sign, monotonicity, or stability.
 
-Query And Export
+Query and Export
 ----------------
 
 Use posterior query helpers for:

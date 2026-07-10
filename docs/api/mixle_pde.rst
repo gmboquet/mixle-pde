@@ -19,10 +19,12 @@ Submodules
    mixle_pde.em_diffusion
    mixle_pde.em_diffusion_3d
    mixle_pde.env_data
+   mixle_pde.earth_scenarios
    mixle_pde.fem
    mixle_pde.field_assimilation
    mixle_pde.field_gauss_newton
    mixle_pde.field_inversion
+   mixle_pde.field_mcmc
    mixle_pde.field_priors
    mixle_pde.flow
    mixle_pde.flow3d
@@ -43,6 +45,7 @@ Submodules
    mixle_pde.nonlinear
    mixle_pde.normal_modes
    mixle_pde.observations
+   mixle_pde._operator
    mixle_pde.ops
    mixle_pde.parabolic_equation
    mixle_pde.pde
@@ -58,6 +61,7 @@ Submodules
    mixle_pde.reasoning
    mixle_pde.refractivity
    mixle_pde.rock_physics
+   mixle_pde.sample_update
    mixle_pde.schrodinger
    mixle_pde.shape
    mixle_pde.smoluchowski
@@ -76,4 +80,3 @@ Module contents
 .. automodule:: mixle_pde
    :members:
    :show-inheritance:
-   :undoc-members:

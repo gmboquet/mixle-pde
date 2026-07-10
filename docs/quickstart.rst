@@ -5,7 +5,11 @@ This quickstart exercises ``mixle-pde`` without requiring a large simulation.
 It checks the modeling capability catalog and runs a small observation
 likelihood through the shared field/observation contracts.
 
-Install For Local Development
+Development of new PDE features is paused, so use this quickstart as a
+documentation and validation entry point for the existing surface. Avoid adding
+new capability claims unless they are backed by tests and release evidence.
+
+Install for Local Development
 -----------------------------
 
 From the repository root:
@@ -33,7 +37,7 @@ The catalog reports dependency availability and the deterministic readiness
 scenarios associated with each modeling family. Use it to distinguish
 implemented capability from future release plans.
 
-Create An Observation Likelihood
+Create an Observation Likelihood
 --------------------------------
 
 .. code-block:: python
@@ -56,7 +60,7 @@ Create An Observation Likelihood
 This proves the typed observation contract and likelihood path without
 constructing a full inversion.
 
-Run A Focused Modeling Gate
+Run a Focused Modeling Gate
 ---------------------------
 
 For field-modeling changes, start with:
@@ -73,6 +77,10 @@ For field-modeling changes, start with:
 Then add the solver-specific tests for the module you changed. A release claim
 for PDE behavior should include known-answer, synthetic recovery, calibration,
 or stability evidence, not only import coverage.
+
+If a focused test is unavailable for the workflow being described, document the
+gap instead of implying release readiness. Numerical packages need explicit
+evidence for the assumptions they make.
 
 Next Steps
 ----------

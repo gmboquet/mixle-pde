@@ -2,7 +2,7 @@ Release Notes
 =============
 
 ``mixle-pde`` is the mechanistic modeling and inverse-problem package for the
-0.6.3 family. Its documentation now covers solver families, field modeling,
+current Mixle family release. Its documentation now covers solver families, field modeling,
 posterior workflows, validation expectations, and package boundaries.
 
 Included
@@ -36,7 +36,7 @@ Record:
 * synthetic recovery or known-answer checks;
 * posterior predictive or held-out checks for field modeling changes;
 * optional dependency behavior for Torch, SciPy, and sparse paths;
-* ``python -m sphinx -W -b html docs docs/_build/html``.
+* ``make -C docs html SPHINXOPTS="-W --keep-going"``.
 
 Known Risks
 -----------

@@ -160,7 +160,7 @@ radial and axial strain. It is geometry plumbing for moving-domain solvers; it
 does not replace ALE transport, fluid-structure coupling, combustion chemistry,
 or adaptive remeshing.
 
-Posterior Queries And Calibration
+Posterior Queries and Calibration
 ---------------------------------
 
 Use posterior query helpers after inversion or assimilation for point
