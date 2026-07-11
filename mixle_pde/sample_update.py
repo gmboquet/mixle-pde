@@ -18,7 +18,6 @@ import numpy as np
 from mixle_pde.field_assimilation import PosteriorFieldSamples4D, _logsumexp, _systematic_resample
 from mixle_pde.latent import PosteriorFieldSamples3D
 
-
 LogLikelihood3D = Callable[[np.ndarray], float]
 LogLikelihood4D = Callable[[np.ndarray, float], float]
 

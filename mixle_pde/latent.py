@@ -142,7 +142,7 @@ class Field3D:
         bounds: tuple[float | None, float | None] | None = None,
         mask: np.ndarray | None = None,
         provenance: dict[str, Any] | None = None,
-    ) -> "Field3D":
+    ) -> Field3D:
         """Construct a field over the nodes of a 3D simplex mesh."""
         return cls(
             coordinates=np.asarray(mesh.nodes, dtype=float),
@@ -270,8 +270,10 @@ class Field4D:
     def mesh_at_time(self, time: float, *, interpolate: bool = True) -> Any | None:
         """Return the simplex mesh at ``time`` when moving or static mesh geometry is available."""
         if self.moving_mesh is not None:
-            return self.moving_mesh.at_time(float(time), clamp=False) if interpolate else self.moving_mesh.at_step(
-                self._index_of(float(time))
+            return (
+                self.moving_mesh.at_time(float(time), clamp=False)
+                if interpolate
+                else self.moving_mesh.at_step(self._index_of(float(time)))
             )
         return self.spatial.mesh
 

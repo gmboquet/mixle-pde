@@ -174,9 +174,9 @@ def marginal_time_series(posterior: Posterior4D, indices, *, alpha: float = 0.1)
         z = ndtri(1.0 - alpha / 2.0)
         lo = grid.from_unconstrained(posterior.mean_array - z * std_u)[:, idx]
         hi = grid.from_unconstrained(posterior.mean_array + z * std_u)[:, idx]
-        std = np.abs(grid.from_unconstrained(posterior.mean_array + std_u) - grid.from_unconstrained(posterior.mean_array))[
-            :, idx
-        ]
+        std = np.abs(
+            grid.from_unconstrained(posterior.mean_array + std_u) - grid.from_unconstrained(posterior.mean_array)
+        )[:, idx]
     return MarginalTimeSeries(
         indices=idx,
         times=posterior.times.copy(),

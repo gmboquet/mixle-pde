@@ -439,9 +439,7 @@ def _hll_reactive_flux(left: np.ndarray, right: np.ndarray, gamma: float) -> np.
         return _reactive_flux(left, gamma)
     if sr <= 0.0:
         return _reactive_flux(right, gamma)
-    return (sr * _reactive_flux(left, gamma) - sl * _reactive_flux(right, gamma) + sl * sr * (right - left)) / (
-        sr - sl
-    )
+    return (sr * _reactive_flux(left, gamma) - sl * _reactive_flux(right, gamma) + sl * sr * (right - left)) / (sr - sl)
 
 
 def _apply_arrhenius_heat_release(

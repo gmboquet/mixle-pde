@@ -367,10 +367,7 @@ def _coerce_process_covariances(process_cov, n_steps: int, n_state: int) -> list
         for cov in covs:
             _validate_covariance(cov, "process_cov")
         return covs
-    raise ValueError(
-        "process_cov must be scalar, shape (n,), shape (n,n), shape (n_steps,n), "
-        "or shape (n_steps,n,n)."
-    )
+    raise ValueError("process_cov must be scalar, shape (n,), shape (n,n), shape (n_steps,n), or shape (n_steps,n,n).")
 
 
 def _validate_covariance(matrix: np.ndarray, name: str) -> None:
@@ -557,9 +554,7 @@ def assimilate_4d_joint_linear_dynamics(
                 raise ValueError(f"observation time {obs.time!r} does not match assimilation time {times[ti]!r}.")
             op = registry.get(obs.kind)
             if not op.is_linear:
-                raise ValueError(
-                    f"observation kind {obs.kind!r} needs a fixed Jacobian for joint linear assimilation."
-                )
+                raise ValueError(f"observation kind {obs.kind!r} needs a fixed Jacobian for joint linear assimilation.")
             jac = np.atleast_2d(np.asarray(op.jacobian(grid, obs.location), dtype=float))
             if jac.shape != (obs.n, n):
                 raise ValueError(f"operator {obs.kind!r} Jacobian shape {jac.shape} != ({obs.n}, {n}).")
