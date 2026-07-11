@@ -5,10 +5,11 @@ Thanks for your interest in mixle-pde. This is a `mixle.ppl` plugin: it depends 
 
 ## Development setup
 
-mixle-pde installs into the same environment as mixle (which brings torch, numba, and the rest).
+mixle-pde depends directly on mixle, numpy, scipy, and torch (the `ops` backend every solver runs
+through requires torch).
 
 ```bash
-pip install -e ".[test,lint]"      # in an environment that already has mixle installed
+pip install -e ".[test,lint]"
 ```
 
 ## Tests

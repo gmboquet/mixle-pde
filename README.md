@@ -14,7 +14,8 @@ the hidden drivers from noisy, partial, indirect observations.
 
 ## Install
 
-mixle-pde installs into an environment that already has mixle (which brings torch, numba, and the rest).
+mixle-pde depends directly on `mixle`, `numpy`, `scipy`, and `torch` (the `ops` namespace every solver
+runs through is a torch backend), so a plain install brings everything the solvers need.
 
 ```bash
 pip install -e .            # from a checkout
@@ -98,8 +99,8 @@ model = PDE(DiffusionOperator(0.1, n)).fit(field_snapshots, dt=0.1)
 
 ## Solver catalog
 
-Release-facing documentation for the new 3D/4D field posterior stack lives in
-[`docs/0.6.x-field-modeling.md`](docs/0.6.x-field-modeling.md). It covers
+Release-facing documentation for the 3D/4D field posterior stack lives in
+[`docs/field-modeling.rst`](docs/field-modeling.rst). It covers
 latent fields, observations, priors, inversion, assimilation, geoscience
 likelihoods, posterior queries, posterior calibration diagnostics, meshes, and readiness checks.
 
