@@ -60,5 +60,4 @@ For inverse and posterior workflows, keep the observation model, noise
 assumptions, prior or regularization policy, grid/mesh shape, units, and
 validation metric with the test record. Numerical evidence is much easier to
 review when the modeling assumptions are recorded beside the command that
-produced the result. See :doc:`release-readiness` for which evidence types a
-modeling change needs before release.
+produced the result.

@@ -42,7 +42,6 @@ code that produced a number.
    modeling-workflows
    observation-and-inversion-contract
    solver-selection-and-inversion-guide
-   release-readiness
    release-notes
    changelog
    security-and-data
@@ -57,6 +56,3 @@ code that produced a number.
    :maxdepth: 2
 
    api/modules
-
-See :doc:`release-readiness` for the release gates this package's numerical
-claims are held to.

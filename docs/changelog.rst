@@ -56,6 +56,4 @@ Changed
 Known limitations
 ~~~~~~~~~~~~~~~~~~
 
-New PDE feature development is paused for this release. See
-:doc:`release-readiness` for the numerical-honesty and scope-freeze gates
-this pass follows.
+New PDE feature development is paused for this release.

@@ -71,8 +71,7 @@ For field-modeling changes, start with:
      tests/capabilities_test.py
 
 Then add the solver-specific tests for the module you changed. See
-:doc:`validation` for the full test matrix and :doc:`release-readiness` for
-the evidence a release claim needs.
+:doc:`validation` for the full test matrix.
 
 Next Steps
 ----------

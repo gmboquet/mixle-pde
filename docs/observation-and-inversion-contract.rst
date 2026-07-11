@@ -193,6 +193,4 @@ Use ``assimilate_4d_ensemble`` when observations are nonlinear and fixed
 Jacobians are not available. The ensemble route returns Gaussian summaries
 from an ensemble approximation and should be described as approximate evidence.
 
-See :doc:`validation` for the test commands that exercise this contract and
-:doc:`release-readiness` for the evidence a new observation or inversion
-route needs before release.
+See :doc:`validation` for the test commands that exercise this contract.

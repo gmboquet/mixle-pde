@@ -176,6 +176,4 @@ Use calibration diagnostics before promotion:
 * uncertainty inflation away from sensitive observations;
 * identifiability diagnostics for weakly constrained batches.
 
-See :doc:`validation` for the test commands that exercise this surface and
-:doc:`release-readiness` for the evidence a field-modeling change needs
-before release.
+See :doc:`validation` for the test commands that exercise this surface.

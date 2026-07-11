@@ -85,5 +85,4 @@ Boundaries
 ``mixle-pde`` owns physics kernels and inverse utilities. It does not own demo
 fixtures, gateway serving, mobile UI state, or core probability primitives.
 Those surfaces belong in ``mixle-demos``, ``mixle-mlops``, ``mixle-ios``, and
-``mixle`` respectively. See :doc:`release-readiness` for the evidence a
-modeling change needs before release.
+``mixle`` respectively.
