@@ -228,7 +228,12 @@ class LinearDynamicsAssimilation4DTest(unittest.TestCase):
         means = post.mean_array[:, 0]
         self.assertIsInstance(post, PosteriorField4D)
         np.testing.assert_allclose(means, np.array([1.0, 2.0, 4.0]), atol=0.08)
-        self.assertLess(post.marginal_std[-1, 0], post.marginal_std[0, 0])
+        # The t=2 observation, smoothed backward, should tighten t=0 relative to the flat prior
+        # (marginal_precision=1.0 -> prior std 1.0). It should *not* be compared against the smoothed
+        # std at t=2 itself: with doubling (amplifying) dynamics an RTS smoother legitimately ends up
+        # tighter at t=0 than at t=2 (an earlier state is a sharper preimage of a well-observed later
+        # one), so that comparison doesn't hold in general and isn't what this test is checking.
+        self.assertLess(post.marginal_std[0, 0], 1.0)
 
     def test_joint_linear_dynamics_posterior_keeps_cross_time_covariance(self):
         grid = Field3D(

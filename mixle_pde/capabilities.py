@@ -1322,7 +1322,7 @@ def _run_earth_sampled_domain_likelihood_update() -> ScenarioResult:
             "biostrat_effective_sample_size": report_4d.effective_sample_size,
             "biostrat_mean_age": float(age_samples.mean()),
         },
-        tolerance={"geochem_updated_mean_gt": 10.0, "biostrat_age_range": [50.0, 60.0]},
+        tolerance={"geochem_updated_mean_gt": 10.0, "biostrat_age_min": 50.0, "biostrat_age_max": 60.0},
         message="sampled domain likelihood update moved posteriors"
         if passed
         else "sampled domain likelihood update failed",
@@ -1709,7 +1709,11 @@ def _run_earth_linear_dynamics_4d_assimilation() -> ScenarioResult:
     means = posterior.mean_array[:, 0]
     expected = np.array([1.0, 2.0, 4.0])
     max_error = float(np.max(np.abs(means - expected)))
-    passed = max_error <= 0.08 and posterior.marginal_std[-1, 0] < posterior.marginal_std[0, 0]
+    # The t=2 observation, smoothed backward, should tighten t=0 relative to the flat prior
+    # (marginal_precision=1.0 -> prior std 1.0), not necessarily relative to the smoothed std at t=2
+    # itself: with doubling (amplifying) dynamics an RTS smoother legitimately ends up tighter at t=0
+    # than at t=2, since an earlier state is a sharper preimage of a well-observed later one.
+    passed = max_error <= 0.08 and posterior.marginal_std[0, 0] < 1.0
     return _result(
         "earth_linear_dynamics_4d_assimilation",
         "earth.geochem_biostrat_likelihoods",
@@ -2318,11 +2322,7 @@ def _run_gas_zero_d_combustion_pressure_rise() -> ScenarioResult:
         and bool(np.all(reactive_fuel >= 0.0))
     )
     passed = (
-        finite
-        and pressure_ratio > 1.05
-        and fuel_burned > 0.0
-        and np.all(result.fuel_fraction >= 0.0)
-        and reactive_ok
+        finite and pressure_ratio > 1.05 and fuel_burned > 0.0 and np.all(result.fuel_fraction >= 0.0) and reactive_ok
     )
     return _result(
         "gas_zero_d_combustion_pressure_rise",

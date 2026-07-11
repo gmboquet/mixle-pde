@@ -128,8 +128,10 @@ class SpatioTemporalPriorTest(unittest.TestCase):
     def test_temporal_precision_couples_adjacent_times(self):
         spatial = _grid()
         field = Field4D(spatial, times=np.array([0.0, 1.0, 3.0]))
+        # marginal_precision must be > 0 (FieldGaussianPrior requires a proper prior); use a value small
+        # enough to be negligible against the temporal-coupling terms this test isolates.
         prior = SpatioTemporalGaussianPrior(
-            FieldGaussianPrior(mean=0.0, smoothness_precision=0.0, marginal_precision=0.0, length_scale=25.0),
+            FieldGaussianPrior(mean=0.0, smoothness_precision=0.0, marginal_precision=1.0e-12, length_scale=25.0),
             temporal_precision=2.0,
         )
         q = prior.precision(field)
