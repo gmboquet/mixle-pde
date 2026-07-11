@@ -36,14 +36,11 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: python -m pip install --upgrade pip
-      # torch is used by the differentiable `ops` backend; install the CPU wheel explicitly.
+      # torch is a required runtime dependency (mixle_pde/ops.py imports it unconditionally); install
+      # the CPU wheel explicitly first so the later resolve doesn't pull a CUDA build.
       - name: Install torch (CPU)
         run: pip install torch --index-url https://download.pytorch.org/whl/cpu
-      # mixle is the sibling package this plugin extends; it is not yet on PyPI.
-      # If gmboquet/mixle is private, add a MIXLE_TOKEN secret and prefix the URL with
-      # x-access-token:${{ secrets.MIXLE_TOKEN }}@ before github.com.
-      - name: Install mixle (core dependency)
-        run: pip install "mixle @ git+https://github.com/gmboquet/mixle.git@main"
+      # mixle is on PyPI now; mixle-pde's declared floor (see pyproject.toml) resolves from there.
       - name: Install mixle-pde
         run: pip install -e ".[test]"
       - name: Run tests

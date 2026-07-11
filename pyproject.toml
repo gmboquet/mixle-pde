@@ -11,15 +11,19 @@ requires-python = ">=3.10"
 license = "MIT"
 authors = [{ name = "Grant Boquet", email = "grant.boquet@gmail.com" }]
 keywords = ["pde", "inverse problems", "bayesian", "mixle"]
-# Depends on mixle (the import package is `mixle`); the solvers are numpy/scipy.
+# Depends on mixle (the import package is `mixle`); the solvers are numpy/scipy, and every solver
+# and inverse callback goes through mixle_pde.ops, which is a torch backend (mixle_pde/ops.py imports
+# torch unconditionally) -- torch is a required runtime dependency, not an optional one.
+# mixle>=0.7.0 tracks the mixle 0.7.0 family release this plugin is validated against.
 dependencies = [
-    "mixle",
+    "mixle>=0.7.0",
     "numpy",
     "scipy",
+    "torch>=2.0",
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8", "pytest-xdist", "torch"]
+test = ["pytest>=8", "pytest-xdist"]
 lint = ["ruff==0.15.17"]
 docs = ["sphinx>=7", "furo"]
 
