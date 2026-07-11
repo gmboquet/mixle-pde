@@ -31,6 +31,7 @@ extensions = [
 
 source_suffix = {".rst": "restructuredtext"}
 master_doc = "index"
+templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
 autosummary_generate = False
@@ -59,3 +60,22 @@ html_theme = "furo"
 html_title = "mixle-pde"
 html_static_path = []
 todo_include_todos = False
+
+# Furo ships no host-agnostic version switcher (its built-in one only activates under Read the Docs
+# hosting) -- this repo's own _templates/sidebar/version-switcher.html reads the version list from
+# switcher.json, rendered once at the site root by sphinx-polyversion (see docs/poly.py). Only takes
+# effect on builds run through `sphinx-polyversion`; a plain `sphinx-build` (single-version, e.g. local
+# `make html`) still renders the partial, but its fetch of `../switcher.json` 404s harmlessly -- the
+# button just shows an empty menu.
+html_sidebars = {
+    "**": [
+        "sidebar/brand.html",
+        "sidebar/version-switcher.html",
+        "sidebar/search.html",
+        "sidebar/scroll-start.html",
+        "sidebar/navigation.html",
+        "sidebar/ethical-ads.html",
+        "sidebar/scroll-end.html",
+        "sidebar/variant-selector.html",
+    ]
+}
