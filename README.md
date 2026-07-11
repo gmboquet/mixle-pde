@@ -1,5 +1,8 @@
 # mixle-pde
 
+![license](https://img.shields.io/badge/license-MIT-green)
+![python](https://img.shields.io/badge/python-3.10%2B-blue)
+
 PDE and ODE-constrained Bayesian inverse problems for [mixle](https://github.com/gmboquet/mixle).
 
 mixle-pde is a `mixle.ppl` plugin. Importing it wires a stack of differentiable forward solvers and
@@ -135,43 +138,48 @@ dimension, `delaunay_mesh` wraps SciPy Delaunay for scattered point clouds, and 
 and transient finite-element work; adaptive remeshing, ALE/FSI coupling, and curved/high-order elements are
 still future solver work.
 
-The 3D/4D Earth posterior surface is modular. `Field3D` and `PosteriorField3D` represent one gridded
-physical property with units, optional bounds, posterior mean/MAP, covariance, credible intervals, and
-sampling. `Observation`, `ForwardOperator`, and `ForwardOperatorRegistry` provide a common geometry/noise/
-provenance contract for measurements; the built-in registry operators cover gravity, magnetics, and direct
-borehole/sensor samples. `FieldGaussianPrior` supplies graph-Matern smoothness, `linear_gaussian_invert`
-performs exact linear-Gaussian inversion, and `gauss_newton_invert` adds bounded MAP/Laplace inversion for
-properties such as porosity, susceptibility, or concentration. `dc_resistivity_forward_operator` wraps the
-existing DC/ERT forward as a nonlinear log-conductivity observation with local finite-difference
-sensitivities for Gauss-Newton posterior construction.
-`layered_mt_forward_operator`, `aem_layered_forward_operator`, `mt_2d_te_forward_operator`,
-`mt_3d_forward_operator`, and `csem_3d_forward_operator` do the same for 1D layered MT/AEM, 2D
-TE-mode, 3D curl-curl magnetotelluric, and 3D controlled-source EM soundings, mapping
-log-conductivity to real-valued geophysical observations.
+The 3D/4D Earth posterior surface is modular, built from these pieces:
 
-`sparse_linear_gaussian_invert` stores a linear-Gaussian posterior in sparse precision-factor form,
-using sparse covariance solves for marginals and linear derived quantities without retaining a dense
-covariance matrix. `PosteriorField4D`, `assimilate_4d`, and `assimilate_4d_ensemble` add a time axis through exact
-Kalman/RTS smoothing for linear observations and ensemble Kalman filtering for nonlinear observations,
-exposing each time slice as an ordinary `PosteriorField3D`. `FieldGaussianPrior` can
-assemble either dense or sparse CSR graph precision matrices. `depth_weights`,
-`depth_weighted_marginal_precision`, `depth_weighted_marginal_precision_sparse`, `CrossPropertyPrior`, and
-`joint_linear_gaussian_invert` provide depth-aware priors and cross-property coupling so observations of
-one property can regularize another.
-`GeochemAssay`, `MultiElementAssay`, `assay_log_likelihood`, `multi_element_assay_log_likelihood`,
-`additive_log_ratio`, `BiostratConstraint`, and `biostrat_log_likelihood` add geochemical
-detection-limit/compositional likelihoods, multi-element covariance/batch effects, and fossil range-zone
-constraints. `GeochronologyAge`, `StratigraphicCorrelation`, and `FaciesIntervalConstraint` add isotopic
-age measurements, relative-age/horizon constraints, and facies/environment interval evidence. These
-likelihoods can be converted into field observations where a project defines the property mapping.
-`posterior_query` extracts point/section/region marginals, linear derived quantities such as total anomalous
-mass, low-rank or diagonal Gaussian summaries, and ensemble samples. `posterior_calibration` measures
-synthetic-truth coverage, held-out observation fit, uncertainty inflation away from data, and
-insufficient-observation flags. Full reaction-path geochemistry,
-paleoecological/basin-process simulators, full truncated multivariate censoring for multi-element assays,
-production-scale adjoint sensitivities, iterative sparse posterior solvers, and full airborne loop/flight-line
-AEM geometry remain future validated kernels. The ensemble 4D path is a stochastic
-Gaussian-summary reference, not a production particle/MCMC smoother.
+- **Fields.** `Field3D` / `PosteriorField3D` represent one gridded physical property with units,
+  optional bounds, posterior mean/MAP, covariance, credible intervals, and sampling.
+- **Observations and forward operators.** `Observation`, `ForwardOperator`, and
+  `ForwardOperatorRegistry` give measurements a common geometry/noise/provenance contract; the
+  built-in registry operators cover gravity, magnetics, and direct borehole/sensor samples.
+  `dc_resistivity_forward_operator` wraps the DC/ERT forward as a nonlinear log-conductivity
+  observation with local finite-difference sensitivities. `layered_mt_forward_operator`,
+  `aem_layered_forward_operator`, `mt_2d_te_forward_operator`, `mt_3d_forward_operator`, and
+  `csem_3d_forward_operator` do the same for 1D layered MT/AEM, 2D TE-mode, 3D curl-curl
+  magnetotelluric, and 3D controlled-source EM soundings, all mapping log-conductivity to
+  real-valued geophysical observations.
+- **Linear-Gaussian and Gauss-Newton inversion.** `FieldGaussianPrior` supplies graph-Matern
+  smoothness (dense or sparse CSR precision matrices); `linear_gaussian_invert` performs exact
+  linear-Gaussian inversion; `gauss_newton_invert` adds bounded MAP/Laplace inversion for
+  properties such as porosity, susceptibility, or concentration. `sparse_linear_gaussian_invert`
+  stores the posterior in sparse precision-factor form, using sparse covariance solves for
+  marginals and linear derived quantities without ever retaining a dense covariance matrix.
+- **4D time-lapse assimilation.** `PosteriorField4D`, `assimilate_4d`, and
+  `assimilate_4d_ensemble` add a time axis through exact Kalman/RTS smoothing (linear
+  observations) or ensemble Kalman filtering (nonlinear observations), exposing each time slice
+  as an ordinary `PosteriorField3D`.
+- **Depth-aware and cross-property priors.** `depth_weights`, `depth_weighted_marginal_precision`,
+  `depth_weighted_marginal_precision_sparse`, `CrossPropertyPrior`, and
+  `joint_linear_gaussian_invert` let observations of one property regularize another.
+- **Geochemistry and geochronology likelihoods.** `GeochemAssay`, `MultiElementAssay`,
+  `assay_log_likelihood`, `multi_element_assay_log_likelihood`, and `additive_log_ratio` add
+  detection-limit/compositional and multi-element covariance/batch-effect likelihoods.
+  `BiostratConstraint` / `biostrat_log_likelihood` add fossil range-zone constraints;
+  `GeochronologyAge`, `StratigraphicCorrelation`, and `FaciesIntervalConstraint` add isotopic age
+  measurements, relative-age/horizon constraints, and facies/environment interval evidence. These
+  likelihoods can be converted into field observations where a project defines the property mapping.
+- **Posterior extraction and calibration.** `posterior_query` extracts point/section/region
+  marginals, linear derived quantities such as total anomalous mass, low-rank or diagonal Gaussian
+  summaries, and ensemble samples. `posterior_calibration` measures synthetic-truth coverage,
+  held-out observation fit, uncertainty inflation away from data, and insufficient-observation flags.
+
+Not yet implemented: full reaction-path geochemistry, paleoecological/basin-process simulators, full
+truncated multivariate censoring for multi-element assays, production-scale adjoint sensitivities,
+iterative sparse posterior solvers, and full airborne loop/flight-line AEM geometry. The ensemble 4D
+path is a stochastic Gaussian-summary reference, not a production particle/MCMC smoother.
 
 ### Inverse and inference layer
 
@@ -301,6 +309,13 @@ pytest tests/wave3d_test.py -q      # one file
 pytest tests/capabilities_test.py -q
 ```
 
+## Maintainers & contributors
+
+Maintained by **Grant Boquet** ([@gmboquet](https://github.com/gmboquet) ·
+grant.boquet@gmail.com).
+
+Contributions, issues, and discussion are welcome — open a PR or an issue.
+
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT — see [LICENSE](https://github.com/gmboquet/mixle-pde/blob/main/LICENSE).
