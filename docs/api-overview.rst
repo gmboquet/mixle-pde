@@ -7,14 +7,13 @@ the main modeling areas.
 PDE Models and Solvers
 ----------------------
 
-* ``mixle_pde.pde``, ``mixle_pde.pde_solve``, ``mixle_pde.dynamics``, and
-  ``mixle_pde.ops`` provide the core PDE-state-space registration, solver
-  infrastructure, dynamics operators, and operator helpers.
+``mixle_pde.pde``, ``mixle_pde.pde_solve``, ``mixle_pde.dynamics``, and ``mixle_pde.ops``
+    Core PDE-state-space registration, solver infrastructure, dynamics
+    operators, and operator helpers.
 
-* ``mixle_pde.heat``, ``mixle_pde.wave``, ``mixle_pde.flow``,
-  ``mixle_pde.elastic``, ``mixle_pde.maxwell``, and related modules provide
-  forward solver families for thermal, wave, fluid, elastic, EM, acoustic, and
-  multiphysics problems.
+``mixle_pde.heat``, ``mixle_pde.wave``, ``mixle_pde.flow``, ``mixle_pde.elastic``, ``mixle_pde.maxwell``, and related modules
+    Forward solver families for thermal, wave, fluid, elastic, EM, acoustic,
+    and multiphysics problems.
 
 Field Modeling
 --------------
@@ -27,18 +26,15 @@ Field Modeling
     biostrat constraints, and related geoscience observation models. See
     :doc:`observation-and-inversion-contract` for runnable usage.
 
-* ``mixle_pde.field_inversion``, ``mixle_pde.field_gauss_newton``,
-  ``mixle_pde.field_assimilation``, and ``mixle_pde.field_priors`` provide
-  linear-Gaussian inversion, Gauss-Newton inversion, 4D assimilation, depth
-  weights, and cross-property priors.
+``mixle_pde.field_inversion``, ``mixle_pde.field_gauss_newton``, ``mixle_pde.field_assimilation``, and ``mixle_pde.field_priors``
+    Linear-Gaussian inversion, Gauss-Newton inversion, 4D assimilation, depth
+    weights, and cross-property priors.
 
 Geoscience and Mechanistic Helpers
 ----------------------------------
 
-* ``mixle_pde.geophysics``, ``mixle_pde.potential_fields``,
-  ``mixle_pde.rock_physics``, ``mixle_pde.basin``, and
-  ``mixle_pde.propagation_inverse`` provide potential-field, rock-physics,
-  basin, and propagation inverse utilities.
+``mixle_pde.geophysics``, ``mixle_pde.potential_fields``, ``mixle_pde.rock_physics``, ``mixle_pde.basin``, and ``mixle_pde.propagation_inverse``
+    Potential-field, rock-physics, basin, and propagation-inverse utilities.
 
 ``mixle_pde.posterior_query``, ``mixle_pde.posterior_calibration``, and ``mixle_pde.mesh``
     Posterior summaries, sections, region queries, low-rank compression,
@@ -77,10 +73,8 @@ Specialized solver modules include ``flow3d``, ``wave3d``, ``wave_pml``,
 mechanistic examples unless a workflow records mesh, boundary, coefficient,
 source, and stability assumptions.
 
-Review Notes
-------------
-
-The API reference should be used with the workflow guides. A module page proves
-that the public names are documented; the workflow pages explain which
-combination of observation model, forward operator, prior, inversion method,
-and validation evidence makes a result reviewable.
+A module page proves that a name is documented; it does not say which
+combination of observation model, forward operator, prior, and inversion
+method makes a result reviewable. Pair it with the workflow guides,
+particularly :doc:`modeling-workflows` and
+:doc:`solver-selection-and-inversion-guide`.

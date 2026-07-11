@@ -156,9 +156,25 @@ be empty, and the smoother still returns a posterior slice for that time.
 
    times = np.array([0.0, 1.0, 2.0])
    observations_by_time = [
-       [Observation("borehole", coordinates[[0]], np.array([10.0]), np.array([0.25]), time=0.0)],
+       [
+           Observation(
+               kind="borehole",
+               location=coordinates[[0]],
+               value=np.array([10.0]),
+               noise_cov=np.array([0.25]),
+               time=0.0,
+           )
+       ],
        [],
-       [Observation("borehole", coordinates[[3]], np.array([14.0]), np.array([0.25]), time=2.0)],
+       [
+           Observation(
+               kind="borehole",
+               location=coordinates[[3]],
+               value=np.array([14.0]),
+               noise_cov=np.array([0.25]),
+               time=2.0,
+           )
+       ],
    ]
 
    posterior4d = assimilate_4d(
@@ -177,15 +193,6 @@ Use ``assimilate_4d_ensemble`` when observations are nonlinear and fixed
 Jacobians are not available. The ensemble route returns Gaussian summaries
 from an ensemble approximation and should be described as approximate evidence.
 
-Validation Checklist
---------------------
-
-When adding an observation or inversion route, include:
-
-* observation shape and noise-validation tests;
-* a known-answer likelihood or synthetic recovery test;
-* a failure test for unregistered observation kinds;
-* a failure test for nonlinear operators passed to exact linear inversion;
-* posterior predictive or held-out fit evidence;
-* clear docs naming whether the posterior is exact, sparse-exact,
-  linearized, ensemble-based, or sampled.
+See :doc:`validation` for the test commands that exercise this contract and
+:doc:`release-readiness` for the evidence a new observation or inversion
+route needs before release.

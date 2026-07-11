@@ -1,13 +1,9 @@
 Installation
 ============
 
-``mixle-pde`` installs into an environment that can import core ``mixle``.
-Install core first when validating the package family from sibling checkouts,
-or install the published core package before testing an isolated release
-candidate.
-
-Use installation checks to preserve the existing package surface. Do not treat a
-local environment with unpublished solver experiments as release evidence.
+``mixle-pde`` requires core ``mixle`` to be importable. Install core first
+when validating the package family from sibling checkouts; install the
+published core package when testing an isolated release candidate.
 
 From a checkout:
 
@@ -24,11 +20,13 @@ on ``PYTHONPATH`` for the command being validated:
 
    PYTHONPATH=../mixle python -m pytest
 
-The optional dependency profile matters. Solver and inversion paths may use
-NumPy, SciPy, Torch, or sparse linear algebra libraries depending on the module
-being exercised. Release notes should record which extras were installed for
-each validation run so that a missing optional backend is not mistaken for a
-solver failure.
+NumPy, SciPy, and Torch are base dependencies, not optional extras: every
+solver and inverse callback runs through the Torch-backed ``ops`` namespace
+(``mixle_pde/ops.py`` imports torch unconditionally), so a plain install
+brings everything the solver and inversion paths need. The only genuinely
+optional pieces are the geophysical data loaders in ``mixle_pde.env_data``
+(GEBCO, WOA/Argo, DEM, ERA5), which import their heavier backends lazily and
+raise a clear ``ImportError`` naming what is missing.
 
 Smoke test the public import surface:
 
@@ -51,19 +49,3 @@ Build this documentation with warnings treated as failures:
 For release evidence, also run the package tests from an environment that does
 not inherit the developer shell's ambient ``PYTHONPATH``. That catches missing
 declared dependencies and stale imports before the package is published.
-
-Optional Backend Notes
-----------------------
-
-Record whether SciPy sparse routines, Torch-backed paths, or other optional
-backends were installed for each validation run. If an optional backend is not
-available, examples should skip clearly or use the documented NumPy/SciPy
-fallback. Do not treat a developer environment with extra solvers as proof that
-the base install behaves the same way.
-
-Frozen Surface Expectations
----------------------------
-
-During the paused-development period, install documentation should describe the
-current package and optional backends only. Add new dependency instructions only
-when the corresponding code and validation evidence are committed.

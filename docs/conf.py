@@ -15,7 +15,7 @@ for path in (ROOT, WORKSPACE_CORE):
 
 project = "mixle-pde"
 author = "Grant Boquet"
-copyright = "2014-2026, Grant Boquet and contributors"
+copyright = "2026, Grant Boquet"
 
 pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
 release = pyproject["project"]["version"]

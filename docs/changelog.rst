@@ -2,21 +2,27 @@ Changelog
 =========
 
 This changelog records documentation-visible release changes for
-``mixle-pde``.
+``mixle-pde``. See the root ``CHANGELOG.md`` for the full commit-level record.
 
-0.7.0 - 2026-07-10
-------------------
+0.7.0 - 2026-07-11
+-------------------
 
-Version bumped to 0.7.0 to track the mixle 0.7.0 family release. Verified that
-the PDE/ODE solver and inversion surface imports and runs against
-``mixle==0.7.0`` (the plugin depends on ``mixle.ppl`` and ``mixle.inference``);
-no runtime API changes were required.
+The package's first public-release-readiness pass. ``mixle>=0.7.0`` is now the
+declared dependency floor (previously unpinned), and ``torch>=2.0`` is
+declared as a core dependency rather than test-only: every solver and inverse
+callback runs through the ``ops`` torch backend, so it was already required at
+runtime. Verified that the PDE/ODE solver and inversion surface imports and
+runs against ``mixle==0.7.0`` (the plugin depends on ``mixle.ppl`` and
+``mixle.inference``); no runtime API changes were required.
+
+This pass also found and fixed four deterministic test/scenario bugs surfaced
+by pinning the dependency floor: a ``TypeError`` in the default
+modeling-readiness checks, an unrealized noise covariance that made a
+synthetic-inversion comparison a coin flip, an RTS-smoother uncertainty
+assertion with the comparison direction backwards under amplifying dynamics,
+and a prior constructed with an invalid (zero) marginal precision.
 
 See :doc:`release-notes` for scope, validation evidence, and known risks.
-
-Development status: new PDE feature development is paused. Documentation
-updates should clarify the current surface, validation expectations, and known
-limits rather than introducing new runtime claims.
 
 Added
 ~~~~~
@@ -47,26 +53,9 @@ Changed
   posterior-query surfaces so examples do not overstate solver guarantees.
 * The docs tree is Sphinx/reStructuredText only.
 
-Release Gate
-~~~~~~~~~~~~
+Known limitations
+~~~~~~~~~~~~~~~~~~
 
-A public release is not complete until solver/inverse tests, synthetic
-recovery checks, optional-dependency behavior, strict Sphinx docs, packaging
-checks, and the coordinated family manifest all refer to the same commit.
-
-Reviewer Notes
-~~~~~~~~~~~~~~
-
-Documentation should preserve the difference between a small solver example, a
-field-inversion workflow, and a scientific claim. When a page introduces a new
-physics module, it should name the governing assumptions, input units,
-boundary or mesh requirements, validation evidence, and limitations needed to
-interpret the result.
-
-Maintenance Notes
-~~~~~~~~~~~~~~~~~
-
-While development is paused, prefer documentation corrections, API reference
-coverage, and validation instructions over new examples. A new example should
-only land when it exercises already-reviewed code and includes the corresponding
-numerical evidence.
+New PDE feature development is paused for this release. See
+:doc:`release-readiness` for the numerical-honesty and scope-freeze gates
+this pass follows.

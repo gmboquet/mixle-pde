@@ -57,6 +57,4 @@ Numerical Expectations
 Solver examples should prefer explicit tolerances, deterministic seeds where
 sampling is involved, and documented grid or mesh assumptions. Inverse
 workflows should report misfit, posterior uncertainty, and any regularization
-or prior that materially affects the result. When an optional dependency
-changes the solver path, the release evidence should say which implementation
-was used.
+or prior that materially affects the result.

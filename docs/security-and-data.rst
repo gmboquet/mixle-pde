@@ -33,17 +33,6 @@ Solver examples should state whether they are analytic checks, manufactured
 solutions, synthetic recovery tests, or production-scale simulations. Avoid
 implying that a smoke test validates a full physical modeling workflow.
 
-Release Checklist
------------------
-
-Before release:
-
-* run focused numerical tests;
-* label synthetic/public/private inputs;
-* inspect generated artifacts for private paths or coordinates;
-* document optional dependencies used for validation;
-* build docs with warnings as errors.
-
 Coordinate and Unit Review
 --------------------------
 

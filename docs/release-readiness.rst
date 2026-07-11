@@ -9,8 +9,11 @@ Supported Environment
 ---------------------
 
 The package metadata declares Python 3.10 and newer with core ``mixle``,
-NumPy, and SciPy as base dependencies. Optional Torch, sparse, or accelerator
-paths should remain guarded and should record their tested versions when used.
+NumPy, SciPy, and Torch as base dependencies. Every solver and inverse
+callback runs through the Torch-backed ``ops`` namespace, so Torch is
+required, not optional. The geophysical data loaders in ``mixle_pde.env_data``
+are the only guarded optional paths and should record their tested versions
+when used.
 
 Because new development is paused, release readiness should focus on preserving
 and accurately documenting the current surface rather than expanding scope.

@@ -96,7 +96,9 @@ list of arrays.
            [0.0, 1.0, 0.0],
        ]
    )
-   grid = Field3D(coords, spacing=1.0, units="kg/m^3", property_name="density")
+   grid = Field3D(
+       coordinates=coords, spacing=1.0, units="kg/m^3", property_name="density"
+   )
 
    obs = Observation(
        kind="borehole",
@@ -174,14 +176,6 @@ Use calibration diagnostics before promotion:
 * uncertainty inflation away from sensitive observations;
 * identifiability diagnostics for weakly constrained batches.
 
-Validation Expectations
------------------------
-
-Field-modeling changes should include:
-
-* known-answer likelihood or synthetic recovery tests;
-* failure tests for unsupported exact-inversion inputs;
-* posterior predictive or held-out fit evidence;
-* clear documentation naming whether the posterior is exact, sparse-exact,
-  linearized, ensemble-based, or sampled;
-* strict Sphinx builds with warnings treated as errors.
+See :doc:`validation` for the test commands that exercise this surface and
+:doc:`release-readiness` for the evidence a field-modeling change needs
+before release.

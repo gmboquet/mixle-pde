@@ -1,11 +1,11 @@
 mixle-pde
 =========
 
-``mixle-pde`` is the PDE, ODE, field-inversion, and mechanistic simulation
-package for Mixle. It keeps physics kernels, inverse-problem utilities,
-geophysical forward operators, field priors, assimilation routines, and
-PDE-constrained latent models outside the core package while preserving a
-clean integration point with Mixle's probabilistic-programming surface.
+``mixle-pde`` is Mixle's mechanistic-modeling package: PDE and ODE solvers,
+field-inversion utilities, geophysical forward operators, field priors,
+assimilation routines, and PDE-constrained latent models. Splitting it out
+keeps physics kernels out of core Mixle, while giving downstream applications
+one clean integration point into Mixle's probabilistic-programming surface.
 
 Start Here
 ----------
@@ -25,11 +25,10 @@ observations, Gaussian priors, posterior summaries, MCMC reference checks,
 Gauss-Newton updates, sampled-posterior updates, synthetic earth scenarios,
 and assimilation reports.
 
-Treat solver examples as building blocks: production workflows should record
-the operator, boundary conditions, mesh or grid assumptions, noise model, and
-validation evidence that make an inverse result defensible. For release
-review, the API reference should cover every tracked module because missing
-automodule pages hide public numerical surface area from reviewers.
+Treat solver examples as building blocks, not finished workflows: a
+defensible result records the operator, boundary conditions, mesh or grid
+assumptions, noise model, and validation evidence behind it, not just the
+code that produced a number.
 
 .. toctree::
    :caption: Start Here
@@ -59,12 +58,5 @@ automodule pages hide public numerical surface area from reviewers.
 
    api/modules
 
-Release Review Standard
------------------------
-
-Review PDE documentation by the numerical claim being made. A forward solver
-needs a stability, manufactured-solution, or reference-problem check. An
-inverse workflow needs recovery, posterior, or held-out evidence. A geoscience
-example needs data classification, units, coordinate assumptions, and
-limitations. The API reference names the surface; the workflow pages explain
-what evidence makes results defensible.
+See :doc:`release-readiness` for the release gates this package's numerical
+claims are held to.

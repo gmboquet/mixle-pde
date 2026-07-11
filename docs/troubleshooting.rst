@@ -21,11 +21,15 @@ the intended package:
 Torch or SciPy Is Missing
 -------------------------
 
-Some solvers and inverse paths require optional numerical dependencies. The
-base package should fail clearly for missing optional dependencies. Validation
-notes should say which extras were installed. If a module requires SciPy sparse
-solvers, Torch tensors, or a geophysical helper dependency, record that as a
-backend requirement rather than widening the base install unnecessarily.
+NumPy, SciPy, and Torch are base dependencies, not optional extras: every
+solver and inverse callback runs through the Torch-backed ``ops`` namespace
+(``mixle_pde/ops.py`` imports torch unconditionally). If either is missing,
+the environment install is incomplete. Reinstall with
+``python -m pip install -e .`` rather than adding the package by hand. The
+geophysical data loaders in ``mixle_pde.env_data`` (GEBCO, WOA/Argo, DEM,
+ERA5) are the only genuinely optional pieces; they raise a clear
+``ImportError`` naming the missing backend when their heavier dependencies
+are absent.
 
 Linear Inversion Rejects an Observation
 ---------------------------------------

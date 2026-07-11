@@ -62,7 +62,7 @@ Uncertainty and Calibration
 ---------------------------
 
 PDE workflows often fail quietly when uncertainty is treated as decoration.
-For release-quality examples, record:
+A convincing example states:
 
 * observation noise model;
 * prior family and parameter bounds;
@@ -90,7 +90,10 @@ A solver or inversion change should include at least one stability check:
 Optional Backends
 -----------------
 
-SciPy and sparse linear algebra are part of the normal package path. Torch,
-GPU, or other accelerated paths should remain optional unless the package
-metadata and validation matrix explicitly make them required. Importing the
-package without optional accelerators should not fail.
+NumPy, SciPy, and Torch are base dependencies as of 0.7.0: every solver and
+inverse callback runs through the Torch-backed ``ops`` namespace, so
+importing any solver module requires Torch. GPU execution is a Torch device
+choice, not a separate optional path. The genuinely optional pieces are the
+``mixle_pde.env_data`` geophysical loaders (GEBCO, WOA/Argo, DEM, ERA5),
+which import their heavier backends lazily and fail with a clear error
+naming what is missing.

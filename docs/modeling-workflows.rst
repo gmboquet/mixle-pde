@@ -1,9 +1,9 @@
 Modeling Workflows
 ==================
 
-``mixle-pde`` should make mechanistic models usable from probabilistic and
-application workflows without moving physics kernels into core ``mixle``. This
-page maps the common workflow from field definition to posterior validation.
+``mixle-pde`` makes mechanistic models usable from probabilistic and
+application workflows without moving physics kernels into core ``mixle``.
+This page maps the workflow from field definition to posterior validation.
 
 Define the Field
 ----------------
@@ -85,16 +85,5 @@ Boundaries
 ``mixle-pde`` owns physics kernels and inverse utilities. It does not own demo
 fixtures, gateway serving, mobile UI state, or core probability primitives.
 Those surfaces belong in ``mixle-demos``, ``mixle-mlops``, ``mixle-ios``, and
-``mixle`` respectively.
-
-Release Checklist
------------------
-
-For a modeling change, include:
-
-* focused solver or inverse tests;
-* synthetic recovery or known-answer checks;
-* docs explaining the inference route;
-* generated API reference updates;
-* strict Sphinx build;
-* clear notes that separate planned extensions from validated behavior.
+``mixle`` respectively. See :doc:`release-readiness` for the evidence a
+modeling change needs before release.
