@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>mixle-pde documentation</title>
+</head>
+<body>
+  <!-- Unlike core mixle's copy of this template, this doesn't hardcode a redirect to "main/":
+       main has no docs/ tree yet, so it never appears in switcher.json at all. Read the freshly
+       rendered switcher.json (sorted newest-first by sphinx-polyversion) and redirect to whichever
+       version is actually newest, so this keeps working across releases with no manual edits, and
+       degrades to a plain link list if fetch fails (e.g. opened from a local file:// build). -->
+  <p id="fallback">Loading the <a href="v0.7.0/index.html">mixle-pde documentation</a>...</p>
+  <script>
+    fetch("switcher.json")
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (versions) {
+        if (!versions.length) { return; }
+        var target = versions[0].name + "/index.html";
+        document.getElementById("fallback").innerHTML =
+          'Redirecting to the <a href="' + target + '">latest mixle-pde documentation</a>...';
+        location.replace(target);
+      })
+      .catch(function () {});
+  </script>
+</body>
+</html>
