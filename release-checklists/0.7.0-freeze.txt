@@ -1,0 +1,40 @@
+# Resolved dependency set for the mixle-pde 0.7.0 release.
+#
+# Captured 2026-07-11 against commit <see release-checklists/0.7.0.md> on release/0.7.0.
+# Environment: Python 3.12.12, macOS arm64 (CPU-only torch wheel from
+# https://download.pytorch.org/whl/cpu). Produced by:
+#
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   pip install "mixle==0.7.0"
+#   pip install dist/mixle_pde-0.7.0-py3-none-any.whl   # the built wheel, plus [test] extras
+#   pip freeze
+#
+# mixle-pde itself is listed separately below since `pip freeze` emits a local file:// wheel
+# path that is specific to this machine's build directory:
+#   mixle-pde==0.7.0
+
+certifi==2026.6.17
+charset-normalizer==3.4.9
+execnet==2.1.2
+filelock==3.29.0
+fsspec==2026.4.0
+idna==3.18
+iniconfig==2.3.0
+Jinja2==3.1.6
+MarkupSafe==3.0.3
+mixle==0.7.0
+mixle-pde==0.7.0
+mpmath==1.3.0
+networkx==3.6.1
+numpy==2.5.1
+packaging==26.2
+pluggy==1.6.0
+pytest==9.1.1
+pytest-xdist==3.8.0
+requests==2.34.2
+scipy==1.18.0
+setuptools==78.1.0
+sympy==1.14.0
+torch==2.13.0
+typing_extensions==4.15.0
+urllib3==2.7.0
