@@ -1,7 +1,7 @@
 """Edge-preserving priors over a PDE/ODE Differential forward: complex-valued data and multistart.
 
 The Gaussian-forward TotalVariation/Potts tests stay in mixle (priors_test.py); these use the
-``Differential`` forward operator from pysparkplug-pde.
+``Differential`` forward operator from mixle-pde.
 """
 
 import unittest

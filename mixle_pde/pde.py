@@ -345,7 +345,7 @@ def _pde_err(*a, **k):
 
 
 # Self-register the PDE-constrained state-space composite with its bespoke fitter (the fit_fn hook),
-# so core dispatches to pde_fit without a per-family branch. This module is imported by the package
-# init (in mixle: mixle.ppl.physics; once relocated: the pysparkplug-pde plugin), which fires the
-# registration; the PDE(operator) constructor builds RandomVariables of this family.
+# so core dispatches to pde_fit without a per-family branch. This module is imported by the mixle_pde
+# package init, which fires the registration; the PDE(operator) constructor builds RandomVariables of
+# this family.
 register_composite("PDEStateSpace", _pde_err, _pde_err, fit_fn=pde_fit)
