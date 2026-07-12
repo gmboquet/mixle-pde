@@ -10,7 +10,14 @@
 </div>
 <script>
 (function () {
-  var root = "{{ pathto('', 1) }}../";
+  // NOT "{{ pathto('', 1) }}../": that assumes every version's own docs root sits exactly one
+  // directory below the site root, which sphinx-polyversion violates for any branch name
+  // containing a slash (e.g. "release/0.7.0" builds into <site-root>/release/0.7.0/, two levels
+  // down, not one -- doesn't affect this repo's current main/vX.Y.Z-only regexes, but broke this
+  // exact template verbatim-copied to mixle-discrete, which does build a slash-named branch).
+  // Compute the site root directly instead -- this is a GitHub Pages project site, so it's always
+  // <origin>/<first path segment>/, regardless of how deep the current version's own name nests.
+  var root = "/" + window.location.pathname.split("/").filter(Boolean)[0] + "/";
   var container = document.getElementById("version-switcher");
   var button = container.querySelector(".version-switcher__button");
   var menu = container.querySelector(".version-switcher__menu");
