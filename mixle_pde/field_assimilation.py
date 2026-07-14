@@ -28,10 +28,65 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+import scipy.sparse as sp
 
 from mixle_pde.field_inversion import FieldGaussianPrior, _noise_precision
 from mixle_pde.latent import Field3D, PosteriorField3D, PosteriorFieldSamples3D
 from mixle_pde.observations import ForwardOperatorRegistry, Observation
+
+
+def _gaspari_cohn_taper(scaled_distance: np.ndarray) -> np.ndarray:
+    """The 5th-order Gaspari-Cohn piecewise polynomial, compactly supported on ``[0, 2]``."""
+    z = np.abs(np.asarray(scaled_distance, dtype=float))
+    out = np.zeros_like(z)
+    near = z <= 1.0
+    zn = z[near]
+    out[near] = -0.25 * zn**5 + 0.5 * zn**4 + 0.625 * zn**3 - (5.0 / 3.0) * zn**2 + 1.0
+    far = (z > 1.0) & (z <= 2.0)
+    zf = z[far]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        out[far] = (
+            (1.0 / 12.0) * zf**5 - 0.5 * zf**4 + 0.625 * zf**3 + (5.0 / 3.0) * zf**2 - 5.0 * zf + 4.0 - (2.0 / 3.0) / zf
+        )
+    return np.clip(out, 0.0, 1.0)
+
+
+def gaspari_cohn_localization(coords: np.ndarray, radius: float):
+    """Pairwise Gaspari-Cohn covariance-taper matrix over ``coords`` (workstream C5 / DR-ALG C5).
+
+    Returns a sparse ``(m, m)`` taper with ``taper[i, j] == 1`` at zero distance, decaying smoothly to
+    ``0`` once ``|coords[i] - coords[j]| >= radius`` (support width ``radius``, half-width ``radius /
+    2`` in the standard Gaspari-Cohn parametrization). A caller that needs to localize a *cross*
+    covariance between two different point sets (e.g. an EnKF's state/observation covariance) stacks
+    both coordinate arrays into one ``coords`` and slices the corresponding off-diagonal block out of
+    the returned matrix -- this keeps the frozen signature to the one generic ``coords`` argument while
+    still covering the state-state, state-observation, and observation-observation cases.
+    """
+    coords = np.atleast_2d(np.asarray(coords, dtype=float))
+    if coords.ndim != 2:
+        raise ValueError("coords must be an (m, d) array of point coordinates.")
+    if radius <= 0.0:
+        raise ValueError("radius must be positive.")
+    m = coords.shape[0]
+    if m == 0:
+        return sp.csr_matrix((0, 0))
+    half_width = radius / 2.0
+    from scipy.spatial import cKDTree
+
+    tree = cKDTree(coords)
+    pairs = tree.query_pairs(r=radius, output_type="ndarray")
+    rows = [np.arange(m)]
+    cols = [np.arange(m)]
+    data = [np.ones(m)]
+    if pairs.size:
+        i, j = pairs[:, 0], pairs[:, 1]
+        dist = np.linalg.norm(coords[i] - coords[j], axis=1)
+        weight = _gaspari_cohn_taper(dist / half_width)
+        rows.extend([i, j])
+        cols.extend([j, i])
+        data.extend([weight, weight])
+    matrix = sp.coo_matrix((np.concatenate(data), (np.concatenate(rows), np.concatenate(cols))), shape=(m, m))
+    return matrix.tocsr()
 
 
 @dataclass
@@ -367,10 +422,7 @@ def _coerce_process_covariances(process_cov, n_steps: int, n_state: int) -> list
         for cov in covs:
             _validate_covariance(cov, "process_cov")
         return covs
-    raise ValueError(
-        "process_cov must be scalar, shape (n,), shape (n,n), shape (n_steps,n), "
-        "or shape (n_steps,n,n)."
-    )
+    raise ValueError("process_cov must be scalar, shape (n,), shape (n,n), shape (n_steps,n), or shape (n_steps,n,n).")
 
 
 def _validate_covariance(matrix: np.ndarray, name: str) -> None:
@@ -557,9 +609,7 @@ def assimilate_4d_joint_linear_dynamics(
                 raise ValueError(f"observation time {obs.time!r} does not match assimilation time {times[ti]!r}.")
             op = registry.get(obs.kind)
             if not op.is_linear:
-                raise ValueError(
-                    f"observation kind {obs.kind!r} needs a fixed Jacobian for joint linear assimilation."
-                )
+                raise ValueError(f"observation kind {obs.kind!r} needs a fixed Jacobian for joint linear assimilation.")
             jac = np.atleast_2d(np.asarray(op.jacobian(grid, obs.location), dtype=float))
             if jac.shape != (obs.n, n):
                 raise ValueError(f"operator {obs.kind!r} Jacobian shape {jac.shape} != ({obs.n}, {n}).")
@@ -602,6 +652,46 @@ def _systematic_resample(weights: np.ndarray, rng: np.random.Generator) -> np.nd
     return np.searchsorted(cumulative, positions, side="right")
 
 
+def _pcn_rejuvenate_particles(
+    particles: np.ndarray,
+    obs_list: list[Observation],
+    grid: Field3D,
+    registry: ForwardOperatorRegistry,
+    prior_mean: np.ndarray,
+    chol_precision: np.ndarray,
+    *,
+    beta: float,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """One vectorized pCN move over every particle, accepted on that time's likelihood only.
+
+    This is the resample-move step (Gilks & Berzuini 2001): resampling collapses duplicate particles
+    onto one another, and an MCMC kernel invariant to (an approximation of) the filtering distribution
+    restores diversity without moving the ensemble's support. The prior-preconditioned pCN proposal
+    reuses the same construction as :func:`mixle_pde.field_mcmc.pcn_field_invert`, applied to every
+    particle at once; the acceptance ratio uses only this time's observations (a local-flatness
+    approximation of the particle's incoming prior/process contribution, standard for a jitter move).
+    """
+    n_particles, n_state = particles.shape
+    shrink = float(np.sqrt(1.0 - beta**2))
+
+    def _loglik(batch: np.ndarray) -> np.ndarray:
+        if not obs_list:
+            return np.zeros(batch.shape[0], dtype=float)
+        physical = grid.from_unconstrained(batch)
+        return np.array([registry.total_log_likelihood(grid, physical[i], obs_list) for i in range(batch.shape[0])])
+
+    current_loglik = _loglik(particles)
+    z = rng.standard_normal((n_particles, n_state))
+    xi = np.linalg.solve(chol_precision.T, z.T).T  # each row ~ N(0, prior_cov)
+    proposal = prior_mean[None, :] + shrink * (particles - prior_mean[None, :]) + beta * xi
+    proposal_loglik = _loglik(proposal)
+    accept = np.log(rng.random(n_particles)) < (proposal_loglik - current_loglik)
+    out = particles.copy()
+    out[accept] = proposal[accept]
+    return out
+
+
 def particle_assimilate_4d(
     grid: Field3D,
     times,
@@ -614,12 +704,19 @@ def particle_assimilate_4d(
     rng: np.random.Generator | None = None,
     resample_threshold: float = 0.5,
     jitter: float = 1.0e-9,
+    rejuvenate_steps: int = 0,
+    rejuvenate_beta: float = 0.2,
 ) -> tuple[PosteriorFieldSamples4D, ParticleAssimilationReport]:
     """Sequential Monte Carlo assimilation for nonlinear/non-Gaussian 4D field posteriors.
 
     The state evolves as a random walk in the field's unconstrained coordinates. Observation likelihoods
     are evaluated in physical coordinates through the registry, so bounded fields and nonlinear
     operators use the same observation contract as the Gaussian and ensemble paths.
+
+    ``rejuvenate_steps`` (``0`` by default, so existing calls are unchanged) runs that many
+    :func:`_pcn_rejuvenate_particles` moves immediately after every resample, restoring the diversity
+    that resampling collapses (many particles becoming exact duplicates) without shifting the ensemble's
+    support -- the classic "resample-move" fix for particle impoverishment.
     """
     times = np.asarray(times, dtype=float)
     if times.ndim != 1 or times.size == 0:
@@ -636,6 +733,10 @@ def particle_assimilate_4d(
         raise ValueError("resample_threshold must be in (0, 1].")
     if jitter < 0.0:
         raise ValueError("jitter must be non-negative.")
+    if int(rejuvenate_steps) < 0:
+        raise ValueError("rejuvenate_steps must be non-negative.")
+    if not 0.0 < rejuvenate_beta <= 1.0:
+        raise ValueError("rejuvenate_beta must be in (0, 1].")
     for time, obs_list in zip(times, observations_by_time, strict=True):
         for obs in obs_list:
             if obs.time is not None and not np.isclose(obs.time, time):
@@ -644,8 +745,12 @@ def particle_assimilate_4d(
     rng = np.random.default_rng() if rng is None else rng
     n_particles = int(n_particles)
     n_state = grid.n
+    rejuvenate_steps = int(rejuvenate_steps)
     prior_mean = prior.mean_vector(grid)
-    prior_cov = np.linalg.inv(prior.precision(grid) + jitter * np.eye(n_state))
+    precision = np.asarray(prior.precision(grid), dtype=float)
+    precision = 0.5 * (precision + precision.T)
+    prior_cov = np.linalg.inv(precision + jitter * np.eye(n_state))
+    chol_precision = np.linalg.cholesky(precision) if rejuvenate_steps > 0 else None
     particles = rng.multivariate_normal(prior_mean, prior_cov, size=n_particles)
     trajectories = np.empty((n_particles, times.size, n_state), dtype=float)
     log_weights = np.full(n_particles, -np.log(n_particles), dtype=float)
@@ -683,6 +788,12 @@ def particle_assimilate_4d(
             trajectories[:, : ti + 1, :] = trajectories[idx, : ti + 1, :]
             log_weights = np.full(n_particles, -np.log(n_particles), dtype=float)
             resample_count += 1
+            for _ in range(rejuvenate_steps):
+                particles = _pcn_rejuvenate_particles(
+                    particles, obs_list, grid, registry, prior_mean, chol_precision, beta=rejuvenate_beta, rng=rng
+                )
+            if rejuvenate_steps > 0:
+                trajectories[:, ti, :] = particles
         else:
             log_weights = np.log(np.maximum(weights, np.finfo(float).tiny))
 
@@ -718,6 +829,7 @@ def assimilate_4d_ensemble(
     rng: np.random.Generator | None = None,
     inflation: float = 1.0,
     jitter: float = 1.0e-9,
+    localization_radius: float | None = None,
 ) -> PosteriorField4D:
     """Ensemble Kalman assimilation for nonlinear evolving-field observations.
 
@@ -725,6 +837,16 @@ def assimilate_4d_ensemble(
     ensemble member is pushed through ``ForwardOperator.predict_observation``; the empirical
     state/observation covariance supplies the Kalman gain. The returned :class:`PosteriorField4D`
     contains filtered Gaussian summaries at each time.
+
+    ``localization_radius`` (``None`` by default, so existing calls are unchanged) tapers the empirical
+    state/observation and observation/observation sample covariances with a
+    :func:`gaspari_cohn_localization` Schur product before they enter the Kalman gain. A modest ensemble
+    invents long-range spurious correlations between distant cells and observations; left alone, the
+    gain acts on that noise and can collapse ensemble spread over update after update. Localization
+    zeroes out correlations beyond ``localization_radius`` so only genuinely nearby state/observation
+    pairs update each other. Only the ensemble-estimated covariance is tapered -- the observation's own
+    declared ``noise_cov`` (a physical instrument property, not a sampling artifact) is added afterward,
+    untouched.
     """
     if grid.bounds is not None:
         raise ValueError("assimilate_4d_ensemble currently requires an identity-transform field (bounds=None).")
@@ -741,6 +863,8 @@ def assimilate_4d_ensemble(
         raise ValueError("inflation must be positive.")
     if jitter < 0.0:
         raise ValueError("jitter must be non-negative.")
+    if localization_radius is not None and localization_radius <= 0.0:
+        raise ValueError("localization_radius must be positive when supplied.")
 
     rng = np.random.default_rng() if rng is None else rng
     n = grid.n
@@ -761,8 +885,14 @@ def assimilate_4d_ensemble(
             x_anom = (ensemble - x_mean) * np.sqrt(inflation)
             y_anom = (predicted - y_mean) * np.sqrt(inflation)
             cov_xy = x_anom.T @ y_anom / (ensemble_size - 1)
+            ens_cov_yy = y_anom.T @ y_anom / (ensemble_size - 1)
+            if localization_radius is not None:
+                combined = np.vstack([grid.coordinates, obs.location])
+                taper = gaspari_cohn_localization(combined, localization_radius).toarray()
+                cov_xy = cov_xy * taper[:n, n:]
+                ens_cov_yy = ens_cov_yy * taper[n:, n:]
             noise_cov = obs.noise_cov if not obs.is_diagonal else np.diag(obs.noise_cov)
-            cov_yy = y_anom.T @ y_anom / (ensemble_size - 1) + noise_cov + jitter * np.eye(obs.n)
+            cov_yy = ens_cov_yy + noise_cov + jitter * np.eye(obs.n)
             gain = cov_xy @ np.linalg.inv(cov_yy)
             perturbed = obs.value[None, :] + _observation_noise_sample(obs, rng, ensemble_size)
             innovation = perturbed - predicted
