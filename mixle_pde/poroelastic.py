@@ -44,6 +44,10 @@ and the gradient of a recorded trace w.r.t. the rock properties is available for
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
+
 import numpy as np
 
 # packed state: solid velocity, relative fluid velocity, total stress, pore pressure
@@ -279,3 +283,268 @@ class BiotPoroelastic1D:
         f = np.zeros(self.n)
         f[i] = float(amplitude)
         return {"pf": f}
+
+
+# ======================================================================================================
+# Quasi-static surface deformation (workstream G4): aquifer/reservoir volume change -> InSAR LOS
+# displacement, and the inverse. `BiotPoroelastic1D` above is a *dynamic wave* stepper -- it has no
+# notion of a static surface-deformation Green's function -- so this is a genuinely new forward, built
+# on the same Biot-Gassmann moduli (`gassmann_moduli`) rather than on the wave stepper itself.
+#
+# Forward: a subsurface volume change dV (a dewatering aquifer cell contracting, a reservoir depleting)
+# radiates a static elastic deformation field at the surface. Modelled as a superposition of Mogi (1958)
+# point "nuclei of strain" -- the standard, cheap closed-form approximation for a source small compared
+# to its depth (the same simplifying step `gravity_point_sensitivity`/`magnetic_dipole_sensitivity` make
+# in mixle_pde.geophysics for a point-mass/point-dipole cell): each cell's dV contributes independently
+# and linearly, so the whole operator is one (n_obs, n_cells) sensitivity matrix, exact and O(1) to
+# evaluate (no adjoint or finite-difference Jacobian is needed -- unlike the iterative PDE forwards C1's
+# adjoint targets, this forward is already a closed-form linear kernel, so its own derivative IS the
+# kernel; see the note in `invert_deformation`).
+#
+# For a point source of strength dV at depth `d` below an unbounded elastic half-space of Poisson ratio
+# `nu`, the Mogi surface displacement at horizontal offset `r` from the point directly above the source
+# is: `u_z = (1-nu)/pi * dV * d / (d^2+r^2)^1.5` (vertical) and `u_r = (1-nu)/pi * dV * r / (d^2+r^2)^1.5`
+# (radially outward from the epicentre, positive dV = inflation = uplift; negative dV = deflation /
+# dewatering = subsidence). `nu` and the point-source strength are read off the Biot-Gassmann moduli
+# (`gassmann_moduli`): `mu = 3/4 (H - k_sat)` recovers the shear modulus from the returned `H`/`k_sat`
+# (since `H = k_sat + 4/3 mu`), `nu = (3 k_sat - 2 mu) / (2 (3 k_sat + mu))` is the standard elastic
+# relation, and the point-source strength is `alpha * dV` -- the Biot coefficient scales the *mechanical*
+# (skeleton) volume change a pore-pressure/fluid volume change `dV` actually produces (Geertsma 1973;
+# Segall 1985/1992's nucleus-of-strain reservoir-compaction model).
+def _biot_nu_and_alpha(moduli: dict) -> tuple[float, float]:
+    """Elastic Poisson ratio and the Biot coefficient, both recovered from a `gassmann_moduli()` dict."""
+    alpha = float(moduli["alpha"])
+    k_sat = float(moduli["k_sat"])
+    mu = 0.75 * (float(moduli["H"]) - k_sat)
+    nu = (3.0 * k_sat - 2.0 * mu) / (2.0 * (3.0 * k_sat + mu))
+    return nu, alpha
+
+
+def _mogi_los_sensitivity(
+    cells: np.ndarray,
+    obs_xy: np.ndarray,
+    *,
+    moduli: dict,
+    los_vector: np.ndarray,
+) -> np.ndarray:
+    """The ``(n_obs, n_cells)`` linear sensitivity of LOS surface displacement to per-cell volume change.
+
+    ``cells``/``obs_xy`` are ``(*, 3)`` ``(east, north, up)`` coordinates (metres), matching the
+    convention `mixle_pde.geophysics` already uses -- so every observation must sit strictly above every
+    cell (a positive Mogi source depth); this raises rather than silently producing an unphysical result
+    otherwise. Superposes the per-cell Mogi point-source vertical/radial displacement, resolves the
+    radial component into (east, north) via the cell-to-observation bearing, and projects the resulting
+    3-vector onto the (already-normalized) ``los_vector``.
+    """
+    cells = np.atleast_2d(np.asarray(cells, dtype=float))
+    obs = np.atleast_2d(np.asarray(obs_xy, dtype=float))
+    if cells.ndim != 2 or cells.shape[1] != 3:
+        raise ValueError(f"cells must be an (n_cells, 3) array, got shape {cells.shape}.")
+    if obs.ndim != 2 or obs.shape[1] != 3:
+        raise ValueError(f"obs_xy must be an (n_obs, 3) array, got shape {obs.shape}.")
+
+    nu, alpha = _biot_nu_and_alpha(moduli)
+
+    diff = obs[:, None, :] - cells[None, :, :]  # (n_obs, n_cells, 3)
+    depth = diff[..., 2]
+    if np.any(depth <= 0.0):
+        raise ValueError(
+            "every cell must sit strictly below every observation in the (east, north, up) convention "
+            "(depth = obs_z - cell_z must be positive); got a non-positive depth for at least one pair."
+        )
+    horiz = diff[..., :2]
+    r = np.maximum(np.linalg.norm(horiz, axis=-1), 1.0e-9)
+    R3 = (depth**2 + r**2) ** 1.5
+
+    coeff = (1.0 - nu) / np.pi * alpha / R3  # (n_obs, n_cells)
+    uz = coeff * depth
+    ur = coeff * r
+    ux = ur * horiz[..., 0] / r
+    uy = ur * horiz[..., 1] / r
+
+    los = np.asarray(los_vector, dtype=float)
+    los = los / np.linalg.norm(los)
+    return ux * los[0] + uy * los[1] + uz * los[2]
+
+
+def poroelastic_subsidence(
+    volume_change: np.ndarray,
+    cells: np.ndarray,
+    obs_xy: np.ndarray,
+    *,
+    moduli: dict,
+    los_vector: np.ndarray | tuple[float, float, float] = (0.0, 0.0, 1.0),
+) -> np.ndarray:
+    """Predicted surface LOS displacement from a per-cell subsurface volume change (the G4 forward).
+
+    Args:
+        volume_change: ``(n_cells,)`` volume change per cell, m^3 (negative = contraction/dewatering,
+            positive = inflation).
+        cells: ``(n_cells, 3)`` cell-centroid coordinates, ``(east, north, up)`` metres.
+        obs_xy: ``(n_obs, 3)`` surface observation coordinates, ``(east, north, up)`` metres (``up`` is
+            typically ``0`` at the ground surface).
+        moduli: the dict returned by :func:`gassmann_moduli` (needs ``alpha``, ``k_sat``, ``H``).
+        los_vector: unit line-of-sight vector, ``(east, north, up)`` convention (see
+            :func:`mixle_pde.io.insar.load_insar`); defaults to straight up.
+
+    Returns:
+        ``(n_obs,)`` predicted LOS displacement (metres), linear in ``volume_change``.
+    """
+    G = _mogi_los_sensitivity(cells, obs_xy, moduli=moduli, los_vector=los_vector)
+    dv = np.atleast_1d(np.asarray(volume_change, dtype=float))
+    if dv.shape != (G.shape[1],):
+        raise ValueError(f"volume_change must have shape ({G.shape[1]},), got {dv.shape}.")
+    return G @ dv
+
+
+@dataclass
+class _PushforwardQuantity:
+    """IC-1 `DerivedQuantity`: a pushforward's draws plus the honesty flag inherited from its posterior."""
+
+    samples: np.ndarray
+    prior_dominated: bool = False
+
+    def credible_interval(self, level: float) -> tuple[np.ndarray, np.ndarray]:
+        if not 0.0 < level < 1.0:
+            raise ValueError("level must be in (0, 1).")
+        a = (1.0 - level) / 2.0
+        return np.quantile(self.samples, a, axis=0), np.quantile(self.samples, 1.0 - a, axis=0)
+
+
+@dataclass
+class DeformationPosterior:
+    """IC-1 `Posterior` over per-cell volume/pressure change, recovered by :func:`invert_deformation`.
+
+    Wraps the exact closed-form :class:`~mixle_pde.latent.PosteriorField3D` the linear-Gaussian
+    `insar_los` inversion returns, bridging its field-specific singular `.sample`/`alpha`-parameterised
+    `.credible_interval` surface onto the frozen IC-1 plural `samples`/`level`-parameterised surface
+    (`mixle.reason.posterior_protocol.Posterior`) every downstream consumer (E3-E5, E10, H4, J2) types
+    against, without waiting on `PosteriorField3D` itself growing that surface generically (a separate
+    card, E1, does that).
+    """
+
+    field_posterior: Any  # mixle_pde.latent.PosteriorField3D
+    prior_dominated: bool = False
+
+    @property
+    def mean(self) -> np.ndarray:
+        return self.field_posterior.mean
+
+    @property
+    def cov(self) -> np.ndarray:
+        return self.field_posterior.cov
+
+    def samples(self, n: int, rng: np.random.Generator) -> np.ndarray:
+        """Draw ``n`` per-cell volume/pressure-change samples; shape ``(n, n_cells)``."""
+        return self.field_posterior.sample(n, rng)
+
+    def credible_interval(self, level: float) -> tuple[np.ndarray, np.ndarray]:
+        """Per-cell central credible interval covering ``level`` mass; ``(lo, hi)`` each ``(n_cells,)``."""
+        if not 0.0 < level < 1.0:
+            raise ValueError("level must be in (0, 1).")
+        return self.field_posterior.credible_interval(alpha=1.0 - level)
+
+    def derived_quantity(
+        self, fn: Callable[[np.ndarray], np.ndarray], n: int, rng: np.random.Generator
+    ) -> _PushforwardQuantity:
+        """Pushforward ``fn`` over ``n`` posterior draws (e.g. total recovered dV, or its centroid)."""
+        draws = self.samples(n, rng)
+        pushed = np.asarray([fn(draw) for draw in draws])
+        return _PushforwardQuantity(samples=pushed, prior_dominated=self.prior_dominated)
+
+
+def invert_deformation(
+    insar_obs: list,
+    cells: np.ndarray,
+    *,
+    moduli: dict,
+    how: str = "laplace",
+    prior_volume_scale: float = 1.0e4,
+    smoothness_precision: float = 2.0e-4,
+    length_scale: float | None = None,
+) -> DeformationPosterior:
+    """Posterior over per-cell subsurface volume/pressure change from a batch of `insar_los` observations.
+
+    The forward (:func:`poroelastic_subsidence`) is an exact closed-form linear kernel in the per-cell
+    volume change (a Mogi-source superposition, not an iterative PDE solve), so its Jacobian is the
+    kernel itself -- cheap and exact, with none of the adjoint/finite-difference machinery C1 supplies
+    for the PDE-based DC/EM operators needed here. This is registered as a
+    :class:`~mixle_pde.observations.ForwardOperator` (the same pattern
+    :func:`mixle_pde.observations.gravity_forward_operator` uses for the point-mass gravity kernel) and
+    inverted exactly by :func:`mixle_pde.field_inversion.linear_gaussian_invert` against a Gaussian
+    spatial-smoothness prior over the cells -- the linear-Gaussian path the algorithm names as the
+    alternative to `Differential`/`joint(...).fit("laplace")`, and the natural one here since the
+    forward is already linear rather than an ODE/PDE trajectory. Because the model is exactly
+    linear-Gaussian, ``how="laplace"`` and ``how="map"`` coincide (the Laplace approximation at the MAP
+    IS the exact posterior); both are accepted for API symmetry with the rest of the package.
+
+    Args:
+        insar_obs: a list of ``kind="insar_los"`` Observations (as returned by
+            :func:`mixle_pde.io.insar.load_insar`); every observation must carry the SAME
+            ``provenance["los_vector"]`` (one InSAR track's look direction is treated as constant over
+            the AOI). Missing ``los_vector`` defaults to straight up.
+        cells: ``(n_cells, 3)`` cell-centroid coordinates, ``(east, north, up)`` metres.
+        moduli: the dict returned by :func:`gassmann_moduli`.
+        how: ``"laplace"`` or ``"map"`` (see above; both take the same closed-form path).
+        prior_volume_scale: prior standard deviation on a cell's volume change, m^3 -- a broad,
+            weakly-informative default so a well-resolved anomaly is set by the data, not the prior.
+        smoothness_precision: the spatial-smoothness prior's edge weight (see
+            :class:`~mixle_pde.field_inversion.FieldGaussianPrior`); a small default so neighbouring
+            cells are only weakly coupled and a resolvable anomaly's shape and total credible width are
+            set by the data, not by over-smoothing.
+        length_scale: the smoothness prior's correlation length, metres; defaults to the median nearest-
+            neighbour cell spacing.
+
+    Returns:
+        A :class:`DeformationPosterior` (IC-1 `Posterior`) over the per-cell volume/pressure change.
+    """
+    if how not in ("laplace", "map"):
+        raise ValueError(f"how must be 'laplace' or 'map', got {how!r}.")
+    if not insar_obs:
+        raise ValueError("invert_deformation needs at least one insar_los observation.")
+    if prior_volume_scale <= 0.0:
+        raise ValueError("prior_volume_scale must be positive.")
+
+    from mixle_pde.field_inversion import FieldGaussianPrior, linear_gaussian_invert
+    from mixle_pde.latent import Field3D
+    from mixle_pde.observations import ForwardOperator, ForwardOperatorRegistry
+
+    los_vectors = [tuple(np.round(obs.provenance.get("los_vector", (0.0, 0.0, 1.0)), 9)) for obs in insar_obs]
+    if len(set(los_vectors)) > 1:
+        raise ValueError("invert_deformation needs one shared los_vector across insar_obs; got several.")
+    los_vector = np.asarray(los_vectors[0], dtype=float)
+
+    cells = np.atleast_2d(np.asarray(cells, dtype=float))
+    n_cells = cells.shape[0]
+    grid = Field3D(coordinates=cells, spacing=1.0, units="m^3", property_name="volume_change", bounds=None)
+
+    if length_scale is None:
+        from scipy.spatial import cKDTree
+
+        tree = cKDTree(cells)
+        dist, _ = tree.query(cells, k=min(2, n_cells))
+        length_scale = float(np.median(dist[:, -1])) if n_cells > 1 else 1.0
+        length_scale = max(length_scale, 1.0e-6)
+
+    def _jacobian(_grid: Field3D, obs_locations: np.ndarray) -> np.ndarray:
+        return _mogi_los_sensitivity(cells, obs_locations, moduli=moduli, los_vector=los_vector)
+
+    def _predict(_grid: Field3D, field_values: np.ndarray, obs_locations: np.ndarray) -> np.ndarray:
+        return _jacobian(_grid, obs_locations) @ np.asarray(field_values, dtype=float)
+
+    registry = ForwardOperatorRegistry()
+    registry.register(ForwardOperator("insar_los", _predict, jacobian=_jacobian, differentiable=False))
+
+    prior = FieldGaussianPrior(
+        mean=0.0,
+        smoothness_precision=smoothness_precision,
+        marginal_precision=1.0 / prior_volume_scale**2,
+        length_scale=length_scale,
+    )
+    field_posterior = linear_gaussian_invert(grid, insar_obs, registry, prior)
+
+    prior_trace = float(np.trace(prior.precision(grid)))
+    posterior_trace = float(np.trace(np.linalg.inv(field_posterior.cov)))
+    prior_dominated = prior_trace > 0.5 * posterior_trace
+
+    return DeformationPosterior(field_posterior=field_posterior, prior_dominated=prior_dominated)
