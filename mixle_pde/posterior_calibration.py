@@ -4,16 +4,24 @@ Workstream G requires posterior claims to be measured, not just returned: synthe
 held-out observation fit, uncertainty inflation away from data, and an explicit insufficient-data
 diagnostic. The functions here operate on the shared :class:`mixle_pde.latent.PosteriorField3D`
 interface, so the same checks apply to static inversions and to individual 4D assimilation slices.
+
+Workstream A extends this from measurement to correction: ``variance_inflation_factor`` and
+``split_conformal_quantile`` turn a held-out/calibration split into honest scalar summaries of how
+wrong the posterior's claimed uncertainty is, and ``recalibrate`` applies the chi-square inflation
+back onto the posterior's own covariance so a caller gets a widened ``PosteriorField3D`` whose
+credible intervals actually cover at the stated rate, instead of a diagnostic that only measures the
+miscalibration and leaves it in place.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, replace
 
 import numpy as np
 from scipy.special import ndtri
 
-from mixle_pde.latent import PosteriorField3D
+from mixle_pde.latent import PosteriorField3D, SparsePosteriorPrecision
 from mixle_pde.observations import ForwardOperatorRegistry, Observation
 
 
@@ -62,6 +70,21 @@ class IdentifiabilityDiagnostic:
     insensitive_to_sensitive_std_ratio: float
     insufficient_observations: bool
     reason: str
+
+
+@dataclass(frozen=True)
+class Recalibration:
+    """Summary of a :func:`recalibrate` call: the chi-square inflation and a conformal quantile.
+
+    ``inflation`` is the multiplicative factor applied to the posterior's standard deviation (``> 1``
+    means the input posterior was overconfident; ``< 1`` means it was underconfident). ``conformal_quantile``
+    is the distribution-free split-conformal interval multiplier computed on the same held-out split, so a
+    caller who distrusts the Gaussian chi-square assumption still has an honest interval width available.
+    """
+
+    inflation: float
+    conformal_quantile: float
+    alpha: float
 
 
 def truth_coverage(posterior: PosteriorField3D, truth: np.ndarray, *, alpha: float = 0.1) -> TruthCoverage:
@@ -236,3 +259,119 @@ def identifiability_diagnostic(
         insufficient_observations=bool(insufficient),
         reason=reason,
     )
+
+
+def _residual_and_predictive_std(
+    posterior: PosteriorField3D,
+    registry: ForwardOperatorRegistry,
+    observations: list[Observation],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Flat per-scalar-datum residuals and predictive standard deviations.
+
+    Uses exactly the predictive law :func:`heldout_observation_check` scores against -- ``J @ mean``
+    for the point prediction, ``J Sigma J.T + noise_cov`` for the predictive covariance -- so the
+    inflation factor and the conformal quantile are honest about the same predictive distribution the
+    read-only diagnostic reports, not a different one.
+    """
+    if not observations:
+        raise ValueError("observations must contain at least one held-out/calibration Observation.")
+    cov = posterior.cov if posterior.cov is not None else np.diag(posterior.marginal_variance)
+    residuals: list[float] = []
+    stds: list[float] = []
+    for obs in observations:
+        op = registry.get(obs.kind)
+        if not op.is_linear:
+            raise ValueError(f"recalibration needs fixed-linear operators; {obs.kind!r} is nonlinear.")
+        jac = op.local_jacobian(posterior.grid, posterior.mean, obs)
+        predicted = jac @ posterior.mean
+        predictive_cov = jac @ cov @ jac.T
+        noise_cov = obs.noise_cov if not obs.is_diagonal else np.diag(obs.noise_cov)
+        total_cov = predictive_cov + noise_cov
+        residual = obs.value - predicted
+        std = np.sqrt(np.diag(total_cov))
+        residuals.extend(residual.tolist())
+        stds.extend(std.tolist())
+    return np.asarray(residuals, dtype=float), np.asarray(stds, dtype=float)
+
+
+def variance_inflation_factor(
+    posterior: PosteriorField3D,
+    registry: ForwardOperatorRegistry,
+    held_out: list[Observation],
+) -> float:
+    """Chi-square variance inflation factor ``sqrt(mean(standardized_residual ** 2))``.
+
+    Standardized residuals are formed exactly as in :func:`heldout_observation_check` (predicted
+    ``J @ mean``, predictive + noise standard deviation). ``1.0`` means the posterior's claimed spread
+    matches held-out residuals; ``> 1`` means the posterior is overconfident (too narrow) by that
+    multiplicative factor in standard deviation; ``< 1`` means it is underconfident (too wide).
+    """
+    residual, std = _residual_and_predictive_std(posterior, registry, held_out)
+    chi2_over_dof = float(np.mean((residual / std) ** 2))
+    return math.sqrt(chi2_over_dof)
+
+
+def split_conformal_quantile(
+    posterior: PosteriorField3D,
+    registry: ForwardOperatorRegistry,
+    calib: list[Observation],
+    *,
+    alpha: float = 0.1,
+) -> float:
+    """Distribution-free split-conformal interval multiplier from a calibration split.
+
+    The nonconformity score for each held-out datum is ``|residual| / predictive_std``. The returned
+    value is the ``ceil((n + 1) * (1 - alpha)) / n`` empirical quantile of those scores -- the standard
+    split-conformal correction, which gives ``predicted +/- quantile * predictive_std`` marginal
+    ``1 - alpha`` coverage under only exchangeability of the calibration residuals, needing no synthetic
+    truth and no Gaussian assumption.
+    """
+    if not 0.0 < alpha < 1.0:
+        raise ValueError("alpha must be in (0, 1).")
+    residual, std = _residual_and_predictive_std(posterior, registry, calib)
+    scores = np.sort(np.abs(residual) / std)
+    n = scores.size
+    rank = min(n, int(math.ceil((n + 1) * (1.0 - alpha))))
+    return float(scores[rank - 1])
+
+
+def recalibrate(
+    posterior: PosteriorField3D,
+    registry: ForwardOperatorRegistry,
+    held_out: list[Observation],
+    *,
+    alpha: float = 0.1,
+) -> tuple[PosteriorField3D, Recalibration]:
+    """Rescale ``posterior`` so its held-out coverage actually matches ``1 - alpha``.
+
+    Computes the chi-square :func:`variance_inflation_factor` ``s`` on ``held_out`` and returns a new
+    :class:`PosteriorField3D` with covariance scaled by ``s ** 2``: dense ``cov`` is multiplied by
+    ``s ** 2``; sparse ``precision`` is divided by ``s ** 2`` (an inflated covariance is a shrunk
+    precision); ``low_rank``/``diag_var`` are scaled by ``s``/``s ** 2`` respectively so the
+    reconstructed covariance ``low_rank @ low_rank.T + diag(diag_var)`` matches the dense case exactly.
+    The mean/MAP are left untouched -- recalibration corrects the posterior's claimed spread, not its
+    point estimate. The companion :func:`split_conformal_quantile` is computed on the same split and
+    reported alongside as a distribution-free honesty check.
+    """
+    inflation = variance_inflation_factor(posterior, registry, held_out)
+    quantile = split_conformal_quantile(posterior, registry, held_out, alpha=alpha)
+    scale = inflation**2
+
+    if posterior.cov is not None:
+        rescaled = replace(posterior, cov=posterior.cov * scale)
+    elif posterior.precision_factor is not None:
+        new_precision = posterior.precision_factor.precision / scale
+        rescaled = replace(posterior, precision_factor=SparsePosteriorPrecision(new_precision))
+    else:
+        low_rank = None if posterior.low_rank is None else posterior.low_rank * inflation
+        diag_var = None if posterior.diag_var is None else posterior.diag_var * scale
+        rescaled = replace(posterior, low_rank=low_rank, diag_var=diag_var)
+
+    return rescaled, Recalibration(inflation=inflation, conformal_quantile=quantile, alpha=alpha)
+
+
+# Aliases matching the `*_check` naming convention so later hooks can standardize on it without
+# breaking the original names other Workstream A/C/G/J call sites already import.
+truth_coverage_check = truth_coverage
+uncertainty_inflation_check = uncertainty_inflation
+identifiability_diagnostic_check = identifiability_diagnostic
