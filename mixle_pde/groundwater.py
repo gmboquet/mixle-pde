@@ -1,62 +1,48 @@
-"""Groundwater contaminant transport and Bayesian source inversion (workstream G, card G2).
+"""Groundwater flow, reactive solute transport, and contaminant source inversion (workstream G).
 
-**Scope note.** The work plan's G1 card ("Groundwater flow + reactive solute-transport operator")
-owns a full :class:`GroundwaterTransportOperator` built on a Darcy-flow velocity solve
-(``darcy_velocity``, via ``multiphysics.solve_poisson``) plus an Ogata-Banks analytic-plume helper,
-with its own dedicated test suite. As of this change G1 had not landed on ``release/0.8.0`` (there was
-no ``mixle_pde/groundwater.py`` and no merged ``work/g1-*`` branch), yet this card (G2, "Contaminant
-source inversion") is specified to depend on it. G2's own inversion only ever needs a transport
-operator with a *given, fixed* velocity field -- it never calls ``darcy_velocity`` -- so rather than
-block on G1 landing, this module ships the narrow slice of the operator G2 actually consumes: a
-Kronecker-sum generalization of :func:`mixle_pde.dynamics.laplacian_matrix` /
-:func:`mixle_pde.dynamics.upwind_gradient_matrix` to an n-axis structured grid, with retardation and
-first-order decay. It matches G1's frozen constructor signature exactly and registers under the same
-``"groundwater"`` dynamics-operator name, so when a fuller G1 implementation (the Darcy solve, the
-Ogata-Banks helper) lands it is additive on top of this file, not a rewrite of it.
+Two cards share this module:
 
-The inversion itself (:func:`invert_source`) recovers a posterior over an unknown contaminant
-source's ``(location, rate, onset time)`` from noisy concentration time series at a handful of
-monitoring wells -- exactly the "contaminant source through downstream concentrations" example in
-:mod:`mixle_pde.inverse`'s own module docstring. It is built on:
+* **G1** ("Groundwater flow + reactive solute-transport operator") owns :func:`darcy_velocity` (steady
+  Darcy flow, via :func:`mixle_pde.multiphysics.solve_poisson`), :class:`GroundwaterTransportOperator`
+  (a :class:`~mixle_pde.dynamics.DynamicsOperator` for reactive solute transport in a -- possibly
+  spatially varying -- velocity field: per-axis upwind advection, velocity-dependent dispersion,
+  first-order decay, and linear retardation), and :func:`ogata_banks_plume` (the classic 1-D
+  continuous-injection analytic solution used to validate the operator against a textbook result).
+* **G2** ("Contaminant source inversion") recovers a posterior over an unknown contaminant source's
+  ``(location, rate, onset time)`` from noisy concentration time series at a handful of monitoring
+  wells, built on top of :class:`GroundwaterTransportOperator` -- see :func:`invert_source`.
 
-* :class:`mixle_pde.inverse.Differential` -- wraps the transport PDE as an observation whose forward
-  model is the time-stepped solve, fit via ``mixle.ppl.field.joint([...]).fit(how="laplace")``.
-* A domain-box reparameterization for the source location: ``free(ndim, support="real")`` declares an
-  *unconstrained* latent, which the forward model squashes through a sigmoid and affine-maps onto the
-  operator's domain box. ``mixle.ppl.field`` recognizes only ``support in {"real", "positive"}`` on
-  this Laplace/Differential fitting path -- there is no native "box" support -- so ``loc_support="box"``
-  is realized as this reparameterization rather than inventing a new support kind on that frozen surface.
-* A chi-square variance-inflation + split-conformal recalibration on a held-out subset of the wells, in
-  the spirit of workstream A3's ``posterior_calibration.recalibrate`` recipe (chi-square inflation plus
-  a split-conformal quantile from held-out residuals). A3's ``recalibrate`` has since landed on
-  ``release/0.8.0``, but it is typed against :class:`mixle_pde.latent.PosteriorField3D` and
-  :class:`mixle_pde.observations.ForwardOperatorRegistry` -- it recalibrates the dense 3-D spatial
-  field-inversion posterior through each observation kind's *linear* ``local_jacobian``. The
-  ``Differential``/``joint(...).fit("laplace")`` path used here instead produces a low-dimensional
-  (location, rate, onset) driver posterior from a genuinely nonlinear forward model, so A3's function
-  cannot be called directly against it. The same algorithm (chi-square inflation, split-conformal
-  quantile from a held-out split) is therefore implemented directly against that driver posterior below.
-
-The returned posterior structurally satisfies the frozen IC-1 ``Posterior`` protocol
-(``mixle/mixle/reason/posterior_protocol.py``, work-plan contracts.md): ``.samples(n, rng)``, ``.mean``,
-``.cov``, ``.credible_interval(level)``, ``.derived_quantity(fn, n, rng)``. That module lives in the
-core ``mixle`` distribution and had not landed as of this change either; since editing core ``mixle``
-is outside this (mixle-pde-only) task's repo scope, :class:`SourcePosterior` duck-types the protocol
-exactly rather than importing and asserting ``isinstance`` against it.
+**Scope note.** G2 was implemented before G1 landed on ``release/0.8.0``; since G2's inversion only
+ever needs a transport operator with a *given, fixed* velocity field (it never calls
+:func:`darcy_velocity`), G2 originally shipped a narrower stand-in operator (uniform per-axis velocity
+only, no Darcy coupling) under the same ``mixle_pde.groundwater`` module and ``"groundwater"``
+dynamics-operator registry name, by design "additive on top of [G1] once it lands, not a rewrite of
+it" (G2's own words). Landing G1 folds that stand-in into the fuller implementation below:
+:class:`GroundwaterTransportOperator` now accepts BOTH a full per-cell velocity field (G1's spatially
+varying Darcy-flow case) and a uniform per-axis velocity vector (G2's shorthand, broadcast to a
+spatially-constant field), and a per-axis dispersivity array (G2's anisotropic-dispersion shorthand,
+generalizing G1's single scalar dispersivity), and exposes the grid bookkeeping (``coords``,
+``domain_bounds``, ``nearest_index``) G2's source-inversion code needs, so neither card's own test
+suite has to change.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
+from scipy.special import erfc
 
 from mixle_pde.dynamics import DynamicsOperator, laplacian_matrix, register_dynamics_operator, upwind_gradient_matrix
+from mixle_pde.multiphysics import solve_poisson
 from mixle_pde.observations import Observation
 
 __all__ = [
+    "darcy_velocity",
     "GroundwaterTransportOperator",
+    "ogata_banks_plume",
     "SourceRecalibration",
     "HeldOutPrediction",
     "SourcePosterior",
@@ -65,75 +51,162 @@ __all__ = [
 ]
 
 
+def _shape_tuple(shape: Any) -> tuple[int, ...]:
+    return tuple(int(s) for s in np.atleast_1d(shape))
+
+
+def _spacing_tuple(spacing: Any, ndim: int) -> tuple[float, ...]:
+    if np.isscalar(spacing):
+        return tuple(float(spacing) for _ in range(ndim))
+    arr = np.atleast_1d(np.asarray(spacing, dtype=float))
+    if arr.size != ndim:
+        raise ValueError(f"spacing must be a scalar or length {ndim} (one per axis); got size {arr.size}.")
+    return tuple(float(s) for s in arr)
+
+
+def darcy_velocity(
+    hydraulic_conductivity: Any,
+    source: Any,
+    shape: Any,
+    *,
+    spacing: Any = 1.0,
+    bc: str = "neumann",
+) -> np.ndarray:
+    """Steady Darcy specific-discharge field ``q = -K grad h`` on a structured grid.
+
+    ``h`` is the steady head solving ``-div(K grad h) = source`` via
+    :func:`mixle_pde.multiphysics.solve_poisson` (``source`` plays the role of a pumping/
+    injection/recharge term: positive where water is added, negative where it is withdrawn;
+    the domain boundary is held at the solver's default fixed head of 0, i.e. a far-field
+    aquifer boundary). ``q`` is then formed by a cell-centred (central-difference) gradient of
+    ``h``, scaled by ``-K``, generalizing the scalar ``velocity`` of
+    :class:`~mixle_pde.dynamics.AdvectionDiffusionOperator` to a spatially-varying field.
+
+    Returns an ``(ndim, *shape)`` array: one flux component per grid axis.
+
+    ``bc`` controls only the boundary treatment of that gradient (``solve_poisson`` itself has
+    no Neumann option, just a fixed-head Dirichlet boundary): ``"neumann"`` (the default) zeroes
+    the outward-normal flux component at the two faces of each axis (a closed, no-flow bounding
+    box -- the common assumption when the domain edge is just a numerical truncation, not a real
+    hydraulic boundary); anything else keeps the one-sided finite difference there instead (an
+    open boundary, letting water cross the edge -- consistent with the fixed-head condition
+    ``solve_poisson`` already applies at those same nodes).
+    """
+    shp = _shape_tuple(shape)
+    ndim = len(shp)
+    spc = _spacing_tuple(spacing, ndim)
+    head = solve_poisson(shp, source, hydraulic_conductivity, spacing=spacing)
+    k_field = (
+        float(hydraulic_conductivity)
+        if np.isscalar(hydraulic_conductivity)
+        else np.asarray(hydraulic_conductivity, dtype=float).reshape(shp)
+    )
+    grads = np.gradient(head, *spc) if ndim > 1 else [np.gradient(head, spc[0])]
+    q = np.empty((ndim, *shp), dtype=float)
+    for axis in range(ndim):
+        g = np.asarray(grads[axis], dtype=float)
+        if bc == "neumann":
+            g = g.copy()
+            face = [slice(None)] * ndim
+            face[axis] = 0
+            g[tuple(face)] = 0.0
+            face[axis] = -1
+            g[tuple(face)] = 0.0
+        q[axis] = -k_field * g
+    return q
+
+
+def _kron_axis(mat_1d: np.ndarray, axis: int, shape: tuple[int, ...]) -> np.ndarray:
+    """Kronecker-expand a 1-D ``(n_axis, n_axis)`` operator to act along ``axis`` of an n-D grid.
+
+    The grid is flattened in NumPy's default (row-major / C) order, for which the operator
+    acting only along ``axis`` is the Kronecker product of an identity on every other axis with
+    ``mat_1d`` in position ``axis`` -- the standard construction for a multi-dimensional finite-
+    difference operator built from 1-D stencils.
+    """
+    out = None
+    for ax, n_ax in enumerate(shape):
+        block = mat_1d if ax == axis else np.eye(n_ax)
+        out = block if out is None else np.kron(out, block)
+    return out
+
+
 class GroundwaterTransportOperator(DynamicsOperator):
-    """Advection-dispersion-decay-retardation solute transport on a structured n-axis grid.
+    """Reactive solute transport advected by a (possibly spatially varying) Darcy velocity.
 
-    ``du/dt = -(1/R)[v . grad u] + div(D grad u) - lambda u``, discretized by embedding the 1-D
-    :func:`~mixle_pde.dynamics.laplacian_matrix` / :func:`~mixle_pde.dynamics.upwind_gradient_matrix`
-    stencils for each axis into the full grid via a Kronecker sum (the standard construction for a
-    separable operator on a structured grid: axis ``i``'s 1-D operator embedded as
-    ``I x ... x M_i x ... x I``, identity on every other axis). ``shape`` is the grid's per-axis point
-    count (e.g. ``(nx, ny)`` for a 2-D aquifer slice); ``velocity_field`` is a per-axis (uniform-in-
-    space) Darcy velocity; ``dispersivity`` is a per-axis dispersivity, scaled by the flow *speed*
-    (``|velocity_field|``) into a per-axis dispersion coefficient, plus a small molecular-diffusion
-    floor so a zero-velocity axis still disperses.
+    Generalizes :class:`~mixle_pde.dynamics.AdvectionDiffusionOperator`'s single scalar
+    ``velocity`` to a per-cell velocity field (e.g. from :func:`darcy_velocity`), and adds
+    velocity-dependent dispersion, first-order decay, and linear retardation on top:
 
-    A spatially-varying velocity field (the general Darcy-flow case) is G1's remit, not implemented
-    here -- see the module scope note.
+        R du/dt = -v . grad(u) + div(D grad u) - lambda u,   D_axis = alpha_axis |v| + D_mol
+
+    ``velocity_field`` accepts three shapes: the full ``(ndim, *shape)`` per-cell field
+    :func:`darcy_velocity` returns; for a 1-D ``shape`` a plain ``(n,)`` array as shorthand for
+    ``(1, n)``; or a length-``ndim`` vector, a spatially UNIFORM per-axis velocity broadcast to
+    the full field (the shorthand a fixed, given velocity -- e.g. G2's contaminant-source
+    inversion, which never solves for the Darcy field itself -- uses). ``dispersivity`` (the
+    longitudinal dispersivity ``alpha_L``) accepts either one scalar shared by every axis or a
+    length-``ndim`` per-axis array (anisotropic dispersion); either way it is scaled by the local
+    flow *speed* ``|v|`` (a per-cell field when ``velocity_field`` is spatially varying) plus a
+    constant ``molecular_diffusion`` floor ``D_mol``. ``decay`` (``lambda``) and ``retardation``
+    (``R``) may be scalars or per-cell arrays (shape ``shape``).
     """
 
     def __init__(
         self,
-        velocity_field,
-        dispersivity,
-        shape,
+        velocity_field: Any,
+        dispersivity: Any,
+        shape: Any,
         *,
-        retardation: float = 1.0,
-        decay: float = 0.0,
-        spacing: float = 1.0,
+        retardation: Any = 1.0,
+        decay: Any = 0.0,
+        spacing: Any = 1.0,
         bc: str = "neumann",
         scheme: str = "implicit",
+        molecular_diffusion: float = 0.0,
     ) -> None:
-        if scheme not in ("implicit", "explicit", "exact"):
-            raise ValueError("scheme must be 'implicit', 'explicit', or 'exact'.")
-        self.shape = tuple(int(s) for s in shape)
-        if len(self.shape) == 0:
-            raise ValueError("shape must have at least one axis.")
+        self.shape = _shape_tuple(shape)
         if any(s < 3 for s in self.shape):
             raise ValueError("each grid axis needs at least 3 points.")
-        ndim = len(self.shape)
-
-        self.bc = bc
-        self.scheme = scheme
-        self.retardation = float(retardation)
-        if self.retardation <= 0.0:
+        self.ndim = len(self.shape)
+        n = int(np.prod(self.shape))
+        super().__init__(n=n, length=1.0, bc=bc, scheme=scheme)
+        self.spacing = _spacing_tuple(spacing, self.ndim)
+        self.dispersivity = np.broadcast_to(np.asarray(dispersivity, dtype=float), (self.ndim,)).copy()
+        self.molecular_diffusion = float(molecular_diffusion)
+        if np.isscalar(retardation) and float(retardation) <= 0.0:
             raise ValueError("retardation must be strictly positive.")
-        self.decay = float(decay)
-        self.n = int(np.prod(self.shape))
+        self.decay = self._per_cell(decay)
+        self.retardation = self._per_cell(retardation)
+        self.velocity_field = self._normalize_velocity(velocity_field)
 
-        self.spacing = np.broadcast_to(np.asarray(spacing, dtype=float), (ndim,)).copy()
-        self.velocity = np.broadcast_to(np.asarray(velocity_field, dtype=float), (ndim,)).copy()
-        alpha = np.broadcast_to(np.asarray(dispersivity, dtype=float), (ndim,)).copy()
-        speed = float(np.linalg.norm(self.velocity))
-        molecular_floor = 1.0e-6
-        self.diffusion = alpha * speed + molecular_floor
-
+        # Cell-centre coordinates (C-order, matching the Kronecker construction below) and the
+        # physical (lo, hi) domain box -- the grid bookkeeping G2's source inversion snaps
+        # monitoring-well / candidate-source locations onto.
         axes = [np.arange(s) * self.spacing[a] for a, s in enumerate(self.shape)]
         mesh = np.meshgrid(*axes, indexing="ij")
-        self.coords = np.stack([m.reshape(-1) for m in mesh], axis=1)  # (n, ndim), C-order matches kron
+        self.coords = np.stack([m.reshape(-1) for m in mesh], axis=1)  # (n, ndim)
 
-        self._lap = [laplacian_matrix(s, self.spacing[a], bc) for a, s in enumerate(self.shape)]
-        self._grad = [
-            upwind_gradient_matrix(s, self.spacing[a], self.velocity[a], bc) for a, s in enumerate(self.shape)
-        ]
+    def _per_cell(self, value: Any) -> float | np.ndarray:
+        if np.isscalar(value):
+            return float(value)
+        return np.asarray(value, dtype=float).reshape(self.shape)
 
-    def _embed(self, mats: list[np.ndarray], axis: int) -> np.ndarray:
-        """Kronecker-embed a per-axis 1-D matrix into the full grid operator (identity on other axes)."""
-        out = mats[axis] if axis == 0 else np.eye(self.shape[0])
-        for a in range(1, len(self.shape)):
-            factor = mats[axis] if a == axis else np.eye(self.shape[a])
-            out = np.kron(out, factor)
-        return out
+    def _normalize_velocity(self, velocity_field: Any) -> np.ndarray:
+        vf = np.asarray(velocity_field, dtype=float)
+        full_shape = (self.ndim, *self.shape)
+        if vf.shape == full_shape:
+            return vf
+        if self.ndim == 1 and vf.shape == self.shape:
+            return vf[np.newaxis, ...]
+        if vf.shape == (self.ndim,):
+            # A spatially uniform per-axis velocity (G2's shorthand): broadcast to the full field.
+            broadcast_shape = (self.ndim,) + (1,) * self.ndim
+            return np.broadcast_to(vf.reshape(broadcast_shape), full_shape).copy()
+        raise ValueError(
+            f"velocity_field must have shape {full_shape}, {self.shape} (ndim == 1 shorthand), "
+            f"or ({self.ndim},) (uniform per-axis); got {vf.shape}."
+        )
 
     @property
     def domain_bounds(self) -> tuple[np.ndarray, np.ndarray]:
@@ -141,22 +214,66 @@ class GroundwaterTransportOperator(DynamicsOperator):
         hi = np.array([(s - 1) * self.spacing[a] for a, s in enumerate(self.shape)])
         return np.zeros_like(hi), hi
 
-    def nearest_index(self, point) -> int:
+    def nearest_index(self, point: Any) -> int:
         """The flat cell index whose centre is closest to ``point`` (an ``(ndim,)``-ish coordinate)."""
         point = np.asarray(point, dtype=float).reshape(-1)[: self.coords.shape[1]]
         d2 = np.sum((self.coords - point) ** 2, axis=1)
         return int(np.argmin(d2))
 
     def operator_matrix(self) -> np.ndarray:
-        g = np.zeros((self.n, self.n), dtype=float)
-        for axis in range(len(self.shape)):
-            g += self.diffusion[axis] * self._embed(self._lap, axis)
-            g -= (self.velocity[axis] / self.retardation) * self._embed(self._grad, axis)
-        g -= self.decay * np.eye(self.n)
-        return g
+        """``-(1/R)[v . grad] + div(D grad) - lambda`` -- ``R`` divides the whole transient term."""
+        n = self.n
+        speed = np.sqrt(sum(self.velocity_field[axis] ** 2 for axis in range(self.ndim)))
+
+        advection = np.zeros((n, n))
+        dispersion = np.zeros((n, n))
+        for axis in range(self.ndim):
+            n_axis = self.shape[axis]
+            h_axis = self.spacing[axis]
+            lap_full = _kron_axis(laplacian_matrix(n_axis, h_axis, self.bc), axis, self.shape)
+            g_pos_full = _kron_axis(upwind_gradient_matrix(n_axis, h_axis, 1.0, self.bc), axis, self.shape)
+            g_neg_full = _kron_axis(upwind_gradient_matrix(n_axis, h_axis, -1.0, self.bc), axis, self.shape)
+
+            q_flat = self.velocity_field[axis].reshape(-1)
+            upwind_selected = np.where((q_flat >= 0.0)[:, None], g_pos_full, g_neg_full)
+            advection += -(q_flat[:, None] * upwind_selected)
+
+            dispersion_field_axis = self.dispersivity[axis] * speed + self.molecular_diffusion
+            dispersion += dispersion_field_axis.reshape(-1)[:, None] * lap_full
+
+        decay_diag = np.full(n, self.decay) if np.isscalar(self.decay) else self.decay.reshape(-1)
+        raw = advection + dispersion - np.diag(decay_diag)
+        if np.isscalar(self.retardation):
+            return raw / self.retardation
+        return raw / self.retardation.reshape(-1)[:, None]
 
 
 register_dynamics_operator("groundwater", GroundwaterTransportOperator)
+
+
+def ogata_banks_plume(x: Any, t: Any, velocity: float, dispersion: float, *, c0: float = 1.0) -> np.ndarray:
+    """Ogata & Banks (1961) analytic 1-D continuous-injection solute plume.
+
+    The exact solution of ``dC/dt = -v dC/dx + D d^2C/dx^2`` on a semi-infinite column
+    ``x >= 0`` with concentration held at ``c0`` at ``x=0`` for all ``t>0`` and ``C(x,0)=0``:
+
+        C(x,t)/c0 = 1/2 [erfc((x - v t)/(2 sqrt(D t))) + exp(v x / D) erfc((x + v t)/(2 sqrt(D t)))]
+
+    ``x`` and ``t`` broadcast against each other (an array of positions at one time, an array of
+    times at one position, or a matching pair of arrays). The reflected second term underflows
+    to (correctly) zero for large ``v x / D`` before ``exp`` can overflow.
+    """
+    x = np.asarray(x, dtype=float)
+    t = np.asarray(t, dtype=float)
+    v = float(velocity)
+    d = float(dispersion)
+    t_safe = np.where(t > 0.0, t, np.nan)
+    root = 2.0 * np.sqrt(d * t_safe)
+    term1 = erfc((x - v * t_safe) / root)
+    exponent = np.clip(v * x / d, None, 700.0)
+    term2 = np.where(v * x / d > 700.0, 0.0, np.exp(exponent) * erfc((x + v * t_safe) / root))
+    c = 0.5 * c0 * (term1 + term2)
+    return np.where(t > 0.0, np.nan_to_num(c, nan=0.0), 0.0)
 
 
 # --------------------------------------------------------------------------- shared forward physics
