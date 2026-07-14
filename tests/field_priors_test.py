@@ -128,18 +128,24 @@ class SpatioTemporalPriorTest(unittest.TestCase):
     def test_temporal_precision_couples_adjacent_times(self):
         spatial = _grid()
         field = Field4D(spatial, times=np.array([0.0, 1.0, 3.0]))
+        marginal_precision = 1.0
         prior = SpatioTemporalGaussianPrior(
-            FieldGaussianPrior(mean=0.0, smoothness_precision=0.0, marginal_precision=0.0, length_scale=25.0),
+            FieldGaussianPrior(
+                mean=0.0, smoothness_precision=0.0, marginal_precision=marginal_precision, length_scale=25.0
+            ),
             temporal_precision=2.0,
         )
         q = prior.precision(field)
         n = spatial.n
 
+        # off-diagonal (cross-time) entries come only from the temporal random-walk term, so they are
+        # unaffected by the spatial prior's marginal_precision.
         self.assertLess(q[0, n], 0.0)
         self.assertLess(q[n, 2 * n], 0.0)
         self.assertAlmostEqual(abs(q[0, n]), 2.0)
         self.assertAlmostEqual(abs(q[n, 2 * n]), 1.0)
-        self.assertAlmostEqual(q[n, n], 3.0)
+        # the diagonal additionally carries the spatial prior's own marginal_precision, once per time block.
+        self.assertAlmostEqual(q[n, n], 3.0 + marginal_precision)
 
     def test_negative_temporal_precision_raises(self):
         with self.assertRaises(ValueError):
