@@ -12,11 +12,14 @@ transform is the identity):
 * :func:`section` -- a marginal summary over an axis-aligned plane (thin wrapper on
   :meth:`PosteriorField3D.slice`).
 * :func:`region_summary` -- mean / std of every cell inside a boolean region mask.
-* :func:`derived_quantity` -- the EXACT Gaussian posterior of a linear functional ``w . m`` of the field
-  (mean ``w . mu``, variance ``w^T Sigma w``); the honest way to ask "total anomalous mass in this
-  block" or "average grade in this zone" and get a mean AND an uncertainty, since a linear functional of
-  a Gaussian is Gaussian in closed form. :func:`region_mass` is the common special case (sum of
-  ``field * cell_volume`` over a region).
+* :func:`derived_quantity` -- the posterior of a linear functional ``w . m`` of the field: EXACT
+  closed-form Gaussian (mean ``w . mu``, variance ``w^T Sigma w``) for an unbounded field, since a
+  linear functional of a Gaussian is Gaussian in closed form; for a *bounded* field (log/logit
+  transform) that closed form is a linear functional of the wrong (unconstrained) space, so this
+  dispatches to :func:`derived_quantity_physical` instead. :func:`region_mass` is the common special
+  case (sum of ``field * cell_volume`` over a region), with the same bounded-field dispatch.
+* :func:`derived_quantity_physical` -- the sample-based physical-units functional used for bounded
+  fields (and available directly for any Gaussian posterior).
 * :func:`sampled_derived_quantity` -- the empirical version for sampled posteriors, preserving
   non-Gaussian shape by carrying derived samples.
 
@@ -244,16 +247,26 @@ class SampledDerivedQuantity:
         return float(lo), float(hi)
 
 
-def derived_quantity(posterior: PosteriorField3D, weights) -> DerivedQuantity:
-    """Exact posterior of the linear functional ``w . m``: mean ``w . mu``, variance ``w^T Sigma w``.
+def derived_quantity(
+    posterior: PosteriorField3D, weights, *, n: int = 4096, rng: np.random.Generator | None = None
+) -> DerivedQuantity | SampledDerivedQuantity:
+    """Posterior of the linear functional ``w . m``, in physical units.
 
-    Acts on the field's (unconstrained) Gaussian variable -- exact in physical units when the transform
-    is the identity (``bounds=None``), which is the case for the linear-Gaussian inversion path. A
-    linear functional of a Gaussian is Gaussian, so this is closed-form, not sampled.
+    Exact closed-form Gaussian (mean ``w . mu``, variance ``w^T Sigma w``) when ``posterior.grid.bounds
+    is None`` -- the field's unconstrained-to-physical map is then the identity, so a linear functional
+    of the unconstrained Gaussian *is* the physical-unit functional, and a linear functional of a
+    Gaussian is Gaussian, so this is closed-form, not sampled.
+
+    When the field is bounded (log/logit transform) that identity breaks: ``w . g(mu)`` is ``g`` of a
+    linear functional of the unconstrained mean, not ``E[w . g(X)]``, and the two can differ by tens of
+    percent. In that case this dispatches to :func:`derived_quantity_physical`, which draws physical-unit
+    samples instead. ``n``/``rng`` are only used on that sampled path.
     """
     w = np.asarray(weights, dtype=float).reshape(-1)
     if w.shape != (posterior.grid.n,):
         raise ValueError(f"weights must have shape ({posterior.grid.n},).")
+    if posterior.grid.bounds is not None:
+        return derived_quantity_physical(posterior, w, n=n, rng=rng)
     mean = float(w @ posterior.mean)
     if posterior.cov is not None:
         var = float(w @ posterior.cov @ w)
@@ -268,6 +281,25 @@ def derived_quantity(posterior: PosteriorField3D, weights) -> DerivedQuantity:
     return DerivedQuantity(mean=mean, std=float(np.sqrt(max(var, 0.0))))
 
 
+def derived_quantity_physical(
+    posterior: PosteriorField3D, weights, *, n: int = 4096, rng: np.random.Generator | None = None
+) -> SampledDerivedQuantity:
+    """Sampled posterior of the linear functional ``w . g(X)`` in PHYSICAL units.
+
+    The correct path for bounded fields: :meth:`PosteriorField3D.sample` already maps unconstrained
+    draws through ``grid.from_unconstrained``, so ``s @ weights`` is an empirical draw of the physical-
+    unit functional for every one of the ``n`` samples -- unlike the closed-form Gaussian in
+    :func:`derived_quantity`, which is only exact when the unconstrained-to-physical map is the identity.
+    """
+    w = np.asarray(weights, dtype=float).reshape(-1)
+    if w.shape != (posterior.grid.n,):
+        raise ValueError(f"weights must have shape ({posterior.grid.n},).")
+    if rng is None:
+        rng = np.random.default_rng()
+    s = posterior.sample(int(n), rng)
+    return SampledDerivedQuantity(s @ w)
+
+
 def sampled_derived_quantity(posterior: PosteriorFieldSamples3D, weights) -> SampledDerivedQuantity:
     """Empirical posterior of a linear functional over physical posterior samples."""
     w = np.asarray(weights, dtype=float).reshape(-1)
@@ -276,18 +308,24 @@ def sampled_derived_quantity(posterior: PosteriorFieldSamples3D, weights) -> Sam
     return SampledDerivedQuantity(posterior.physical_samples @ w)
 
 
-def region_mass(posterior: Posterior3D, mask, cell_volumes) -> DerivedQuantity | SampledDerivedQuantity:
+def region_mass(
+    posterior: Posterior3D, mask, cell_volumes, *, n: int = 4096, rng: np.random.Generator | None = None
+) -> DerivedQuantity | SampledDerivedQuantity:
     """Posterior of total anomalous mass in a region: ``sum_{i in mask} field_i * volume_i``.
 
-    The common derived quantity for a subsurface body -- a mean tonnage/mass AND its uncertainty, in one
-    closed-form Gaussian for Gaussian posteriors or as derived samples for empirical posteriors.
+    The common derived quantity for a subsurface body -- a mean tonnage/mass AND its uncertainty. Three
+    paths, depending on the posterior: derived samples for an already-empirical posterior; a closed-form
+    Gaussian for an unbounded Gaussian posterior; and, for a *bounded* Gaussian posterior (``field`` is a
+    log/logit transform of the underlying Gaussian), the sample path via :func:`derived_quantity_physical`
+    -- the closed form there is a linear functional of the wrong (unconstrained) space. ``n``/``rng`` are
+    only used on the sampled paths.
     """
     mask = np.asarray(mask, dtype=bool)
     vols = np.broadcast_to(np.asarray(cell_volumes, dtype=float), (posterior.grid.n,))
     weights = np.where(mask, vols, 0.0)
     if isinstance(posterior, PosteriorFieldSamples3D):
         return sampled_derived_quantity(posterior, weights)
-    return derived_quantity(posterior, weights)
+    return derived_quantity(posterior, weights, n=n, rng=rng)
 
 
 def region_mass_time_series(posterior: Posterior4D, mask, cell_volumes) -> DerivedTimeSeries:
