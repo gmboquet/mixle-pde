@@ -63,14 +63,17 @@ def field_direction(inclination_deg, declination_deg):
 
 
 def magnetic_dipole_sensitivity(obs, cells, volumes, *, inclination, declination, field_nt=50000.0):
-    r"""Linear sensitivity matrix ``G`` (n_obs x n_cells) of the magnetic **total-field anomaly** to cell
-    susceptibility, under the induced-magnetization dipole approximation (each cell a point dipole along the
-    ambient field). With susceptibility ``kappa`` (SI, dimensionless), ``d = G @ kappa`` gives the anomaly in nT.
+    r"""COARSE-MESH APPROXIMATION -- not field-ready; exact prism kernels are C4. This is the
+    induced-magnetization point-dipole approximation (each cell a point dipole along the ambient field); the
+    exact rectangular-prism formula (Bhattacharyya 1964) is the rigorous alternative.
+
+    Linear sensitivity matrix ``G`` (n_obs x n_cells) of the magnetic **total-field anomaly** to cell
+    susceptibility. With susceptibility ``kappa`` (SI, dimensionless), ``d = G @ kappa`` gives the anomaly in nT.
 
     For a cell of volume ``V`` at displacement ``r`` from an observation point, with field unit vector ``b``
     and strength ``T0``: ``dT = (T0 V / 4pi) (3 (b.r_hat)^2 - 1) / |r|^3 * kappa`` -- the standard dipole
     total-field kernel. This is the cheap, robust approximation good for coarse meshes and observations above
-    the cells; the exact rectangular-prism formula (Bhattacharyya 1964) is the rigorous alternative.
+    the cells.
 
     Args:
         obs: (n_obs, 3) observation coordinates (east, north, up), metres.
@@ -93,14 +96,16 @@ def magnetic_dipole_sensitivity(obs, cells, volumes, *, inclination, declination
 
 
 def gravity_point_sensitivity(obs, cells, volumes):
-    r"""Linear sensitivity matrix ``G`` (n_obs x n_cells) of the **vertical gravity anomaly** to cell density
-    contrast, under the point-mass approximation (each cell a point mass at its centre). With density contrast
-    ``rho`` (kg/m^3), ``d = G @ rho`` gives the anomaly in **mGal**.
+    r"""COARSE-MESH APPROXIMATION -- not field-ready; exact prism kernels are C4. This is the point-mass
+    approximation (each cell a point mass at its centre); the exact rectangular-prism formula (Nagy 1966 /
+    Plouff 1976) is the rigorous alternative for coarse meshes near observations.
+
+    Linear sensitivity matrix ``G`` (n_obs x n_cells) of the **vertical gravity anomaly** to cell density
+    contrast. With density contrast ``rho`` (kg/m^3), ``d = G @ rho`` gives the anomaly in **mGal**.
 
     For a cell of volume ``V`` at displacement ``r`` from an observation point (vertical offset ``dz``, with
     ``z`` up so the cell is below): ``g_z = 1e5 * G_grav * V * dz / |r|^3 * rho`` (the ``1e5`` converts
-    m/s^2 to mGal). Linear in ``rho``. The exact rectangular-prism formula (Nagy 1966 / Plouff 1976) is the
-    rigorous alternative for coarse meshes near observations.
+    m/s^2 to mGal). Linear in ``rho``.
 
     Args:
         obs: (n_obs, 3) observation coordinates (east, north, up), metres.

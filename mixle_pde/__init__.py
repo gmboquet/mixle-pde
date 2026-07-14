@@ -83,7 +83,9 @@ from mixle_pde.electrostatics import linearized_pbe, nonlinear_pbe, reaction_fie
 from mixle_pde.em_diffusion import layered_mt_impedance, mt_2d_te
 from mixle_pde.em_diffusion_3d import assemble_curl_curl_3d, csem_3d, mt_3d
 
-# realistic sonar/radar propagation (part 3): full-wave reference, asymptotic ray/PO scattering, real-data layer
+# realistic sonar/radar propagation (part 3): full-wave reference, asymptotic ray/PO scattering,
+# ocean/atmosphere environmental-medium loaders (sonar/radar); NOT the geophysical-survey ingest
+# layer — see workstream B
 from mixle_pde.env_data import (
     apply_mask,
     assemble_field,

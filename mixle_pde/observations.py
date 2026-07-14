@@ -109,6 +109,12 @@ class ForwardOperator:
     adjoint. ``jacobian_at_values(grid, field_values, obs_locations) -> (n, grid.n)`` declares a
     nonlinear operator that can still expose a local linearization for Gauss-Newton. Linear Gaussian
     inference accepts only the fixed-Jacobian form; nonlinear MAP/Laplace inference can use either.
+
+    ``jacobian_kind='finite_difference'`` (with ``finite_difference_step`` recorded) means the local
+    Jacobian above is central-difference: O(2n) forward solves per evaluation, one per model parameter,
+    versus a single solve for a true adjoint. Every nonlinear DC/EM operator in this module (DC
+    resistivity, layered MT, AEM, 2-D/3-D MT, CSEM) currently uses this reference path; adjoint
+    sensitivities are C1.
     """
 
     kind: str
@@ -395,7 +401,8 @@ def layered_mt_forward_operator(
 
     The local Jacobian is central finite-difference in the log-conductivity parameters. This is a
     deterministic reference path for Gauss-Newton/Laplace posterior construction; large production MT
-    inversions should replace it with an adjoint sensitivity.
+    inversions should replace it with an adjoint sensitivity. (finite-difference Jacobian: O(2n) forward
+    solves; adjoint sensitivities are C1)
     """
     if finite_difference_step <= 0.0:
         raise ValueError("finite_difference_step must be positive.")
@@ -491,7 +498,8 @@ def aem_layered_forward_operator(
 
     The local Jacobian is central finite-difference in the log-conductivity parameters. This is the
     validated 1-D frequency-domain AEM reference path; production flight-line/loop geometry should use a
-    dedicated airborne-source adjoint.
+    dedicated airborne-source adjoint. (finite-difference Jacobian: O(2n) forward solves; adjoint
+    sensitivities are C1)
     """
     if finite_difference_step <= 0.0:
         raise ValueError("finite_difference_step must be positive.")
@@ -588,7 +596,8 @@ def mt_2d_te_forward_operator(
 
     The local Jacobian is central finite-difference in the log-conductivity parameters. This is a
     small/medium reference path for posterior construction; production 2-D MT inversion should replace
-    it with an adjoint sensitivity.
+    it with an adjoint sensitivity. (finite-difference Jacobian: O(2n) forward solves; adjoint
+    sensitivities are C1)
     """
     if finite_difference_step <= 0.0:
         raise ValueError("finite_difference_step must be positive.")
@@ -691,7 +700,8 @@ def mt_3d_forward_operator(
 
     The local Jacobian is central finite-difference in the log-conductivity parameters. This is a
     reference path for posterior construction and validation; production 3-D MT inversion should use
-    adjoint sensitivities from the curl-curl solve.
+    adjoint sensitivities from the curl-curl solve. (finite-difference Jacobian: O(2n) forward solves;
+    adjoint sensitivities are C1)
     """
     if finite_difference_step <= 0.0:
         raise ValueError("finite_difference_step must be positive.")
@@ -805,7 +815,8 @@ def csem_3d_forward_operator(
 
     The local Jacobian is central finite-difference in log-conductivity. It is a deterministic
     reference path for posterior construction; production CSEM inversion should use an adjoint
-    sensitivity from the curl-curl solve.
+    sensitivity from the curl-curl solve. (finite-difference Jacobian: O(2n) forward solves; adjoint
+    sensitivities are C1)
     """
     if finite_difference_step <= 0.0:
         raise ValueError("finite_difference_step must be positive.")
