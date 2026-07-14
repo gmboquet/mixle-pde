@@ -33,6 +33,7 @@ import numpy as np
 
 from mixle_pde.field_inversion import FieldGaussianPrior, _noise_precision
 from mixle_pde.latent import Field3D, Field4D, PosteriorField3D
+from mixle_pde.linear_solve import dense_spd_solve
 from mixle_pde.observations import ForwardOperatorRegistry, Observation
 
 
@@ -218,7 +219,7 @@ def joint_linear_gaussian_invert(
     rhs[:n] += ra
     rhs[n:] += rb
 
-    cov = np.linalg.inv(lam + jitter * np.eye(2 * n))
+    cov = dense_spd_solve(lam + jitter * np.eye(2 * n), np.eye(2 * n))
     mean = cov @ rhs
     post_a = PosteriorField3D(grid=grid_a, mean=mean[:n], map=mean[:n].copy(), cov=cov[:n, :n])
     post_b = PosteriorField3D(grid=grid_b, mean=mean[n:], map=mean[n:].copy(), cov=cov[n:, n:])

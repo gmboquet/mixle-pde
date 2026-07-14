@@ -35,6 +35,7 @@ import numpy as np
 
 from mixle_pde.field_inversion import FieldGaussianPrior, _noise_precision, linear_gaussian_invert
 from mixle_pde.latent import Field3D, PosteriorField3D
+from mixle_pde.linear_solve import dense_spd_solve
 from mixle_pde.observations import ForwardOperatorRegistry, Observation
 
 
@@ -75,13 +76,17 @@ def gauss_newton_invert(
     max_iter: int = 100,
     tol: float = 1e-5,
     jitter: float = 1.0e-10,
+    factor_cache: dict | None = None,
 ) -> tuple[PosteriorField3D, GaussNewtonReport]:
     """Gauss-Newton MAP + Laplace posterior for a bounded-field linear-observation inversion.
 
     Every observation's operator must declare a Jacobian (linear in the PHYSICAL field). The field's
     ``bounds`` drive the nonlinear transform; an identity-transform field is allowed too (then this
-    reduces to the exact linear-Gaussian solve in one step). Returns the posterior and a convergence
-    report.
+    reduces to the exact linear-Gaussian solve in one step). ``factor_cache`` (see
+    :func:`mixle_pde.linear_solve.make_factor_cache`) is threaded through to the final Laplace-covariance
+    solve so a caller iterating this function (e.g. an outer EM loop refitting the prior) can reuse the
+    Cholesky factor whenever it calls back in with the same Hessian object. Returns the posterior and a
+    convergence report.
     """
     if not observations:
         raise ValueError("need at least one observation to invert.")
@@ -175,7 +180,7 @@ def gauss_newton_invert(
         resid = obs.value - ops[id(obs)].predict_observation(grid, phi, obs)
         misfit += float(resid @ rinvs[id(obs)] @ resid)
 
-    cov = np.linalg.inv(lam + jitter * np.eye(n))
+    cov = dense_spd_solve(lam + jitter * np.eye(n), np.eye(n), factor_cache=factor_cache)
     posterior = PosteriorField3D(grid=grid, mean=u, map=u.copy(), cov=cov)
     report = GaussNewtonReport(
         iterations=len(step_norms), converged=converged, step_norms=step_norms, final_data_misfit=misfit

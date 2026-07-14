@@ -103,6 +103,11 @@ def _integrate_record(step, y0, n_steps, record, torch, checkpoint=None):
     return torch.cat(chunks)
 
 
+def _pattern_key(r: np.ndarray, c: np.ndarray, n: int) -> tuple:
+    """A cheap content hash of a sparsity pattern -- the factor-cache key for :func:`sparse_solve`."""
+    return (int(n), hash(r.tobytes()), hash(c.tobytes()))
+
+
 def _sparse_solve_function(torch):
     """Build (once) the autograd Function bound to this torch import."""
     import scipy.sparse as sp
@@ -110,11 +115,24 @@ def _sparse_solve_function(torch):
 
     class _SparseSolve(torch.autograd.Function):
         @staticmethod
-        def forward(ctx, vals, rows, cols, n, b):
+        def forward(ctx, vals, rows, cols, n, b, factor_cache):
             r = rows.detach().cpu().numpy()
             c = cols.detach().cpu().numpy()
-            A = sp.csc_matrix((vals.detach().cpu().numpy(), (r, c)), shape=(int(n), int(n)))
-            lu = spla.splu(A)
+            vals_np = vals.detach().cpu().numpy()
+            lu = None
+            cache_key = None
+            if factor_cache is not None:
+                # keyed on the (rows, cols, n) pattern; only reused when the cached values also match
+                # exactly, so a caller that mutates the coefficient field never gets a stale factor.
+                cache_key = _pattern_key(r, c, int(n))
+                cached = factor_cache.get(cache_key)
+                if cached is not None and cached[0].shape == vals_np.shape and np.array_equal(cached[0], vals_np):
+                    lu = cached[1]
+            if lu is None:
+                A = sp.csc_matrix((vals_np, (r, c)), shape=(int(n), int(n)))
+                lu = spla.splu(A)
+                if factor_cache is not None:
+                    factor_cache[cache_key] = (vals_np.copy(), lu)
             bnp = b.detach().cpu().numpy()
             u = lu.solve(bnp)
             ctx.lu = lu
@@ -134,7 +152,7 @@ def _sparse_solve_function(torch):
             # dL/dA = -lambda u^H, read only at the (row, col) pattern: grad_vals[k] = -lambda[r_k] conj(u[c_k])
             grad_vals = -lam_t[r] * u[c].conj()
             grad_b = lam_t
-            return grad_vals, None, None, None, grad_b
+            return grad_vals, None, None, None, grad_b, None
 
     return _SparseSolve
 
@@ -151,7 +169,7 @@ def sparse_used_since(reset: bool = False) -> bool:
     return was
 
 
-def sparse_solve(vals, rows, cols, n, b):
+def sparse_solve(vals, rows, cols, n, b, *, factor_cache: dict | None = None):
     """Solve the sparse system ``A u = b`` where ``A = sparse(rows, cols, vals)`` (n x n), with adjoint grads.
 
     ``vals`` (nnz,) and ``b`` (n,) are torch tensors (gradients flow to both); ``rows``/``cols`` are fixed
@@ -160,6 +178,12 @@ def sparse_solve(vals, rows, cols, n, b):
     The adjoint backward uses a factorization (not autograd), so it is first-order only: it powers MAP and
     Gauss-Newton (``how='gauss_newton'``), but a forward using it must not be fit with the second-order
     ``how='laplace'`` (the dense Hessian would be silently wrong); fit_field detects this and raises.
+
+    ``factor_cache`` (see :func:`mixle_pde.linear_solve.make_factor_cache`) is optional and defaults to no
+    caching (identical behaviour to before). When supplied, a repeated call whose ``(rows, cols, n)``
+    pattern AND ``vals`` both match a previous call in the same cache reuses that cached ``splu`` factor
+    instead of refactorizing ``A`` from scratch -- the fix for a stepper that solves the same operator
+    every time step (a fixed coefficient field, only ``b`` changing).
     """
     torch = _torch()
     fn = _CACHE.get("fn")
@@ -168,7 +192,7 @@ def sparse_solve(vals, rows, cols, n, b):
     _USED[0] = True
     rows = torch.as_tensor(rows, dtype=torch.long)
     cols = torch.as_tensor(cols, dtype=torch.long)
-    return fn.apply(vals, rows, cols, int(n), b)
+    return fn.apply(vals, rows, cols, int(n), b, factor_cache)
 
 
 # --------------------------------------------------------------------------------------------------

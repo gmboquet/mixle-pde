@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from mixle_pde.latent import Field3D, PosteriorField3D, SparsePosteriorPrecision
+from mixle_pde.linear_solve import dense_spd_solve
 from mixle_pde.observations import ForwardOperatorRegistry, Observation
 
 
@@ -127,11 +128,21 @@ class FieldGaussianPrior:
         return sp.coo_matrix((data, (rows, cols)), shape=(n, n)).tocsr()
 
 
-def _noise_precision(observation: Observation) -> np.ndarray:
-    """``R^-1`` as a dense ``(n, n)`` matrix, from the observation's diagonal or full noise covariance."""
+def _noise_precision(observation: Observation):
+    """``R^-1``, from the observation's diagonal or full noise covariance -- never a dense matrix inverse.
+
+    Diagonal noise (the common case) returns a sparse ``(n, n)`` :func:`scipy.sparse.diags` -- an
+    elementwise reciprocal, no factorization needed -- which every call site combines with ``@``
+    (``dense @ sparse`` returns a dense array, so this is a drop-in replacement). A full noise covariance
+    is per-observation-batch sized (not grid-sized), so it stays dense, but through a cached Cholesky
+    factor solve against the identity rather than a general matrix inverse, exploiting the covariance's
+    SPD structure (see :func:`mixle_pde.linear_solve.dense_spd_solve`).
+    """
     if observation.is_diagonal:
-        return np.diag(1.0 / observation.noise_cov)
-    return np.linalg.inv(observation.noise_cov)
+        import scipy.sparse as sp
+
+        return sp.diags(1.0 / observation.noise_cov, format="csr")
+    return dense_spd_solve(observation.noise_cov, np.eye(observation.noise_cov.shape[0]))
 
 
 def linear_gaussian_invert(
@@ -176,7 +187,7 @@ def linear_gaussian_invert(
         lam = lam + jt_rinv @ jac
         rhs = rhs + jt_rinv @ obs.value
 
-    cov = np.linalg.inv(lam + jitter * np.eye(n))
+    cov = dense_spd_solve(lam + jitter * np.eye(n), np.eye(n))
     mean = cov @ rhs
     return PosteriorField3D(grid=grid, mean=mean, map=mean.copy(), cov=cov)
 
