@@ -29,6 +29,7 @@ __all__ = [
     "pipe_simplex_mesh",
     "refine_simplex_mesh",
     "space_time_mesh",
+    "telescoping_mesh",
 ]
 
 
@@ -457,6 +458,31 @@ class MovingSimplexMesh:
         }
 
 
+def _grid_simplex_mesh(axes: list[np.ndarray]) -> SimplexMesh:
+    """Freudenthal-decompose a tensor grid given by per-axis (possibly non-uniform) node coordinates.
+
+    Shared by :func:`box_simplex_mesh` (uniform axes) and :func:`telescoping_mesh` (graded axes): each
+    hyper-rectangular cell of the ``len(axes)``-dimensional tensor grid is split into ``dim!`` simplices,
+    deterministically, by walking the ``dim!`` corner-to-corner permutation paths of the cell.
+    """
+    dim = len(axes)
+    shape = tuple(len(a) for a in axes)
+    grids = np.meshgrid(*axes, indexing="ij")
+    nodes = np.column_stack([grid.ravel() for grid in grids])
+
+    simplices: list[list[int]] = []
+    for cell in np.ndindex(*(s - 1 for s in shape)):
+        for perm in permutations(range(dim)):
+            idx = list(cell)
+            verts = [tuple(idx)]
+            for axis in perm:
+                idx = idx.copy()
+                idx[axis] += 1
+                verts.append(tuple(idx))
+            simplices.append([int(np.ravel_multi_index(v, shape)) for v in verts])
+    return SimplexMesh(nodes, np.asarray(simplices, dtype=int))
+
+
 def box_simplex_mesh(shape: Any, *, lengths: Any = None, origin: Any = None) -> SimplexMesh:
     """Create a Freudenthal simplex mesh of an axis-aligned box.
 
@@ -476,20 +502,52 @@ def box_simplex_mesh(shape: Any, *, lengths: Any = None, origin: Any = None) -> 
     origin = np.zeros(dim, dtype=float) if origin is None else np.broadcast_to(np.asarray(origin, dtype=float), (dim,))
 
     axes = [origin[i] + np.linspace(0.0, lengths[i], shape[i]) for i in range(dim)]
-    grids = np.meshgrid(*axes, indexing="ij")
-    nodes = np.column_stack([grid.ravel() for grid in grids])
+    return _grid_simplex_mesh(axes)
 
-    simplices: list[list[int]] = []
-    for cell in np.ndindex(*(s - 1 for s in shape)):
-        for perm in permutations(range(dim)):
-            idx = list(cell)
-            verts = [tuple(idx)]
-            for axis in perm:
-                idx = idx.copy()
-                idx[axis] += 1
-                verts.append(tuple(idx))
-            simplices.append([int(np.ravel_multi_index(v, shape)) for v in verts])
-    return SimplexMesh(nodes, np.asarray(simplices, dtype=int))
+
+def _telescoped_axis(n_core: int, h: float, pad: int, growth: float) -> np.ndarray:
+    """One graded 1-D axis: ``n_core`` uniform-``h`` core nodes plus ``pad`` geometrically growing nodes per side.
+
+    Node ``0`` of the core sits at coordinate ``0``; the ``p``-th padded node outward from the core (``p`` from
+    ``1`` to ``pad``) sits an additional ``sum_{k<=p} h * growth**k`` beyond the core edge, so the first padded
+    cell is already wider than the core spacing and each subsequent one grows by ``growth`` again (the telescoping
+    / octree-style grading that reaches a large far field for a small extra node count).
+    """
+    core = np.arange(n_core, dtype=float) * h
+    if pad <= 0:
+        return core
+    widths = h * growth ** np.arange(1, pad + 1)
+    cum = np.cumsum(widths)
+    left = (core[0] - cum)[::-1]
+    right = core[-1] + cum
+    return np.concatenate([left, core, right])
+
+
+def telescoping_mesh(core_shape: Any, spacing: Any, *, pad: int = 4, growth: float = 1.3) -> SimplexMesh:
+    """Create a graded box simplex mesh: a fine uniform core plus geometrically graded padding.
+
+    ``core_shape`` gives the fine-region node counts per axis (as :func:`box_simplex_mesh`'s ``shape``);
+    ``spacing`` is the core cell size (scalar or per-axis). ``pad`` graded layers are appended on every side of
+    every axis, each successive cell width scaled by ``growth`` (> 1) relative to the last, so the survey core
+    stays at the requested resolution while the mesh reaches a much larger absorbing far field cheaply --
+    octree-style geometric grading outward, not uniform refinement of the whole domain.
+    """
+    core_shape = tuple(int(s) for s in np.atleast_1d(core_shape))
+    dim = len(core_shape)
+    if dim < 1:
+        raise ValueError("core_shape must have at least one axis.")
+    if any(s < 2 for s in core_shape):
+        raise ValueError("every mesh axis needs at least two core nodes.")
+    pad = int(pad)
+    if pad < 0:
+        raise ValueError("pad must be non-negative.")
+    growth = float(growth)
+    if pad > 0 and growth <= 1.0:
+        raise ValueError("growth must be greater than 1.0 for outward grading.")
+    spacing_arr = np.broadcast_to(np.asarray(spacing, dtype=float), (dim,))
+
+    axes = [_telescoped_axis(core_shape[i], float(spacing_arr[i]), pad, growth) for i in range(dim)]
+    return _grid_simplex_mesh(axes)
 
 
 def delaunay_mesh(points: Any) -> SimplexMesh:
