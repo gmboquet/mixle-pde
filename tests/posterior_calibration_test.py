@@ -31,7 +31,7 @@ class PosteriorCalibrationTest(unittest.TestCase):
     def _posterior(self):
         mean = self.truth + np.array([0.1, -0.1, 0.0, 0.2, -0.2, 0.0])
         cov = np.diag(np.array([0.25, 0.25, 0.25, 4.0, 9.0, 16.0]))
-        return PosteriorField3D(self.grid, mean=mean, cov=cov)
+        return PosteriorField3D(self.grid, mean=mean, dense_cov=cov)
 
     def test_truth_coverage_counts_cells_inside_credible_intervals(self):
         report = truth_coverage(self._posterior(), self.truth, alpha=0.1)

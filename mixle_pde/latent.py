@@ -21,10 +21,13 @@ endpoints and ordering survive the map).
 from __future__ import annotations
 
 import json
+import warnings
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+from scipy.sparse.linalg import LinearOperator
 from scipy.special import ndtri
 
 #: The frozen provenance key IC-2 (`mixle_pde.io.artifacts`) writes its saved-artifact digest under;
@@ -209,7 +212,7 @@ class Field3D:
         bounds: tuple[float | None, float | None] | None = None,
         mask: np.ndarray | None = None,
         provenance: dict[str, Any] | None = None,
-    ) -> "Field3D":
+    ) -> Field3D:
         """Construct a field over the nodes of a 3D simplex mesh."""
         return cls(
             coordinates=np.asarray(mesh.nodes, dtype=float),
@@ -337,8 +340,10 @@ class Field4D:
     def mesh_at_time(self, time: float, *, interpolate: bool = True) -> Any | None:
         """Return the simplex mesh at ``time`` when moving or static mesh geometry is available."""
         if self.moving_mesh is not None:
-            return self.moving_mesh.at_time(float(time), clamp=False) if interpolate else self.moving_mesh.at_step(
-                self._index_of(float(time))
+            return (
+                self.moving_mesh.at_time(float(time), clamp=False)
+                if interpolate
+                else self.moving_mesh.at_step(self._index_of(float(time)))
             )
         return self.spatial.mesh
 
@@ -381,24 +386,57 @@ class Field4D:
             raise ValueError("Field4D moving_mesh times must match Field4D times.")
 
 
+_DENSE_COV_MAX_N = 2048
+"""Grid size at/below which `PosteriorField3D.cov`/`PosteriorFieldSamples3D.cov` materialize a
+dense array; above it, they return a matrix-free `LinearOperator` (IC-1; work-plan Sec.C2)."""
+
+
+class _PosteriorDerivedQuantity:
+    """A pushforward of a posterior through a functional (IC-1 `DerivedQuantity`): the draws, a
+    central credible interval, and the `prior_dominated` honesty flag. `prior_dominated` is set
+    from A2's variance-reduction hook once that lands (work-plan A2); it defaults to False here,
+    since that hook is out of scope for this task.
+    """
+
+    def __init__(self, samples: np.ndarray, *, prior_dominated: bool = False) -> None:
+        self.samples = np.asarray(samples)
+        self.prior_dominated = bool(prior_dominated)
+
+    def credible_interval(self, level: float) -> tuple[np.ndarray, np.ndarray]:
+        """Central ``level`` interval (e.g. 0.9) of the derived quantity."""
+        if not 0.0 < level < 1.0:
+            raise ValueError("level must be in (0, 1).")
+        alpha = 1.0 - level
+        lo = np.quantile(self.samples, alpha / 2.0, axis=0)
+        hi = np.quantile(self.samples, 1.0 - alpha / 2.0, axis=0)
+        return lo, hi
+
+
 @dataclass
 class PosteriorField3D:
     """A Gaussian posterior over a :class:`Field3D`, in the field's unconstrained space.
 
-    Covariance storage is one of four modes, chosen by which of ``cov`` / ``precision_factor`` /
-    ``low_rank`` + ``diag_var`` / ``diag_var`` alone is supplied:
+    Covariance storage is one of four modes, chosen by which of ``dense_cov`` / ``precision_factor``
+    / ``low_rank`` + ``diag_var`` / ``diag_var`` alone is supplied:
 
-    * dense: ``cov`` is the full ``(n, n)`` covariance.
+    * dense: ``dense_cov`` is the full ``(n, n)`` covariance.
     * sparse precision: ``precision_factor`` stores ``cov^-1`` and sparse solves.
     * low-rank + diagonal: ``cov = low_rank @ low_rank.T + diag(diag_var)`` with ``low_rank``
       shape ``(n, k)``.
     * diagonal only: ``diag_var`` alone, i.e. independent marginals.
+
+    ``dense_cov`` is the raw, mode-discriminating storage slot (``None`` unless the dense mode was
+    explicitly supplied at construction -- callers use ``dense_cov is None`` to detect the other
+    three modes). The IC-1 `cov` **property** below is the always-populated read surface: it returns
+    ``dense_cov`` unchanged in dense mode, and otherwise materializes a dense array (small grids) or
+    a matrix-free `LinearOperator` (large grids) from whichever mode is active -- it is a *view*, not
+    a fourth storage mode.
     """
 
     grid: Field3D
     mean: np.ndarray
     map: np.ndarray | None = None
-    cov: np.ndarray | None = None
+    dense_cov: np.ndarray | None = None
     precision_factor: SparsePosteriorPrecision | None = None
     low_rank: np.ndarray | None = None
     diag_var: np.ndarray | None = None
@@ -414,20 +452,22 @@ class PosteriorField3D:
             raise ValueError(f"map must have shape ({n},) matching the grid.")
 
         modes = [
-            self.cov is not None,
+            self.dense_cov is not None,
             self.precision_factor is not None,
             self.low_rank is not None or self.diag_var is not None,
         ]
         if sum(bool(mode) for mode in modes) != 1:
-            raise ValueError("supply exactly one covariance mode: `cov`, `precision_factor`, or `low_rank`/`diag_var`.")
+            raise ValueError(
+                "supply exactly one covariance mode: `dense_cov`, `precision_factor`, or `low_rank`/`diag_var`."
+            )
         if not any(modes):
             raise ValueError("supply a covariance mode.")
 
-        if self.cov is not None:
-            cov = np.asarray(self.cov, dtype=float)
-            if cov.shape != (n, n):
-                raise ValueError(f"cov must have shape ({n}, {n}).")
-            self.cov = cov
+        if self.dense_cov is not None:
+            dense_cov = np.asarray(self.dense_cov, dtype=float)
+            if dense_cov.shape != (n, n):
+                raise ValueError(f"dense_cov must have shape ({n}, {n}).")
+            self.dense_cov = dense_cov
         if self.precision_factor is not None and self.precision_factor.n != n:
             raise ValueError(f"precision_factor must have shape ({n}, {n}).")
         if self.low_rank is not None:
@@ -448,8 +488,8 @@ class PosteriorField3D:
     @property
     def marginal_variance(self) -> np.ndarray:
         """Per-point posterior variance in unconstrained space, whichever storage mode is active."""
-        if self.cov is not None:
-            return np.diag(self.cov).copy()
+        if self.dense_cov is not None:
+            return np.diag(self.dense_cov).copy()
         if self.precision_factor is not None:
             return self.precision_factor.marginal_variance()
         if self.low_rank is not None:
@@ -460,11 +500,47 @@ class PosteriorField3D:
     def marginal_std(self) -> np.ndarray:
         return np.sqrt(self.marginal_variance)
 
+    @property
+    def cov(self) -> np.ndarray | LinearOperator:
+        """IC-1 `Posterior.cov`: covariance in the field's unconstrained space (the same space as
+        `mean`) -- a dense `(grid.n, grid.n)` array when explicitly supplied (`dense_cov`) or small
+        enough to materialize cheaply, otherwise a matrix-free `LinearOperator` backed by whichever
+        storage mode (`precision_factor` or `low_rank`/`diag_var`) is active. Never materializes a
+        dense array beyond `_DENSE_COV_MAX_N` (work-plan Sec.C2).
+        """
+        if self.dense_cov is not None:
+            return self.dense_cov
+        n = self.grid.n
+        if self.precision_factor is not None:
+            if n <= _DENSE_COV_MAX_N:
+                return self.precision_factor.covariance_dense()
+            solve = self.precision_factor.solve
+            return LinearOperator((n, n), matvec=solve, matmat=solve, dtype=float)
+        low_rank, diag_var = self.low_rank, self.diag_var
+        if low_rank is not None:
+            if n <= _DENSE_COV_MAX_N:
+                return low_rank @ low_rank.T + np.diag(diag_var)
+
+            def _low_rank_action(v: np.ndarray) -> np.ndarray:
+                v = np.asarray(v, dtype=float)
+                residual = diag_var[:, None] * v if v.ndim == 2 else diag_var * v
+                return low_rank @ (low_rank.T @ v) + residual
+
+            return LinearOperator((n, n), matvec=_low_rank_action, matmat=_low_rank_action, dtype=float)
+        if n <= _DENSE_COV_MAX_N:
+            return np.diag(diag_var)
+
+        def _diag_action(v: np.ndarray) -> np.ndarray:
+            v = np.asarray(v, dtype=float)
+            return diag_var[:, None] * v if v.ndim == 2 else diag_var * v
+
+        return LinearOperator((n, n), matvec=_diag_action, matmat=_diag_action, dtype=float)
+
     def sample(self, n: int, rng: np.random.Generator) -> np.ndarray:
         """Draw ``n`` samples, mapped into physical units; shape ``(n, grid.n)``."""
         m = self.grid.n
-        if self.cov is not None:
-            chol = np.linalg.cholesky(self.cov + 1e-12 * np.eye(m))
+        if self.dense_cov is not None:
+            chol = np.linalg.cholesky(self.dense_cov + 1e-12 * np.eye(m))
             z = rng.standard_normal((n, m))
             unconstrained = self.mean[None, :] + z @ chol.T
         elif self.precision_factor is not None:
@@ -482,6 +558,14 @@ class PosteriorField3D:
             unconstrained = self.mean[None, :] + eps
         return self.grid.from_unconstrained(unconstrained)
 
+    def samples(self, n: int, rng: np.random.Generator) -> np.ndarray:
+        """IC-1 `Posterior.samples`: draw ``n`` samples in physical units; shape ``(n, grid.n)``.
+
+        A thin alias over :meth:`sample` (kept unchanged, so no existing caller of the singular
+        name breaks).
+        """
+        return self.sample(n, rng)
+
     def posterior_predictive_draws(
         self,
         registry: Any,
@@ -495,15 +579,40 @@ class PosteriorField3D:
         op = registry.get(observation.kind)
         return np.vstack([op.predict_observation(self.grid, draw, observation) for draw in draws])
 
-    def credible_interval(self, alpha: float = 0.1) -> tuple[np.ndarray, np.ndarray]:
-        """Per-point central credible interval covering ``1 - alpha`` mass, in physical units."""
-        if not 0.0 < alpha < 1.0:
-            raise ValueError("alpha must be in (0, 1).")
-        z = ndtri(1.0 - alpha / 2.0)
+    def credible_interval(self, level: float = 0.9, *, alpha: float | None = None) -> tuple[np.ndarray, np.ndarray]:
+        """IC-1 `Posterior.credible_interval`: per-point central interval covering ``level`` mass,
+        in physical units.
+
+        ``alpha`` (the former public parameter, the miss-coverage ``1 - level``) is accepted as a
+        deprecated keyword alias for one release: passing it overrides ``level`` and emits a
+        ``DeprecationWarning``.
+        """
+        if alpha is not None:
+            warnings.warn(
+                "PosteriorField3D.credible_interval(alpha=...) is deprecated; pass level=... "
+                "(level = 1 - alpha) instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            level = 1.0 - alpha
+        if not 0.0 < level < 1.0:
+            raise ValueError("level must be in (0, 1).")
+        z = ndtri(0.5 + level / 2.0)
         std = self.marginal_std
         lo_u = self.mean - z * std
         hi_u = self.mean + z * std
         return self.grid.from_unconstrained(lo_u), self.grid.from_unconstrained(hi_u)
+
+    def derived_quantity(
+        self, fn: Callable[[np.ndarray], np.ndarray], n: int, rng: np.random.Generator
+    ) -> _PosteriorDerivedQuantity:
+        """IC-1 `Posterior.derived_quantity`: pushforward ``fn`` over ``n`` posterior draws
+        (physical units) into a `DerivedQuantity` (samples + a central credible interval + the
+        `prior_dominated` honesty flag; work-plan A2 sets that flag once its variance-reduction
+        hook lands -- out of scope here, so it defaults to False).
+        """
+        draws = self.samples(n, rng)
+        return _PosteriorDerivedQuantity(fn(draws), prior_dominated=False)
 
     def physical_mean(self, *, n: int = 4096, rng: np.random.Generator | None = None) -> np.ndarray:
         """Posterior mean in physical units, i.e. ``E[g(X)]`` where ``g = grid.from_unconstrained``.
@@ -555,6 +664,16 @@ class PosteriorFieldSamples3D:
     covariance summary would hide posterior shape. It deliberately mirrors the core query surface of
     :class:`PosteriorField3D`: ``mean`` / ``map`` in unconstrained space, marginal variance/std,
     physical-unit ``sample`` draws, physical-unit credible intervals, and axis-aligned slices.
+
+    Note (IC-1 conformance): the empirical draws are stored under the ``samples`` **attribute**
+    (read directly by several existing consumers), which collides with the plural ``samples(n,
+    rng)`` **method** IC-1's `Posterior` protocol expects -- the same collision :class:`PosteriorField3D`
+    had with its old ``sample``/``samples`` naming, and that ``PosteriorEnsemble`` had with its
+    ``samples`` attribute. Unlike those two (each with a handful of call sites), the stored
+    ``samples`` array here is read directly across many modules; renaming it is a larger, separate
+    change. This class therefore adds `credible_interval(level)`, `derived_quantity`, and `cov`, but
+    does not (yet) satisfy `isinstance(x, Posterior)` -- it keeps `sample` (singular) as its draw
+    method.
     """
 
     grid: Field3D
@@ -608,6 +727,27 @@ class PosteriorFieldSamples3D:
         return np.sqrt(self.marginal_variance)
 
     @property
+    def cov(self) -> np.ndarray | LinearOperator:
+        """IC-1 `Posterior.cov`: empirical covariance of the stored (unconstrained-space) draws --
+        a dense ``(grid.n, grid.n)`` array when small enough to materialize cheaply, otherwise a
+        matrix-free `LinearOperator` computed from the centered sample matrix (never a materialized
+        dense array beyond `_DENSE_COV_MAX_N`).
+        """
+        n = self.grid.n
+        if self.samples.shape[0] == 1:
+            return np.zeros((n, n))
+        if n <= _DENSE_COV_MAX_N:
+            return np.atleast_2d(np.cov(self.samples, rowvar=False))
+        centered = self.samples - self.mean[None, :]
+        denom = max(self.samples.shape[0] - 1, 1)
+
+        def _action(v: np.ndarray) -> np.ndarray:
+            v = np.asarray(v, dtype=float)
+            return (centered.T @ (centered @ v)) / denom
+
+        return LinearOperator((n, n), matvec=_action, matmat=_action, dtype=float)
+
+    @property
     def physical_samples(self) -> np.ndarray:
         """Stored posterior samples mapped into physical units."""
         return self.grid.from_unconstrained(self.samples)
@@ -619,13 +759,36 @@ class PosteriorFieldSamples3D:
         idx = rng.integers(0, self.samples.shape[0], size=int(n))
         return self.grid.from_unconstrained(self.samples[idx])
 
-    def credible_interval(self, alpha: float = 0.1) -> tuple[np.ndarray, np.ndarray]:
-        """Per-point empirical central credible interval in physical units."""
-        if not 0.0 < alpha < 1.0:
-            raise ValueError("alpha must be in (0, 1).")
+    def credible_interval(self, level: float = 0.9, *, alpha: float | None = None) -> tuple[np.ndarray, np.ndarray]:
+        """IC-1 `Posterior.credible_interval`: per-point empirical central interval covering
+        ``level`` mass, in physical units. ``alpha`` (``1 - level``) is a deprecated keyword alias
+        for one release.
+        """
+        if alpha is not None:
+            warnings.warn(
+                "PosteriorFieldSamples3D.credible_interval(alpha=...) is deprecated; pass level=... "
+                "(level = 1 - alpha) instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            level = 1.0 - alpha
+        if not 0.0 < level < 1.0:
+            raise ValueError("level must be in (0, 1).")
+        alpha_internal = 1.0 - level
         physical = self.physical_samples
-        lo, hi = np.quantile(physical, [alpha / 2.0, 1.0 - alpha / 2.0], axis=0)
+        lo, hi = np.quantile(physical, [alpha_internal / 2.0, 1.0 - alpha_internal / 2.0], axis=0)
         return lo, hi
+
+    def derived_quantity(
+        self, fn: Callable[[np.ndarray], np.ndarray], n: int, rng: np.random.Generator
+    ) -> _PosteriorDerivedQuantity:
+        """IC-1 `Posterior.derived_quantity`: pushforward ``fn`` over ``n`` resampled draws
+        (physical units) into a `DerivedQuantity` (samples + a central credible interval +
+        `prior_dominated`, which defaults to False -- work-plan A2's variance-reduction hook is out
+        of scope here).
+        """
+        draws = self.sample(n, rng)
+        return _PosteriorDerivedQuantity(fn(draws), prior_dominated=False)
 
     def posterior_predictive_draws(
         self,

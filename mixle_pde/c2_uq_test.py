@@ -226,7 +226,7 @@ class SparseLowRankUQAttachmentTestCase(unittest.TestCase, _MultimodalSetup):
             low_rank_k=self.grid.n - 1,
             rng=np.random.default_rng(0),
         )
-        self.assertIsNone(low_rank.cov)
+        self.assertIsNone(low_rank.dense_cov)
         self.assertIsNone(low_rank.precision_factor)
         self.assertIsNotNone(low_rank.diag_var)
         np.testing.assert_allclose(low_rank.mean, exact.mean, rtol=1.0e-8, atol=1.0e-8)

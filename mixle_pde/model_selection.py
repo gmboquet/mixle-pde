@@ -64,13 +64,13 @@ def _posterior_log_abs_det_precision(posterior: Any) -> float:
     """``log|H|`` where ``H`` is the posterior precision, read off whichever covariance-storage mode
     ``posterior`` uses -- dense covariance, sparse precision factor, or low-rank + diagonal -- without
     ever materializing a dense ``(n, n)`` array beyond what is already stored."""
-    if posterior.cov is not None:
+    if posterior.dense_cov is not None:
         # Some LAPACK backends (e.g. Apple Accelerate) raise spurious divide-by-zero/overflow
         # RuntimeWarnings from slogdet's internal LU factorization on well-conditioned matrices even
         # though the returned sign/logdet are correct; the warnings are cosmetic, not a correctness
         # signal, so they are suppressed rather than left to alarm callers.
         with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
-            sign, logdet_cov = np.linalg.slogdet(posterior.cov)
+            sign, logdet_cov = np.linalg.slogdet(posterior.dense_cov)
         if sign <= 0.0:
             raise ValueError("posterior covariance must be positive definite.")
         return -logdet_cov

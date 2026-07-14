@@ -352,8 +352,8 @@ def joint_linear_gaussian_invert(
 
     cov = dense_spd_solve(lam + jitter * np.eye(2 * n), np.eye(2 * n))
     mean = cov @ rhs
-    post_a = PosteriorField3D(grid=grid_a, mean=mean[:n], map=mean[:n].copy(), cov=cov[:n, :n])
-    post_b = PosteriorField3D(grid=grid_b, mean=mean[n:], map=mean[n:].copy(), cov=cov[n:, n:])
+    post_a = PosteriorField3D(grid=grid_a, mean=mean[:n], map=mean[:n].copy(), dense_cov=cov[:n, :n])
+    post_b = PosteriorField3D(grid=grid_b, mean=mean[n:], map=mean[n:].copy(), dense_cov=cov[n:, n:])
     return post_a, post_b
 
 

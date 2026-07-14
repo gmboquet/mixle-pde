@@ -182,7 +182,7 @@ def gauss_newton_invert(
         misfit += float(resid @ rinvs[id(obs)] @ resid)
 
     cov = dense_spd_solve(lam + jitter * np.eye(n), np.eye(n), factor_cache=factor_cache)
-    posterior = PosteriorField3D(grid=grid, mean=u, map=u.copy(), cov=cov)
+    posterior = PosteriorField3D(grid=grid, mean=u, map=u.copy(), dense_cov=cov)
     report = GaussNewtonReport(
         iterations=len(step_norms), converged=converged, step_norms=step_norms, final_data_misfit=misfit
     )

@@ -48,8 +48,8 @@ def _covariance_action(posterior: Any, v: np.ndarray) -> np.ndarray:
     v = np.asarray(v, dtype=float)
     single = v.ndim == 1
     mat = v[:, None] if single else v
-    if posterior.cov is not None:
-        out = posterior.cov @ mat
+    if posterior.dense_cov is not None:
+        out = posterior.dense_cov @ mat
     elif posterior.precision_factor is not None:
         out = posterior.precision_factor.solve(mat)
     elif posterior.low_rank is not None:

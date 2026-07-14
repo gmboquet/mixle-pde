@@ -128,7 +128,7 @@ def heldout_observation_check(
         raise ValueError("held_out must contain at least one observation.")
     if not 0.0 < alpha < 1.0:
         raise ValueError("alpha must be in (0, 1).")
-    cov = posterior.cov if posterior.cov is not None else np.diag(posterior.marginal_variance)
+    cov = posterior.dense_cov if posterior.dense_cov is not None else np.diag(posterior.marginal_variance)
     z = ndtri(1.0 - alpha / 2.0)
     log_likelihood = 0.0
     sq_resid: list[float] = []
@@ -275,7 +275,7 @@ def _residual_and_predictive_std(
     """
     if not observations:
         raise ValueError("observations must contain at least one held-out/calibration Observation.")
-    cov = posterior.cov if posterior.cov is not None else np.diag(posterior.marginal_variance)
+    cov = posterior.dense_cov if posterior.dense_cov is not None else np.diag(posterior.marginal_variance)
     residuals: list[float] = []
     stds: list[float] = []
     for obs in observations:
@@ -357,8 +357,8 @@ def recalibrate(
     quantile = split_conformal_quantile(posterior, registry, held_out, alpha=alpha)
     scale = inflation**2
 
-    if posterior.cov is not None:
-        rescaled = replace(posterior, cov=posterior.cov * scale)
+    if posterior.dense_cov is not None:
+        rescaled = replace(posterior, dense_cov=posterior.dense_cov * scale)
     elif posterior.precision_factor is not None:
         new_precision = posterior.precision_factor.precision / scale
         rescaled = replace(posterior, precision_factor=SparsePosteriorPrecision(new_precision))
