@@ -34,6 +34,7 @@ ingredients step 5 still names:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -354,3 +355,56 @@ def joint_linear_gaussian_invert(
     post_a = PosteriorField3D(grid=grid_a, mean=mean[:n], map=mean[:n].copy(), cov=cov[:n, :n])
     post_b = PosteriorField3D(grid=grid_b, mean=mean[n:], map=mean[n:].copy(), cov=cov[n:, n:])
     return post_a, post_b
+
+
+@dataclass
+class TVFieldPrior:
+    """Blocky/edge-preserving total-variation prior (workstream A1): the IRLS surrogate of the L1
+    penalty on a roughness/gradient operator, config-object form of
+    :func:`mixle_pde.blocky_priors.total_variation_weights`.
+
+    ``roughness`` is any ``(k, n)`` scipy-sparse roughness/gradient operator -- typically
+    :func:`mixle_pde.geophysics.roughness_operator` or, for a structurally-oriented smoothness,
+    :func:`mixle_pde.blocky_priors.dip_rotated_gradient_operator`. :meth:`reweight` is the callable to
+    hand to :func:`mixle_pde.geophysics.regularized_gauss_newton`'s ``reweight`` kwarg (directly, or via
+    :func:`mixle_pde.blocky_priors.blocky_invert`'s outer IRLS loop), so a sharp, blocky recovery is one
+    named prior object away rather than a hand-assembled weight function.
+    """
+
+    roughness: Any
+    eps: float = 1e-6
+
+    def __post_init__(self) -> None:
+        if self.eps <= 0.0:
+            raise ValueError("eps must be positive.")
+
+    def reweight(self, m: np.ndarray) -> np.ndarray:
+        """IRLS row weights for :meth:`roughness`, one per its row (see
+        :func:`mixle_pde.blocky_priors.total_variation_weights`)."""
+        from mixle_pde.blocky_priors import total_variation_weights
+
+        return total_variation_weights(m, self.roughness, eps=self.eps)
+
+
+@dataclass
+class MinimumSupportPrior:
+    """Compact/minimum-support prior (workstream A1): the Last & Kubik (1983) IRLS surrogate
+    ``1/(m^2+eps^2)`` that concentrates recovered anomaly into a compact body, config-object form of
+    :func:`mixle_pde.blocky_priors.minimum_support_weights`.
+
+    Per-cell (not per-roughness-row): pair with ``roughness=None`` (identity damping) in
+    :func:`mixle_pde.geophysics.regularized_gauss_newton`, or use directly via
+    :func:`mixle_pde.blocky_priors.blocky_invert`'s ``prior="compact"``.
+    """
+
+    eps: float = 1e-6
+
+    def __post_init__(self) -> None:
+        if self.eps <= 0.0:
+            raise ValueError("eps must be positive.")
+
+    def reweight(self, m: np.ndarray) -> np.ndarray:
+        """IRLS per-cell weights (see :func:`mixle_pde.blocky_priors.minimum_support_weights`)."""
+        from mixle_pde.blocky_priors import minimum_support_weights
+
+        return minimum_support_weights(m, eps=self.eps)
