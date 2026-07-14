@@ -208,10 +208,18 @@ def region_time_summary(posterior: Posterior4D, mask) -> dict[str, Any]:
 
 @dataclass
 class DerivedQuantity:
-    """The exact Gaussian posterior of a linear functional of the field: ``value ~ N(mean, std^2)``."""
+    """The exact Gaussian posterior of a linear functional of the field: ``value ~ N(mean, std^2)``.
+
+    ``prior_dominated`` (work-plan A2) is the honesty flag: True when the region's data-weighted
+    posterior variance reduction (see :mod:`mixle_pde.informativeness`) never rose much above the prior
+    baseline, i.e. this mean/interval is mostly the regulariser's doing, not the survey's. It defaults to
+    False (unknown/not evaluated) so every existing call site is unchanged; `derived_quantity`/
+    `region_mass` set it whenever the caller supplies ``prior_var``/``posterior_var``.
+    """
 
     mean: float
     std: float
+    prior_dominated: bool = False
 
     def credible_interval(self, alpha: float = 0.1) -> tuple[float, float]:
         z = ndtri(1.0 - alpha / 2.0)
@@ -248,7 +256,13 @@ class SampledDerivedQuantity:
 
 
 def derived_quantity(
-    posterior: PosteriorField3D, weights, *, n: int = 4096, rng: np.random.Generator | None = None
+    posterior: PosteriorField3D,
+    weights,
+    *,
+    n: int = 4096,
+    rng: np.random.Generator | None = None,
+    prior_var: np.ndarray | None = None,
+    posterior_var: np.ndarray | None = None,
 ) -> DerivedQuantity | SampledDerivedQuantity:
     """Posterior of the linear functional ``w . m``, in physical units.
 
@@ -261,6 +275,11 @@ def derived_quantity(
     linear functional of the unconstrained mean, not ``E[w . g(X)]``, and the two can differ by tens of
     percent. In that case this dispatches to :func:`derived_quantity_physical`, which draws physical-unit
     samples instead. ``n``/``rng`` are only used on that sampled path.
+
+    ``prior_var``/``posterior_var`` are optional per-cell marginal variances (see
+    :mod:`mixle_pde.informativeness`); when both are supplied, the returned quantity's
+    ``prior_dominated`` flag is set from the data-weighted (by ``weights``) variance reduction over the
+    functional's support, so a decision quantity never claims informativeness it does not have.
     """
     w = np.asarray(weights, dtype=float).reshape(-1)
     if w.shape != (posterior.grid.n,):
@@ -278,7 +297,14 @@ def derived_quantity(
         var = float(proj @ proj + np.sum(posterior.diag_var * w**2))
     else:
         var = float(np.sum(posterior.diag_var * w**2))
-    return DerivedQuantity(mean=mean, std=float(np.sqrt(max(var, 0.0))))
+    if (prior_var is None) != (posterior_var is None):
+        raise ValueError("prior_var and posterior_var must be supplied together.")
+    prior_dominated = False
+    if prior_var is not None and posterior_var is not None:
+        from mixle_pde.informativeness import region_prior_dominated
+
+        prior_dominated = region_prior_dominated(prior_var, posterior_var, w)
+    return DerivedQuantity(mean=mean, std=float(np.sqrt(max(var, 0.0))), prior_dominated=prior_dominated)
 
 
 def derived_quantity_physical(
@@ -309,7 +335,14 @@ def sampled_derived_quantity(posterior: PosteriorFieldSamples3D, weights) -> Sam
 
 
 def region_mass(
-    posterior: Posterior3D, mask, cell_volumes, *, n: int = 4096, rng: np.random.Generator | None = None
+    posterior: Posterior3D,
+    mask,
+    cell_volumes,
+    *,
+    n: int = 4096,
+    rng: np.random.Generator | None = None,
+    prior_var: np.ndarray | None = None,
+    posterior_var: np.ndarray | None = None,
 ) -> DerivedQuantity | SampledDerivedQuantity:
     """Posterior of total anomalous mass in a region: ``sum_{i in mask} field_i * volume_i``.
 
@@ -319,13 +352,20 @@ def region_mass(
     log/logit transform of the underlying Gaussian), the sample path via :func:`derived_quantity_physical`
     -- the closed form there is a linear functional of the wrong (unconstrained) space. ``n``/``rng`` are
     only used on the sampled paths.
+
+    ``prior_var``/``posterior_var`` (per-cell marginal variances, see :mod:`mixle_pde.informativeness`)
+    are forwarded to `derived_quantity` for Gaussian posteriors so the returned quantity's
+    ``prior_dominated`` flag reports whether this region's mass is data-driven or mostly the prior's
+    doing; they are not meaningful for sampled (empirical) posteriors and are ignored there.
     """
     mask = np.asarray(mask, dtype=bool)
     vols = np.broadcast_to(np.asarray(cell_volumes, dtype=float), (posterior.grid.n,))
     weights = np.where(mask, vols, 0.0)
     if isinstance(posterior, PosteriorFieldSamples3D):
         return sampled_derived_quantity(posterior, weights)
-    return derived_quantity(posterior, weights, n=n, rng=rng)
+    return derived_quantity(
+        posterior, weights, n=n, rng=rng, prior_var=prior_var, posterior_var=posterior_var
+    )
 
 
 def region_mass_time_series(posterior: Posterior4D, mask, cell_volumes) -> DerivedTimeSeries:
