@@ -228,7 +228,14 @@ class LinearDynamicsAssimilation4DTest(unittest.TestCase):
         means = post.mean_array[:, 0]
         self.assertIsInstance(post, PosteriorField4D)
         np.testing.assert_allclose(means, np.array([1.0, 2.0, 4.0]), atol=0.08)
-        self.assertLess(post.marginal_std[-1, 0], post.marginal_std[0, 0])
+        # t=0 has no direct observation, so its *filtered* std is exactly the prior std; the RTS
+        # backward pass is what pulls it down by propagating the t=2 observation through the (near
+        # deterministic) transition. Comparing against the raw prior std -- rather than against
+        # marginal_std[-1, 0] -- is what actually demonstrates that backward propagation, since with an
+        # amplifying transition (here x2 per step) backward-inferred uncertainty shrinks going backward
+        # in time, so marginal_std is expected to *increase* from t=0 to t=2, not decrease.
+        prior_std = 1.0 / np.sqrt(prior.marginal_precision)
+        self.assertLess(post.marginal_std[0, 0], prior_std)
 
     def test_joint_linear_dynamics_posterior_keeps_cross_time_covariance(self):
         grid = Field3D(
