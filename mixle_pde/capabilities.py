@@ -1322,7 +1322,11 @@ def _run_earth_sampled_domain_likelihood_update() -> ScenarioResult:
             "biostrat_effective_sample_size": report_4d.effective_sample_size,
             "biostrat_mean_age": float(age_samples.mean()),
         },
-        tolerance={"geochem_updated_mean_gt": 10.0, "biostrat_age_range": [50.0, 60.0]},
+        tolerance={
+            "geochem_updated_mean_gt": 10.0,
+            "biostrat_age_range_lo": 50.0,
+            "biostrat_age_range_hi": 60.0,
+        },
         message="sampled domain likelihood update moved posteriors"
         if passed
         else "sampled domain likelihood update failed",
