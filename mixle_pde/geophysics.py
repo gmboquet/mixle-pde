@@ -22,6 +22,9 @@ This module adds the machinery those problems actually need:
   per-problem prior tuning.
 * :func:`cross_gradient` and :func:`joint_inversion` -- structural (cross-gradient) coupling of several
   property models that share boundaries but not a petrophysical law, and the joint inverter that uses it.
+* :func:`gravity_prism_sensitivity` and :func:`magnetic_prism_sensitivity` -- the exact rectangular-prism
+  potential-field kernels (Nagy 1966 / Plouff 1976; Bhattacharyya 1964), for cells near or beneath an
+  observation where the point-mass/point-dipole kernels above are only a coarse-mesh approximation.
 
 Everything is torch-differentiable and uses the package's existing ``divergence_form`` / ``sparse_solve``;
 nothing here patches mixle.
@@ -41,6 +44,8 @@ __all__ = [
     "traveltime_tomography",
     "magnetic_dipole_sensitivity",
     "gravity_point_sensitivity",
+    "gravity_prism_sensitivity",
+    "magnetic_prism_sensitivity",
     "depth_weighting",
     "roughness_operator",
     "regularized_gauss_newton",
@@ -122,6 +127,133 @@ def gravity_point_sensitivity(obs, cells, volumes):
     d = obs[:, None, :] - cells[None, :, :]
     r = np.maximum(np.linalg.norm(d, axis=2), 1e-6)
     return 1.0e5 * G_GRAV * V[None, :] * d[:, :, 2] / r**3
+
+
+_G_GRAV = 6.674e-11
+
+
+def _prism_potential_gradient(obs, cell_mins, cell_maxs, axis):
+    r"""Closed-form ``d/d(obs_axis) [ integral_cell 1/r dV' ]`` for an axis-aligned rectangular prism cell
+    (the Nagy 1966 / Plouff 1976 triple-integrated Newtonian kernel), vectorized over ``(n_obs, n_cells)``.
+
+    This is the shared building block behind both :func:`gravity_prism_sensitivity` (``axis=2``, i.e. the
+    vertical component) and :func:`magnetic_prism_sensitivity` (all three axes, contracted with the field
+    direction). Written as the standard 8-corner alternating sum
+
+    .. math:: g_{axis} = -\sum_{i,j,k \in \{1,2\}} (-1)^{i+j+k}
+        \Big[ u\,\ln(r+v) + v\,\ln(r+u) - s\,\mathrm{atan2}(uv,\, sr) \Big]
+
+    where ``s`` is the coordinate along ``axis`` (observation minus the corresponding cell corner) and
+    ``u, v`` are the other two axes in cyclic order (cell corner minus observation), ``r`` the corner
+    distance. Every corner combination is visited once via the two nested Python loops below (8 total,
+    fixed cost, not a function of mesh resolution), and the whole thing is a plain vectorized numpy
+    expression over the ``(n_obs, n_cells)`` broadcast -- no per-cell Python loop.
+
+    This closed form is validated (see ``c4_prism_test.py``) against direct numerical quadrature of the
+    defining volume integral to ~1e-10 relative accuracy, and against the point-mass limit as the prism
+    shrinks to a point (matching :func:`gravity_point_sensitivity`).
+    """
+    obs = np.asarray(obs, float)
+    cell_mins = np.asarray(cell_mins, float)
+    cell_maxs = np.asarray(cell_maxs, float)
+    u_axis = (axis + 1) % 3
+    v_axis = (axis + 2) % 3
+    o_s = obs[:, None, axis]
+    o_u = obs[:, None, u_axis]
+    o_v = obs[:, None, v_axis]
+    # special (differentiation) axis: observation-minus-corner; in-plane axes: corner-minus-observation.
+    s1 = o_s - cell_maxs[None, :, axis]
+    s2 = o_s - cell_mins[None, :, axis]
+    u1 = cell_mins[None, :, u_axis] - o_u
+    u2 = cell_maxs[None, :, u_axis] - o_u
+    v1 = cell_mins[None, :, v_axis] - o_v
+    v2 = cell_maxs[None, :, v_axis] - o_v
+    n_obs, n_cells = obs.shape[0], cell_mins.shape[0]
+    total = np.zeros((n_obs, n_cells))
+    eps = 1e-10
+    for i, s in enumerate((s1, s2), start=1):
+        for j, u in enumerate((u1, u2), start=1):
+            for k, v in enumerate((v1, v2), start=1):
+                r = np.maximum(np.sqrt(s**2 + u**2 + v**2), eps)
+                sign = (-1) ** (i + j + k)
+                term = (
+                    u * np.log(np.maximum(r + v, eps))
+                    + v * np.log(np.maximum(r + u, eps))
+                    - s * np.arctan2(u * v, s * r)
+                )
+                total += sign * term
+    return -total
+
+
+def gravity_prism_sensitivity(obs, cell_mins, cell_maxs, *, units="mGal"):
+    r"""EXACT rectangular-prism vertical gravity sensitivity (Nagy 1966 / Plouff 1976), replacing the
+    point-mass approximation (:func:`gravity_point_sensitivity`) with the closed-form triple integral of
+    ``(z0 - z') / r^3`` over each cell's true volume -- accurate arbitrarily close to a cell, where the
+    point-mass kernel is only a coarse-mesh approximation.
+
+    Linear sensitivity matrix ``G`` (n_obs x n_cells) of the vertical gravity anomaly to cell density
+    contrast; ``d = G @ rho`` gives the anomaly in the requested ``units`` (default mGal), matching
+    :func:`gravity_point_sensitivity`'s convention exactly (same sign, same units) so the two are drop-in
+    alternatives -- point kernel for a coarse/far mesh, this one near the observations or wherever the
+    cell size is not small relative to the observation distance.
+
+    Args:
+        obs: (n_obs, 3) observation coordinates (east, north, up), metres.
+        cell_mins: (n_cells, 3) lower corner of each axis-aligned rectangular cell, metres.
+        cell_maxs: (n_cells, 3) upper corner of each axis-aligned rectangular cell, metres.
+        units: ``"mGal"`` (default; ``1e5`` x SI) or ``"si"`` (m/s^2 per kg/m^3).
+
+    Returns:
+        ``G`` (n_obs, n_cells) such that ``G @ rho`` is the vertical gravity anomaly.
+    """
+    if units not in ("mGal", "si"):
+        raise ValueError(f"unknown units {units!r}; use 'mGal' or 'si'.")
+    g_si = _G_GRAV * _prism_potential_gradient(obs, cell_mins, cell_maxs, axis=2)
+    return 1.0e5 * g_si if units == "mGal" else g_si
+
+
+def magnetic_prism_sensitivity(obs, cell_mins, cell_maxs, *, inclination, declination, field_nt=50000.0):
+    r"""EXACT rectangular-prism total-field magnetic sensitivity under induced magnetization
+    (Bhattacharyya 1964), replacing the point-dipole approximation
+    (:func:`magnetic_dipole_sensitivity`) with the true volume integral of the induced-dipole TMI kernel
+    ``(3(b.r_hat)^2 - 1)/r^3`` over each cell.
+
+    By the same Poisson relation that ties a uniformly-magnetized body's potential to the directional
+    derivative of its equivalent-density gravity potential, the total-field anomaly is the *second*
+    directional derivative (along the field direction ``b``) of the prism's Newtonian potential
+    ``Phi(cell) = integral_cell 1/r dV'``. The *first* directional derivative is exact/closed-form (three
+    calls to :func:`_prism_potential_gradient`, one per axis, contracted with ``b``); the second is taken
+    as a central difference of that closed-form scalar along ``b`` at a step size tied to the survey's own
+    length scale, so the only non-exact piece is a well-conditioned O(h^2) finite difference of an already
+    exact function -- not a re-approximation of the cell geometry. Validated against direct quadrature of
+    the defining volume integral to ~1e-6 relative accuracy (see ``c4_prism_test.py``).
+
+    Args:
+        obs: (n_obs, 3) observation coordinates (east, north, up), metres.
+        cell_mins: (n_cells, 3) lower corner of each axis-aligned rectangular cell, metres.
+        cell_maxs: (n_cells, 3) upper corner of each axis-aligned rectangular cell, metres.
+        inclination, declination: geomagnetic field inclination/declination, degrees.
+        field_nt: ambient field strength T0, nT.
+
+    Returns:
+        ``G`` (n_obs, n_cells) such that ``G @ kappa`` is the total-field anomaly (nT).
+    """
+    b = field_direction(inclination, declination)
+    obs = np.asarray(obs, float)
+    cell_mins = np.asarray(cell_mins, float)
+    cell_maxs = np.asarray(cell_maxs, float)
+    scale = max(1.0, float(np.ptp(np.vstack([obs, cell_mins, cell_maxs]))))
+    h = 1.0e-4 * scale
+
+    def _directional_derivative(o):
+        gx = _prism_potential_gradient(o, cell_mins, cell_maxs, axis=0)
+        gy = _prism_potential_gradient(o, cell_mins, cell_maxs, axis=1)
+        gz = _prism_potential_gradient(o, cell_mins, cell_maxs, axis=2)
+        return b[0] * gx + b[1] * gy + b[2] * gz
+
+    shift = h * b[None, :]
+    second_directional = (_directional_derivative(obs + shift) - _directional_derivative(obs - shift)) / (2.0 * h)
+    return -(field_nt / (4.0 * np.pi)) * second_directional
 
 
 def depth_weighting(cell_z, z0, *, nu=3.0, eps=None):
