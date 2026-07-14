@@ -496,6 +496,7 @@ def regularized_gauss_newton(
     line_search: int = 25,
     rtol: float = 1e-4,
     verbose: bool = False,
+    reweight: Callable[[np.ndarray], np.ndarray] | None = None,
 ):
     r"""Occam-style regularized Gauss-Newton for any differentiable forward ``forward(x) -> data``.
 
@@ -519,6 +520,14 @@ def regularized_gauss_newton(
         line_search: max backtracking halvings per iteration.
         rtol: stop when the relative objective decrease falls below this.
         verbose: print per-iteration objective.
+        reweight: optional ``x -> weights`` callable (one weight per row of ``roughness``) for an
+            Iteratively Reweighted Least Squares (IRLS) surrogate of a non-quadratic model penalty --
+            e.g. :func:`mixle_pde.blocky_priors.total_variation_weights` (blocky/edge-preserving) or
+            :func:`mixle_pde.blocky_priors.minimum_support_weights` (compact-support). When given, the
+            effective smoothness operator ``R_eff = diag(sqrt(reweight(x))) @ R`` is recomputed from the
+            current iterate at the top of every Gauss-Newton iteration, and both the line-search
+            objective and the Gauss-Newton system use that iteration's ``R_eff``. ``None`` (default)
+            reproduces today's plain-quadratic behaviour exactly.
 
     Returns:
         ``(x, std)`` -- the inverted model (numpy) and a linearized posterior standard deviation per cell
@@ -533,18 +542,36 @@ def regularized_gauss_newton(
     w_t = torch.as_tensor(w)
     ref_np = np.zeros(n) if ref is None else np.asarray(ref, float)
     R = sp.eye(n, format="csr") if roughness is None else roughness.tocsr()
-    RtR = (R.T @ R).tocsc()
+
+    def _weighted_R(xv_np):
+        if reweight is None:
+            return R
+        rw = np.sqrt(np.asarray(reweight(xv_np), dtype=float))
+        if rw.shape != (R.shape[0],):
+            raise ValueError("reweight(x) must return one weight per row of `roughness`.")
+        return sp.diags(rw) @ R
+
+    R_eff = _weighted_R(np.asarray(x0, float))
+    RtR = (R_eff.T @ R_eff).tocsc()
     RtR_dense = np.asarray(RtR.todense())
 
     def objective(xv):
         r = ((forward(xv) - data_t) * w_t).detach().cpu().numpy()
-        rr = R @ (xv.detach().cpu().numpy() - ref_np)
+        rr = R_eff @ (xv.detach().cpu().numpy() - ref_np)
         return 0.5 * float(r @ r) + 0.5 * beta * float(rr @ rr)
 
     f_prev = objective(x)
     Jw = H = None
     for it in range(n_iter):
         x0d = x.detach()
+        xnp = x0d.cpu().numpy()
+        if reweight is not None:
+            # IRLS: refresh the reweighted roughness at the current iterate, and re-baseline the
+            # objective the line search below compares against so the decrease test stays meaningful.
+            R_eff = _weighted_R(xnp)
+            RtR = (R_eff.T @ R_eff).tocsc()
+            RtR_dense = np.asarray(RtR.todense())
+            f_prev = objective(x)
         pred = forward(x0d)
         # Gauss-Newton; reuse the Jacobian for `jac_every` iterations (quasi-Newton) -- the forward is
         # mildly nonlinear, so recomputing the expensive sensitivity every step is wasteful.
@@ -552,8 +579,10 @@ def regularized_gauss_newton(
             J = torch.autograd.functional.jacobian(forward, x0d, vectorize=False).detach().cpu().numpy()
             Jw = J * w[:, None]
             H = Jw.T @ Jw + beta * RtR_dense
+        elif reweight is not None:
+            H = Jw.T @ Jw + beta * RtR_dense
         rw = ((pred - data_t) * w_t).detach().cpu().numpy()
-        g = Jw.T @ rw + beta * (RtR @ (x0d.cpu().numpy() - ref_np))
+        g = Jw.T @ rw + beta * (RtR @ (xnp - ref_np))
         try:
             dx = np.linalg.solve(H, -g)
         except np.linalg.LinAlgError:
@@ -581,6 +610,10 @@ def regularized_gauss_newton(
         f_prev = f_now
     # linearized posterior std from the final Gauss-Newton Hessian
     x0d = x.detach()
+    if reweight is not None:
+        R_eff = _weighted_R(x0d.cpu().numpy())
+        RtR = (R_eff.T @ R_eff).tocsc()
+        RtR_dense = np.asarray(RtR.todense())
     J = torch.autograd.functional.jacobian(forward, x0d, vectorize=False).detach().cpu().numpy()
     Jw = J * w[:, None]
     H = Jw.T @ Jw + beta * RtR_dense
