@@ -86,6 +86,58 @@ class Observation:
         return self.noise_cov.ndim == 1
 
 
+@dataclass
+class SurveyGeometry:
+    """Maps real acquisition XYZ (electrodes/shots/receivers/flight lines) onto discretisation indices.
+
+    ``points`` is the ``(m, 3)`` real-world geometry in ``crs``; ``node_index``/``edge_index`` are the
+    resolved mesh handles the forward operators consume, so an operator is built from XYZ with no
+    hand-authored indices (workstream B7) -- replacing the manual quadrupole/edge tables the DC (around
+    :func:`dc_resistivity_forward_operator`) and CSEM (around :func:`csem_3d_forward_operator`) operators
+    used to require by hand. The node/edge-numbering rules themselves live in
+    :mod:`mixle_pde.geometry_to_mesh` (`nearest_node_indices`, `electrodes_to_schedule`,
+    `yee_edge_index`); this dataclass is the IC-4 handle that carries a survey's real geometry
+    through to the point it is resolved onto a specific grid.
+    """
+
+    points: np.ndarray
+    crs: str | None = None
+    node_index: np.ndarray | None = None
+    edge_index: np.ndarray | None = None
+
+    def __post_init__(self) -> None:
+        pts = np.atleast_2d(np.asarray(self.points, dtype=float))
+        if pts.ndim != 2 or pts.shape[1] != 3:
+            raise ValueError("points must be an (m, 3) array of (x, y, z) points.")
+        self.points = pts
+        if self.node_index is not None:
+            node_index = np.atleast_1d(np.asarray(self.node_index))
+            if node_index.shape != (pts.shape[0],):
+                raise ValueError(f"node_index must have shape ({pts.shape[0]},), got {node_index.shape}.")
+            self.node_index = node_index.astype(int)
+        if self.edge_index is not None:
+            edge_index = np.atleast_1d(np.asarray(self.edge_index))
+            if edge_index.shape != (pts.shape[0],):
+                raise ValueError(f"edge_index must have shape ({pts.shape[0]},), got {edge_index.shape}.")
+            self.edge_index = edge_index.astype(int)
+
+    def resolve(self, grid: Any) -> SurveyGeometry:
+        """Return a copy with ``node_index`` filled by snapping ``points`` onto ``grid`` (workstream B7).
+
+        ``grid`` is a :class:`~mixle_pde.latent.Field3D` (or anything exposing an ``(n, 3)``
+        ``coordinates`` array): each point is snapped onto its nearest grid node via
+        :func:`mixle_pde.geometry_to_mesh.nearest_node_indices` (a KD-tree query, never a hand-built
+        table). ``edge_index`` is left as-is -- resolving a Yee-edge id additionally needs a per-point
+        dipole axis that a bare ``grid`` does not carry; call
+        :func:`mixle_pde.geometry_to_mesh.yee_edge_index` directly for that (one point + axis at a
+        time), then assign the result onto a copy of this geometry.
+        """
+        from mixle_pde.geometry_to_mesh import nearest_node_indices
+
+        node_index = nearest_node_indices(self.points, grid)
+        return SurveyGeometry(points=self.points, crs=self.crs, node_index=node_index, edge_index=self.edge_index)
+
+
 def gaussian_log_likelihood(observation: Observation, predicted: np.ndarray) -> float:
     """``log p(observation.value | predicted)`` under the observation's OWN noise model.
 
