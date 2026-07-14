@@ -186,6 +186,14 @@ from mixle_pde.geophysics import (
     roughness_operator,
     straight_ray_operator,
 )
+from mixle_pde.groundwater import (
+    GroundwaterTransportOperator,
+    HeldOutPrediction,
+    SourcePosterior,
+    SourceRecalibration,
+    invert_source,
+    simulate_wells,
+)
 from mixle_pde.guided_wave import SAFEPlate, safe_dispersion
 from mixle_pde.heat import TransientHeat
 from mixle_pde.helmholtz_pml import helmholtz_pml_operator, solve_helmholtz_pml
@@ -570,4 +578,10 @@ __all__ = [
     "NormalModes1D",
     "refractivity_from_clutter",
     "ocean_sound_speed_inversion",
+    "GroundwaterTransportOperator",
+    "SourceRecalibration",
+    "HeldOutPrediction",
+    "SourcePosterior",
+    "simulate_wells",
+    "invert_source",
 ]
