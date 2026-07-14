@@ -135,3 +135,168 @@ def fluid_substitute(
     rho_out = rho + phi * (rho_fl_out - rho_fl_in)
     Vp_out, Vs_out = velocity_from_moduli(K_sat_out, mu, rho_out, ops=ops)
     return Vp_out, Vs_out, rho_out
+
+
+# --- Uncertainty propagation -------------------------------------------------------------------
+#
+# `fluid_substitute` above is a point-in, point-out map: every rock-physics input (mineral modulus,
+# in-situ/target fluid moduli, porosity) is treated as known exactly. In practice those come from lab
+# measurements or regional defaults with real scatter, and an elastic-FWI-driven reservoir prediction
+# that reports a single fluid-substituted velocity hides how much that number can move on plausible
+# rock-physics uncertainty alone -- exactly the kind of overconfident, prior-narrow number the honesty
+# flag elsewhere in the stack (an IC-1-style posterior's `prior_dominated`) exists to catch. The two
+# functions below propagate named parameter uncertainty through the same deterministic core by Monte
+# Carlo, and report a finite-difference sensitivity to the single input (the target-fluid modulus) that
+# usually carries the most reservoir-engineering uncertainty (unswept oil vs. brine vs. gas cap).
+
+_LOGNORMAL_PRIOR_PARAMS = ("K_min", "K_fl_in", "K_fl_out", "rho_fl_out")
+_CLIPPED_NORMAL_PRIOR_PARAMS = ("phi",)
+
+
+def _lognormal_draws(mean: float, std: float, n: int, rng: np.random.Generator) -> np.ndarray:
+    """``n`` draws from a lognormal moment-matched to the linear-space ``(mean, std)``.
+
+    Moduli and densities are strictly positive, so a lognormal is the natural uncertainty model here
+    (no support below zero, skew grows with the coefficient of variation) rather than a normal that
+    would need ad hoc truncation. ``std == 0`` degenerates to the deterministic value at every draw.
+    """
+    if mean <= 0.0:
+        raise ValueError(f"lognormal prior mean must be positive, got {mean!r}")
+    if std < 0.0:
+        raise ValueError(f"prior std must be non-negative, got {std!r}")
+    if std == 0.0:
+        return np.full(n, float(mean))
+    sigma2 = np.log1p((std / mean) ** 2)
+    mu = np.log(mean) - 0.5 * sigma2
+    return rng.lognormal(mean=mu, sigma=np.sqrt(sigma2), size=n)
+
+
+def _clipped_normal_draws(
+    mean: float, std: float, n: int, rng: np.random.Generator, *, lo: float = 1e-4, hi: float = 1.0 - 1e-4
+) -> np.ndarray:
+    """``n`` draws from a normal clipped to ``(lo, hi)`` -- the porosity uncertainty model.
+
+    Porosity is bounded in ``(0, 1)`` and Gassmann's denominators divide by ``phi`` and ``1 - phi``, so
+    draws must stay strictly interior; clipping (rather than rejection sampling) keeps the sampler
+    closed-form and always-terminating at the cost of a little mass pile-up at the boundary, which is
+    negligible for any prior whose mean sits comfortably away from 0 or 1.
+    """
+    if std == 0.0:
+        return np.full(n, float(mean))
+    draws = rng.normal(loc=mean, scale=std, size=n)
+    return np.clip(draws, lo, hi)
+
+
+def fluid_substitute_uncertain(
+    Vp: Any,
+    Vs: Any,
+    rho: Any,
+    *,
+    phi: Any,
+    K_min: Any,
+    rho_min: Any,
+    K_fl_in: Any,
+    rho_fl_in: Any,
+    K_fl_out: Any,
+    rho_fl_out: Any,
+    priors: dict[str, tuple[float, float]],
+    n: int = 2048,
+    rng: np.random.Generator | None = None,
+) -> dict[str, np.ndarray]:
+    """Monte Carlo-propagate rock-physics parameter uncertainty through :func:`fluid_substitute`.
+
+    ``priors`` names a subset of ``{K_min, K_fl_in, K_fl_out, phi, rho_fl_out}`` and gives each a
+    ``(mean, std)`` in the same physical units as the corresponding keyword argument. Every named
+    parameter is drawn independently ``n`` times (no correlated mineral/fluid priors -- see module
+    docstring non-goals): moduli and fluid/mineral densities are drawn lognormal (moment-matched to
+    the given ``(mean, std)``), porosity is drawn from a clipped normal. Any of the five parameters
+    absent from ``priors`` is held fixed at its passed-in deterministic value for every draw. The
+    unmodified, deterministic ``fluid_substitute`` core (this function's only call into Gassmann) is
+    then evaluated once, vectorized over all ``n`` draws in a single elementwise call, since the
+    transform is already backend-agnostic elementwise arithmetic.
+
+    Returns ``{'Vp': (n,), 'Vs': (n,), 'rho': (n,)}`` arrays of substituted-fluid draws -- an ensemble
+    a caller can summarize (mean, credible interval, std) instead of trusting one point estimate.
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+    known_params = set(_LOGNORMAL_PRIOR_PARAMS) | set(_CLIPPED_NORMAL_PRIOR_PARAMS)
+    unknown = set(priors) - known_params
+    if unknown:
+        raise ValueError(f"unsupported prior keys {sorted(unknown)}; expected a subset of {sorted(known_params)}")
+
+    nominal = {"K_min": K_min, "K_fl_in": K_fl_in, "K_fl_out": K_fl_out, "phi": phi, "rho_fl_out": rho_fl_out}
+    draws: dict[str, np.ndarray] = {}
+    for name, value in nominal.items():
+        if name not in priors:
+            draws[name] = np.full(n, float(value))
+        elif name in _CLIPPED_NORMAL_PRIOR_PARAMS:
+            mean, std = priors[name]
+            draws[name] = _clipped_normal_draws(mean, std, n, rng)
+        else:
+            mean, std = priors[name]
+            draws[name] = _lognormal_draws(mean, std, n, rng)
+
+    Vp_out, Vs_out, rho_out = fluid_substitute(
+        Vp,
+        Vs,
+        rho,
+        phi=draws["phi"],
+        K_min=draws["K_min"],
+        rho_min=rho_min,
+        K_fl_in=draws["K_fl_in"],
+        rho_fl_in=rho_fl_in,
+        K_fl_out=draws["K_fl_out"],
+        rho_fl_out=draws["rho_fl_out"],
+    )
+    return {
+        "Vp": np.asarray(Vp_out, dtype=float),
+        "Vs": np.asarray(Vs_out, dtype=float),
+        "rho": np.asarray(rho_out, dtype=float),
+    }
+
+
+def fluid_modulus_sensitivity(
+    Vp: Any,
+    Vs: Any,
+    rho: Any,
+    *,
+    phi: Any,
+    K_min: Any,
+    rho_min: Any,
+    K_fl_in: Any,
+    rho_fl_in: Any,
+    K_fl_out: Any,
+    rho_fl_out: Any,
+    delta: float = 0.05,
+) -> dict[str, float]:
+    """Central finite-difference sensitivity of ``fluid_substitute``'s output to ``K_fl_out``.
+
+    Perturbs only the target-fluid modulus, ``K_fl_out +/- delta``, re-running the deterministic
+    Gassmann substitution at each end and differencing: ``d(Vp, Vs, rho) / d K_fl_out`` evaluated at
+    the passed-in nominal point. This is the single input a reservoir engineer is usually least
+    certain about at the field boundary (unswept oil vs. brine vs. free gas all show up as a different
+    ``K_fl_out``), so reporting it lets a downstream FWI-to-reservoir handoff flag where the fluid-type
+    call is not pinned down by the seismic alone, instead of collapsing that uncertainty silently.
+
+    Returns ``{'Vp': float, 'Vs': float, 'rho': float}``.
+    """
+
+    def _at(k_fl_out: float) -> tuple[Any, Any, Any]:
+        return fluid_substitute(
+            Vp,
+            Vs,
+            rho,
+            phi=phi,
+            K_min=K_min,
+            rho_min=rho_min,
+            K_fl_in=K_fl_in,
+            rho_fl_in=rho_fl_in,
+            K_fl_out=k_fl_out,
+            rho_fl_out=rho_fl_out,
+        )
+
+    plus = _at(K_fl_out + delta)
+    minus = _at(K_fl_out - delta)
+    names = ("Vp", "Vs", "rho")
+    return {name: float((p - m) / (2.0 * delta)) for name, p, m in zip(names, plus, minus)}
