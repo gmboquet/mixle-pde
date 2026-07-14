@@ -34,7 +34,11 @@ class Observation:
 
     ``noise_cov`` is either ``(n,)`` (diagonal variances -- independent noise) or ``(n, n)`` (a full
     covariance, e.g. correlated instrument drift). ``time`` is ``None`` for a static (time-invariant)
-    observation, or the observation time for a 4D time-lapse field.
+    observation, or the observation time for a 4D time-lapse field. ``crs`` is an EPSG string (e.g.
+    ``"EPSG:32613"``) naming the coordinate reference system ``location`` is expressed in, or ``None``
+    when ``location`` is already mesh-local; see :mod:`mixle_pde.geospatial.crs` to reproject it.
+    ``modality`` is the coarse sensor family (``"gravity"``, ``"seismic"``, ``"assay"``, ...) used for
+    routing/UI, distinct from the fine-grained ``kind`` a :class:`ForwardOperator` dispatches on.
     """
 
     kind: str
@@ -44,6 +48,8 @@ class Observation:
     time: float | None = None
     units: str = ""
     provenance: dict[str, Any] = field(default_factory=dict)
+    crs: str | None = None
+    modality: str = ""
 
     def __post_init__(self) -> None:
         loc = np.atleast_2d(np.asarray(self.location, dtype=float))
