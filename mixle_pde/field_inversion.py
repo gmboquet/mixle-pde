@@ -188,6 +188,9 @@ def sparse_linear_gaussian_invert(
     prior: FieldGaussianPrior,
     *,
     jitter: float = 1.0e-10,
+    low_rank_k: int | None = None,
+    low_rank_oversample: int = 10,
+    rng: np.random.Generator | None = None,
 ) -> PosteriorField3D:
     """Sparse-precision linear-Gaussian posterior over ``grid``.
 
@@ -196,6 +199,15 @@ def sparse_linear_gaussian_invert(
     posterior as a :class:`~mixle_pde.latent.SparsePosteriorPrecision` instead of materializing the
     dense covariance. Marginal variances and linear derived quantities are recovered through sparse
     covariance solves.
+
+    ``low_rank_k`` (C2) attaches a matrix-free low-rank Laplace-approximation UQ instead: a randomized
+    top-``low_rank_k`` eigendecomposition of the prior-preconditioned data-misfit Hessian
+    (:func:`mixle_pde.uq_lowrank.randomized_lowrank_hessian`, accessed only through Hessian-vector
+    products -- the misfit precision is never assembled beyond the sparse accumulation already needed for
+    the mean) gives the Bui-Thanh/Flath marginal-variance correction ``diag(P) - rowwise ||C U||^2``. The
+    returned posterior then carries ``diag_var`` (marginal variances only, no correlated sampling) rather
+    than the full ``precision_factor`` -- useful when even factoring the exact posterior precision is
+    undesirable at scale. Leave ``low_rank_k=None`` (default) for the exact sparse-precision posterior.
     """
     if grid.bounds is not None:
         raise ValueError(
@@ -208,7 +220,8 @@ def sparse_linear_gaussian_invert(
     import scipy.sparse as sp
 
     n = grid.n
-    lam = prior.precision_sparse(grid).tocsr()
+    Q = prior.precision_sparse(grid).tocsr()
+    lam = Q.copy()
     m0 = prior.mean_vector(grid)
     rhs = lam @ m0
 
@@ -236,7 +249,68 @@ def sparse_linear_gaussian_invert(
     precision = (lam + jitter * sp.eye(n, format="csr")).tocsc()
     factor = SparsePosteriorPrecision(precision)
     mean = factor.solve(rhs)
-    return PosteriorField3D(grid=grid, mean=mean, map=mean.copy(), precision_factor=factor)
+
+    if low_rank_k is None:
+        return PosteriorField3D(grid=grid, mean=mean, map=mean.copy(), precision_factor=factor)
+
+    diag_var = _low_rank_marginal_variance(
+        Q.tocsc(),
+        (lam - Q).tocsr(),
+        n,
+        low_rank_k,
+        rng if rng is not None else np.random.default_rng(),
+        oversample=low_rank_oversample,
+    )
+    return PosteriorField3D(grid=grid, mean=mean, map=mean.copy(), diag_var=diag_var)
+
+
+def _low_rank_marginal_variance(
+    prior_precision_csc,
+    misfit_precision_csr,
+    n: int,
+    k: int,
+    rng: np.random.Generator,
+    *,
+    oversample: int,
+) -> np.ndarray:
+    """C2: Bui-Thanh/Flath low-rank Laplace marginal variance, matrix-free.
+
+    ``marginal_variance = diag(P) - rowwise ||C U diag(sqrt(s/(1+s)))||^2`` where ``P = Q^-1`` is the
+    prior covariance, ``C`` is a matrix square root of ``P`` built from the prior precision's own sparse
+    LDL^T factor (never a dense ``P``), and ``(U, s)`` are the top-``k`` eigenpairs of the whitened
+    data-misfit Hessian ``C^T misfit_precision C``, found via
+    :func:`mixle_pde.uq_lowrank.randomized_lowrank_hessian` -- ``misfit_precision`` itself never leaves
+    sparse HVP form.
+    """
+    from scipy.sparse.linalg import spsolve_triangular
+
+    from mixle_pde.latent import SparsePosteriorPrecision
+    from mixle_pde.uq_lowrank import _ldlt_natural_order, randomized_lowrank_hessian
+
+    prior_diag = SparsePosteriorPrecision(prior_precision_csc).marginal_variance()
+
+    L, D = _ldlt_natural_order(prior_precision_csc)
+    sqrt_d = np.sqrt(np.clip(D, 1.0e-300, None))
+    L_csr = L.tocsr()
+    Lt_csr = L.T.tocsr()
+
+    def _prior_sqrt(v: np.ndarray) -> np.ndarray:
+        """``C v = L^-T D^-1/2 v``, a valid square-root factor of the prior covariance ``P = Q^-1``."""
+        return spsolve_triangular(Lt_csr, v / sqrt_d, lower=False)
+
+    def _prior_sqrt_transpose(v: np.ndarray) -> np.ndarray:
+        """``C^T v = D^-1/2 L^-1 v``."""
+        return spsolve_triangular(L_csr, v, lower=True) / sqrt_d
+
+    def hvp(v: np.ndarray) -> np.ndarray:
+        return _prior_sqrt_transpose(misfit_precision_csr @ _prior_sqrt(v))
+
+    U, s = randomized_lowrank_hessian(hvp, n, k, rng, oversample=oversample)
+    mapped = np.column_stack([_prior_sqrt(U[:, i]) for i in range(U.shape[1])]) if U.shape[1] else U
+    scale = np.sqrt(s / (1.0 + s))
+    correction = mapped * scale[None, :]
+    reduced = prior_diag - np.sum(correction**2, axis=1)
+    return np.clip(reduced, 0.0, None)
 
 
 @dataclass
