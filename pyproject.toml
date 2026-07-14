@@ -24,6 +24,11 @@ dependencies = [
 test = ["pytest>=8", "pytest-xdist", "torch"]
 lint = ["ruff==0.15.17"]
 docs = ["sphinx>=7", "furo"]
+raster = ["rasterio"]
+netcdf = ["xarray", "netCDF4"]
+grib = ["cfgrib", "xarray"]
+data = ["segyio", "lasio", "rasterio", "harmonica", "verde",
+        "geopandas", "fiona", "pyproj", "pandas", "openpyxl"]
 
 [project.urls]
 Homepage = "https://github.com/gmboquet/mixle-pde"
