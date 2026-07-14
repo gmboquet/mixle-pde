@@ -44,7 +44,7 @@ def _dense_posterior(seed=0):
     A = rng.normal(size=(n, n))
     cov = A @ A.T / n + np.eye(n)  # SPD dense covariance
     mean = rng.normal(size=n) * 5.0
-    return grid, PosteriorField3D(grid=grid, mean=mean, cov=cov), cov
+    return grid, PosteriorField3D(grid=grid, mean=mean, dense_cov=cov), cov
 
 
 def _sampled_posterior():
@@ -271,21 +271,21 @@ class CompressionTest(unittest.TestCase):
     def test_to_diagonal_keeps_marginals(self):
         grid, post, cov = _dense_posterior()
         diag = to_diagonal(post)
-        self.assertIsNone(diag.cov)
+        self.assertIsNone(diag.dense_cov)
         np.testing.assert_allclose(diag.marginal_variance, np.diag(cov), rtol=1e-9)
 
     def test_to_ensemble_draws_samples(self):
         grid, post, _ = _dense_posterior()
         ens = to_ensemble(post, 200, np.random.default_rng(0))
-        self.assertEqual(ens.samples.shape, (200, grid.n))
+        self.assertEqual(ens.draws.shape, (200, grid.n))
         np.testing.assert_allclose(ens.mean(), post.mean, atol=1.0)  # ensemble mean ~ posterior mean
 
     def test_to_ensemble_resamples_empirical_posterior(self):
         grid, post, samples = _sampled_posterior()
         ens = to_ensemble(post, 20, np.random.default_rng(8))
 
-        self.assertEqual(ens.samples.shape, (20, grid.n))
-        self.assertTrue(all(np.any(np.all(row == samples, axis=1)) for row in ens.samples))
+        self.assertEqual(ens.draws.shape, (20, grid.n))
+        self.assertTrue(all(np.any(np.all(row == samples, axis=1)) for row in ens.draws))
 
     def test_rank_bounds_are_validated(self):
         grid, post, _ = _dense_posterior()

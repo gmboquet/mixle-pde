@@ -159,7 +159,7 @@ class LinearGaussianInversionTest(unittest.TestCase):
         dense = linear_gaussian_invert(self.grid, [self.gravity, self.borehole], self.registry, self.prior)
         sparse = sparse_linear_gaussian_invert(self.grid, [self.gravity, self.borehole], self.registry, self.prior)
 
-        self.assertIsNone(sparse.cov)
+        self.assertIsNone(sparse.dense_cov)
         self.assertIsNotNone(sparse.precision_factor)
         np.testing.assert_allclose(sparse.mean, dense.mean, rtol=1.0e-8, atol=1.0e-8)
         np.testing.assert_allclose(sparse.marginal_variance, dense.marginal_variance, rtol=1.0e-6, atol=1.0e-6)

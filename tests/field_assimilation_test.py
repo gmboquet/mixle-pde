@@ -120,7 +120,7 @@ class Assimilation4DTest(unittest.TestCase):
             self.assertTrue(np.all(s.marginal_variance > 0))
             samples = s.sample(16, self.rng)
             self.assertEqual(samples.shape, (16, self.grid.n))
-            lo, hi = s.credible_interval(0.1)
+            lo, hi = s.credible_interval(level=0.9)
             self.assertTrue(np.all(hi >= lo))
 
     def test_4d_posterior_exposes_time_axis_artifacts(self):

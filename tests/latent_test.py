@@ -141,7 +141,7 @@ class PosteriorField3DConstructionTestCase(unittest.TestCase):
         coords = _grid()
         f = Field3D(coordinates=coords, spacing=1.0, units="m", property_name="x")
         with self.assertRaises(ValueError):
-            PosteriorField3D(grid=f, mean=np.zeros(f.n), cov=np.eye(f.n), diag_var=np.ones(f.n))
+            PosteriorField3D(grid=f, mean=np.zeros(f.n), dense_cov=np.eye(f.n), diag_var=np.ones(f.n))
 
     def test_sparse_precision_marginals_match_dense_inverse(self):
         import scipy.sparse as sp
@@ -177,7 +177,7 @@ class SamplingTestCase(unittest.TestCase):
         diag_var = np.full(f.n, 0.1)
         cov = low_rank @ low_rank.T + np.diag(diag_var)
 
-        post_dense = PosteriorField3D(grid=f, mean=np.zeros(f.n), cov=cov)
+        post_dense = PosteriorField3D(grid=f, mean=np.zeros(f.n), dense_cov=cov)
         post_lr = PosteriorField3D(grid=f, mean=np.zeros(f.n), low_rank=low_rank, diag_var=diag_var)
         np.testing.assert_allclose(post_dense.marginal_variance, post_lr.marginal_variance, atol=1e-10)
 

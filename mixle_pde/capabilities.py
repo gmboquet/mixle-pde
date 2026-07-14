@@ -2042,7 +2042,7 @@ def _run_earth_sparse_posterior_factorization() -> ScenarioResult:
     mean_error = float(np.linalg.norm(sparse.mean - dense.mean))
     marginal_error = float(np.linalg.norm(sparse.marginal_variance - dense.marginal_variance))
     derived_std_error = abs(float(sparse_q.std - dense_q.std))
-    storage_ok = sparse.cov is None and sparse.precision_factor is not None
+    storage_ok = sparse.dense_cov is None and sparse.precision_factor is not None
     tol = 1.0e-7
     passed = storage_ok and mean_error <= tol and marginal_error <= tol and derived_std_error <= tol
     return _result(
@@ -2093,7 +2093,7 @@ def _run_earth_posterior_extraction() -> ScenarioResult:
             [0.0, 1.0, 3.0, 49.0],
         ]
     )
-    posterior = PosteriorField3D(grid=grid, mean=mean, cov=cov)
+    posterior = PosteriorField3D(grid=grid, mean=mean, dense_cov=cov)
     point = marginal_at_points(posterior, [1, 3])
     sec = section(posterior, z=-30.0)
     region = region_summary(posterior, np.array([False, True, False, True]))
@@ -2145,8 +2145,8 @@ def _run_earth_posterior_extraction() -> ScenarioResult:
         and slice4d.mean.shape == (grid.n,)
         and compact.low_rank.shape == (grid.n, 2)
         and diagonal.diag_var.shape == (grid.n,)
-        and ensemble.samples.shape == (8, grid.n)
-        and sampled_ensemble.samples.shape == (8, grid.n)
+        and ensemble.draws.shape == (8, grid.n)
+        and sampled_ensemble.draws.shape == (8, grid.n)
     )
     return _result(
         "earth_posterior_extraction",
@@ -2180,7 +2180,7 @@ def _run_earth_posterior_calibration() -> ScenarioResult:
     grid = Field3D(coords, spacing=1.0, units="ppm", property_name="cu_ppm")
     truth = np.array([2.0, 3.0, 4.0, 8.0, 12.0, 16.0])
     cov = np.diag([0.25, 0.25, 0.25, 4.0, 9.0, 16.0])
-    posterior = PosteriorField3D(grid, mean=truth.copy(), cov=cov)
+    posterior = PosteriorField3D(grid, mean=truth.copy(), dense_cov=cov)
     registry = ForwardOperatorRegistry()
     registry.register(borehole_forward_operator())
     observed = Observation("borehole", grid.coordinates[:3], truth[:3], np.full(3, 0.25))
@@ -2322,11 +2322,7 @@ def _run_gas_zero_d_combustion_pressure_rise() -> ScenarioResult:
         and bool(np.all(reactive_fuel >= 0.0))
     )
     passed = (
-        finite
-        and pressure_ratio > 1.05
-        and fuel_burned > 0.0
-        and np.all(result.fuel_fraction >= 0.0)
-        and reactive_ok
+        finite and pressure_ratio > 1.05 and fuel_burned > 0.0 and np.all(result.fuel_fraction >= 0.0) and reactive_ok
     )
     return _result(
         "gas_zero_d_combustion_pressure_rise",

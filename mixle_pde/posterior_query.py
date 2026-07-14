@@ -102,7 +102,7 @@ def marginal_at_points(posterior: Posterior3D, indices, *, alpha: float = 0.1) -
         physical = posterior.physical_samples
         mean_phys = np.mean(physical, axis=0)
         std_phys = np.std(physical, axis=0, ddof=1) if physical.shape[0] > 1 else np.zeros(grid.n)
-        lo, hi = posterior.credible_interval(alpha)
+        lo, hi = posterior.credible_interval(level=1.0 - alpha)
     else:
         mean_phys = grid.from_unconstrained(posterior.mean)
         std_u = posterior.marginal_std
@@ -177,9 +177,9 @@ def marginal_time_series(posterior: Posterior4D, indices, *, alpha: float = 0.1)
         z = ndtri(1.0 - alpha / 2.0)
         lo = grid.from_unconstrained(posterior.mean_array - z * std_u)[:, idx]
         hi = grid.from_unconstrained(posterior.mean_array + z * std_u)[:, idx]
-        std = np.abs(grid.from_unconstrained(posterior.mean_array + std_u) - grid.from_unconstrained(posterior.mean_array))[
-            :, idx
-        ]
+        std = np.abs(
+            grid.from_unconstrained(posterior.mean_array + std_u) - grid.from_unconstrained(posterior.mean_array)
+        )[:, idx]
     return MarginalTimeSeries(
         indices=idx,
         times=posterior.times.copy(),
@@ -287,8 +287,8 @@ def derived_quantity(
     if posterior.grid.bounds is not None:
         return derived_quantity_physical(posterior, w, n=n, rng=rng)
     mean = float(w @ posterior.mean)
-    if posterior.cov is not None:
-        var = float(w @ posterior.cov @ w)
+    if posterior.dense_cov is not None:
+        var = float(w @ posterior.dense_cov @ w)
     elif posterior.precision_factor is not None:
         cov_w = posterior.precision_factor.solve(w)
         var = float(w @ cov_w)
@@ -399,12 +399,12 @@ def compress_to_low_rank(posterior: PosteriorField3D, rank: int) -> PosteriorFie
     diagonal is set so every cell's MARGINAL variance is preserved exactly -- so credible intervals and
     per-cell marginals are unchanged, while storage drops from ``O(n^2)`` to ``O(n * rank)``.
     """
-    if posterior.cov is None:
+    if posterior.dense_cov is None:
         raise ValueError("compress_to_low_rank needs a dense-covariance posterior.")
     n = posterior.grid.n
     if not 1 <= rank <= n:
         raise ValueError(f"rank must be in [1, {n}].")
-    cov = posterior.cov
+    cov = posterior.dense_cov
     vals, vecs = np.linalg.eigh(cov)  # ascending
     keep = slice(n - rank, n)
     lam = np.clip(vals[keep], 0.0, None)
@@ -433,18 +433,23 @@ def to_diagonal(posterior: PosteriorField3D) -> PosteriorField3D:
 
 @dataclass
 class PosteriorEnsemble:
-    """Ensemble storage: a fixed set of posterior sample vectors (physical units) over a grid."""
+    """Ensemble storage: a fixed set of posterior sample vectors (physical units) over a grid.
+
+    The draws are stored under ``draws`` (not ``samples``) because ``samples`` is reserved for
+    IC-1's ``Posterior.samples(n, rng)`` **method** name; a plural ``samples`` **attribute** here
+    would collide with it.
+    """
 
     grid: Field3D
-    samples: np.ndarray  # (n_samples, grid.n)
+    draws: np.ndarray  # (n_samples, grid.n)
 
     def mean(self) -> np.ndarray:
-        return self.samples.mean(axis=0)
+        return self.draws.mean(axis=0)
 
     def std(self) -> np.ndarray:
-        return self.samples.std(axis=0)
+        return self.draws.std(axis=0)
 
 
 def to_ensemble(posterior: Posterior3D, n_samples: int, rng: np.random.Generator) -> PosteriorEnsemble:
     """Draw or resample a fixed posterior ensemble (physical units) for downstream consumers."""
-    return PosteriorEnsemble(grid=posterior.grid, samples=posterior.sample(int(n_samples), rng))
+    return PosteriorEnsemble(grid=posterior.grid, draws=posterior.sample(int(n_samples), rng))

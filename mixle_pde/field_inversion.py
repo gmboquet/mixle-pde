@@ -189,7 +189,7 @@ def linear_gaussian_invert(
 
     cov = dense_spd_solve(lam + jitter * np.eye(n), np.eye(n))
     mean = cov @ rhs
-    return PosteriorField3D(grid=grid, mean=mean, map=mean.copy(), cov=cov)
+    return PosteriorField3D(grid=grid, mean=mean, map=mean.copy(), dense_cov=cov)
 
 
 def sparse_linear_gaussian_invert(
@@ -336,8 +336,8 @@ class PosteriorPredictiveCheck:
 
 def _linear_predictive_variance(posterior: PosteriorField3D, jac: np.ndarray) -> np.ndarray:
     """Diagonal of ``J cov J.T`` for any posterior covariance storage mode."""
-    if posterior.cov is not None:
-        return np.diag(jac @ posterior.cov @ jac.T)
+    if posterior.dense_cov is not None:
+        return np.diag(jac @ posterior.dense_cov @ jac.T)
     if posterior.precision_factor is not None:
         cov_jt = posterior.precision_factor.solve(jac.T)
         return np.sum(jac * cov_jt.T, axis=1)

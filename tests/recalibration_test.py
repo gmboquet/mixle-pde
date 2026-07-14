@@ -30,7 +30,7 @@ class RecalibrationTest(unittest.TestCase):
         # are unit-normal by construction and the chi-square inflation is ~1.
         mean = truth + rng.standard_normal(n) * sigma
         cov = np.eye(n) * sigma**2
-        self.posterior = PosteriorField3D(self.grid, mean=mean, cov=cov)
+        self.posterior = PosteriorField3D(self.grid, mean=mean, dense_cov=cov)
 
         # Held-out observations are the (near-noiseless) synthetic truth -- scoring them against the
         # posterior mean/covariance measures exactly the posterior's own claimed-vs-actual error.
@@ -48,7 +48,7 @@ class RecalibrationTest(unittest.TestCase):
         self.assertGreaterEqual(well_fit_fit.coverage, 0.85)
 
         # Inject overconfidence: shrink the claimed covariance by 9x (std by 3x).
-        overconfident = PosteriorField3D(self.grid, mean=self.posterior.mean, cov=self.posterior.cov / 9.0)
+        overconfident = PosteriorField3D(self.grid, mean=self.posterior.mean, dense_cov=self.posterior.dense_cov / 9.0)
         before_fit = heldout_observation_check(overconfident, self.registry, self.held_out, alpha=alpha)
         self.assertLess(before_fit.coverage, 0.5)
 

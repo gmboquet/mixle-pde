@@ -165,7 +165,9 @@ class PosteriorField4D:
         """
         if not interpolate:
             i = self._index_of(time)
-            return PosteriorField3D(grid=self.grid, mean=self.means[i], map=self.means[i].copy(), cov=self.covs[i])
+            return PosteriorField3D(
+                grid=self.grid, mean=self.means[i], map=self.means[i].copy(), dense_cov=self.covs[i]
+            )
         t = float(time)
         if t < self.times[0] or t > self.times[-1]:
             raise ValueError("time is outside the posterior time range.")
@@ -180,7 +182,7 @@ class PosteriorField4D:
         weight = (t - self.times[left]) / (self.times[right] - self.times[left])
         mean = (1.0 - weight) * self.means[left] + weight * self.means[right]
         cov = (1.0 - weight) * self.covs[left] + weight * self.covs[right]
-        return PosteriorField3D(grid=self.grid, mean=mean, map=mean.copy(), cov=cov)
+        return PosteriorField3D(grid=self.grid, mean=mean, map=mean.copy(), dense_cov=cov)
 
     def cross_covariance(self, time_a: float, time_b: float) -> np.ndarray:
         """Cross-time covariance block between two assimilated times."""
@@ -196,7 +198,7 @@ class PosteriorField4D:
         lows: list[np.ndarray] = []
         highs: list[np.ndarray] = []
         for time in self.times:
-            lo, hi = self.at_time(float(time)).credible_interval(alpha)
+            lo, hi = self.at_time(float(time)).credible_interval(level=1.0 - alpha)
             lows.append(lo)
             highs.append(hi)
         return np.vstack(lows), np.vstack(highs)

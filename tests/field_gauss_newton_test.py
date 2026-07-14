@@ -86,7 +86,7 @@ class GaussNewtonInversionTest(unittest.TestCase):
         # every posterior sample also respects the bound
         samples = post.sample(64, self.rng)
         self.assertTrue(np.all(samples >= 0.0))
-        lo, hi = post.credible_interval(0.1)
+        lo, hi = post.credible_interval(level=0.9)
         self.assertTrue(np.all(lo >= 0.0))
 
     def test_converges_and_reduces_the_data_misfit(self):
