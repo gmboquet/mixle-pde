@@ -1,11 +1,25 @@
 """Field3D / PosteriorField3D: construction, bound transforms, sampling, credible intervals, slicing."""
 
+import hashlib
+import json
 import unittest
 
 import numpy as np
 
-from mixle_pde.latent import Field3D, Field4D, PosteriorField3D, SparsePosteriorPrecision
+from mixle_pde.latent import PROVENANCE_HASH_KEY, Field3D, Field4D, PosteriorField3D, SparsePosteriorPrecision
 from mixle_pde.mesh import box_simplex_mesh, moving_mesh, pipe_radial_deformation
+
+
+def _sha256_of_arrays(arrays: dict) -> str:
+    """IC-2's frozen hashing rule (`mixle_pde.io.artifacts.sha256_of_arrays`), copied verbatim here so
+    this test does not depend on E2's artifact-I/O module landing first (E7 depends on E2, but only on
+    the hashing RULE, which is frozen in notes/exec/contracts.md and reproduced identically wherever it
+    is needed ahead of E2 merging)."""
+    h = hashlib.sha256()
+    for k in sorted(arrays):
+        h.update(k.encode("utf-8"))
+        h.update(memoryview(arrays[k]).tobytes() if hasattr(arrays[k], "tobytes") else bytes(arrays[k]))
+    return h.hexdigest()
 
 
 def _grid(n_per_axis=3):
@@ -258,6 +272,67 @@ class SliceTestCase(unittest.TestCase):
         post = PosteriorField3D(grid=f, mean=np.zeros(f.n), diag_var=np.ones(f.n))
         with self.assertRaises(ValueError):
             post.slice()
+
+
+class ProvenanceContentHashTestCase(unittest.TestCase):
+    """E7 (cross-chain provenance receipt) algorithm step 1: on inversion, attach the IC-2
+    content_hash of the saved posterior to its provenance and serialise it -- no more free-form
+    in-memory dict."""
+
+    def test_attach_content_hash_stamps_the_frozen_key(self):
+        coords = _grid()
+        f = Field3D(coordinates=coords, spacing=1.0, units="m", property_name="density")
+        post = PosteriorField3D(grid=f, mean=np.full(f.n, 2670.0), diag_var=np.full(f.n, 12.0))
+
+        # simulate what E2's `save_posterior` would digest: the posterior's own arrays.
+        arrays = {"mean": post.mean, "diag_var": post.diag_var}
+        digest = _sha256_of_arrays(arrays)
+
+        post.grid.attach_content_hash(digest, stage="inversion", parent="dataset-hash-abc123")
+
+        self.assertEqual(post.grid.provenance[PROVENANCE_HASH_KEY], digest)
+        self.assertEqual(post.grid.provenance["stage"], "inversion")
+        self.assertEqual(post.grid.provenance["parent"], "dataset-hash-abc123")
+        # the hash is independently re-derivable, not merely asserted.
+        self.assertEqual(_sha256_of_arrays(arrays), digest)
+        self.assertEqual(len(digest), 64)
+
+    def test_attach_content_hash_preserves_existing_provenance(self):
+        coords = _grid()
+        f = Field3D(
+            coordinates=coords,
+            spacing=1.0,
+            units="m",
+            property_name="density",
+            provenance={"source": "gravity_survey_2026"},
+        )
+        f.attach_content_hash("deadbeef")
+        self.assertEqual(f.provenance["source"], "gravity_survey_2026")
+        self.assertEqual(f.provenance[PROVENANCE_HASH_KEY], "deadbeef")
+
+    def test_serialise_provenance_is_json_round_trippable(self):
+        coords = _grid()
+        f = Field3D(
+            coordinates=coords,
+            spacing=1.0,
+            units="m",
+            property_name="density",
+            provenance={"grid_shape": np.array([3, 3, 3]), "note": "synthetic"},
+        )
+        f.attach_content_hash("abc123", stage="inversion")
+
+        serialised = f.serialise_provenance()
+        self.assertNotIsInstance(serialised["grid_shape"], np.ndarray)
+        round_tripped = json.loads(json.dumps(serialised))
+        self.assertEqual(round_tripped[PROVENANCE_HASH_KEY], "abc123")
+        self.assertEqual(round_tripped["grid_shape"], [3, 3, 3])
+        self.assertEqual(round_tripped["note"], "synthetic")
+
+    def test_attach_content_hash_fails_fast_on_unserialisable_extra(self):
+        coords = _grid()
+        f = Field3D(coordinates=coords, spacing=1.0, units="m", property_name="density")
+        with self.assertRaises(TypeError):
+            f.attach_content_hash("abc123", not_json_safe={1, 2, 3})
 
 
 if __name__ == "__main__":

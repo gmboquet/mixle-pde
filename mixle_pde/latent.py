@@ -20,11 +20,35 @@ endpoints and ordering survive the map).
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 from scipy.special import ndtri
+
+#: The frozen provenance key IC-2 (`mixle_pde.io.artifacts`) writes its saved-artifact digest under;
+#: `Field3D.attach_content_hash` stamps a lineage edge onto the SAME key so a receipt walking
+#: data -> inversion -> interpretation -> decision (E7) reads one consistent name at every hop.
+PROVENANCE_HASH_KEY = "content_hash"
+
+
+def _json_safe(value: Any) -> Any:
+    """Coerce ``value`` into a JSON-serialisable equivalent.
+
+    Numpy scalars/arrays become plain Python types; dicts/lists/tuples are walked recursively.
+    Everything else passes through unchanged (so a value ``json.dumps`` cannot handle still raises,
+    rather than being silently swallowed here -- see :meth:`Field3D.attach_content_hash`).
+    """
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
 
 
 @dataclass
@@ -147,6 +171,32 @@ class Field3D:
     def geometry_kind(self) -> str:
         """Return ``"simplex_mesh"`` for meshed fields, otherwise ``"point_grid"``."""
         return "simplex_mesh" if self.mesh is not None else "point_grid"
+
+    def serialise_provenance(self) -> dict[str, Any]:
+        """A JSON-safe copy of ``provenance`` (numpy arrays/scalars coerced to plain Python).
+
+        This is the shape the sibling artifact header (IC-2's ``{path}.json``) writes to disk, so a
+        caller's free-form in-memory ``provenance`` dict -- built up over an inversion run with whatever
+        arrays/scalars it produced -- always round-trips through ``json.dumps`` once persisted.
+        """
+        return _json_safe(self.provenance)
+
+    def attach_content_hash(self, content_hash: str, **extra: Any) -> None:
+        """Stamp a content-hash lineage edge onto this field's ``provenance``, in place.
+
+        ``content_hash`` is the IC-2 digest of the saved posterior artifact (the value
+        ``mixle_pde.io.artifacts.save_posterior``/``content_hash`` computes over the artifact's
+        arrays); ``extra`` keyword values (e.g. ``stage="inversion"``, ``parent=<upstream hash>``) are
+        merged alongside it under their own keys. Replaces whatever a caller's free-form in-memory
+        dict held for ``PROVENANCE_HASH_KEY`` (work-plan E7 algorithm step 1: "attach the IC-2
+        content_hash ... to its provenance and serialise it -- no more free-form in-memory dict").
+
+        The merged result is validated JSON-safe immediately (``json.dumps`` on
+        :meth:`serialise_provenance`), so a value the free-form dict cannot survive is caught here, at
+        attach time, rather than failing silently later when an artifact header is actually written.
+        """
+        self.provenance = {**self.provenance, PROVENANCE_HASH_KEY: str(content_hash), **extra}
+        json.dumps(self.serialise_provenance())
 
     @classmethod
     def from_mesh(
