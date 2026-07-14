@@ -438,6 +438,21 @@ class PosteriorField3D:
         hi_u = self.mean + z * std
         return self.grid.from_unconstrained(lo_u), self.grid.from_unconstrained(hi_u)
 
+    def physical_mean(self, *, n: int = 4096, rng: np.random.Generator | None = None) -> np.ndarray:
+        """Posterior mean in physical units, i.e. ``E[g(X)]`` where ``g = grid.from_unconstrained``.
+
+        For an unbounded field ``g`` is the identity, so this agrees with ``grid.from_unconstrained(mean)``
+        up to Monte-Carlo noise. For a bounded field ``g`` is a log/logit transform, and
+        ``grid.from_unconstrained(mean)`` is ``g(median)``, not ``E[g(X)]`` -- Jensen's inequality makes the
+        two diverge once the unconstrained-space variance is appreciable. This draws ``n`` physical-unit
+        samples (:meth:`sample` already maps through ``grid.from_unconstrained``) and averages them, which
+        is unbiased regardless of the transform.
+        """
+        if rng is None:
+            rng = np.random.default_rng()
+        draws = self.sample(n, rng)
+        return draws.mean(axis=0)
+
     def slice(
         self, *, x: float | None = None, y: float | None = None, z: float | None = None, tol: float = 1e-9
     ) -> dict[str, Any]:
