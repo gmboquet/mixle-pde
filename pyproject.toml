@@ -11,11 +11,13 @@ requires-python = ">=3.10"
 license = "MIT"
 authors = [{ name = "Grant Boquet", email = "grant.boquet@gmail.com" }]
 keywords = ["pde", "inverse problems", "bayesian", "mixle"]
-# Depends on mixle (the import package is `mixle`); the solvers are numpy/scipy.
+# Depends on mixle (the import package is `mixle`); the solvers are numpy/scipy. `pyproj` backs the
+# CRS/projection layer (mixle_pde.geospatial) every real-world ingest card builds on.
 dependencies = [
     "mixle",
     "numpy",
     "scipy",
+    "pyproj",
 ]
 
 [project.optional-dependencies]
