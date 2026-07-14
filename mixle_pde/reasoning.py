@@ -33,7 +33,9 @@ from mixle.reason import (
 )
 
 from mixle_pde.dynamics import DynamicsOperator
+from mixle_pde.field_priors import FaciesMixturePrior
 from mixle_pde.geophysics import gravity_point_sensitivity, magnetic_dipole_sensitivity
+from mixle_pde.latent import Field3D
 
 
 class JointPotentialField:
@@ -46,7 +48,12 @@ class JointPotentialField:
         kappa_sd: prior std of the per-cell susceptibility (SI).
         correlation: per-cell prior correlation between ``rho`` and ``kappa`` (in ``[-1, 1]``). A
             positive value (dense rock tends to be more magnetic) couples the modalities so gravity
-            informs ``kappa`` and magnetic informs ``rho``.
+            informs ``kappa`` and magnetic informs ``rho``. Ignored when ``facies`` is given.
+        facies: an optional :class:`~mixle_pde.field_priors.FaciesMixturePrior` (C7) over ``(rho, kappa)``;
+            when given, it REPLACES the single-``correlation`` coupling with the responsibility-weighted
+            facies-mixture precision, so a bimodal rock-physics cloud (e.g. two rock units, each its own
+            density/susceptibility trend) is representable. Call :meth:`refresh_facies_prior` after a
+            `reason` pass to re-fit the facies assignment (EM) to the posterior mean and rebuild the prior.
     """
 
     def __init__(
@@ -57,6 +64,7 @@ class JointPotentialField:
         rho_sd: float = 200.0,
         kappa_sd: float = 0.05,
         correlation: float = 0.0,
+        facies: FaciesMixturePrior | None = None,
     ) -> None:
         self.cells = np.asarray(cells, dtype=float)
         self.n = len(self.cells)
@@ -66,6 +74,7 @@ class JointPotentialField:
         self.rho_sd = float(rho_sd)
         self.kappa_sd = float(kappa_sd)
         self.correlation = float(correlation)
+        self.facies = facies
         self.prior = self._build_prior()
 
     # -- latent layout ------------------------------------------------------------------------
@@ -81,6 +90,8 @@ class JointPotentialField:
 
     def _build_prior(self) -> GaussianBelief:
         n = self.n
+        if self.facies is not None:
+            return self._build_facies_prior()
         cov = np.zeros((2 * n, 2 * n))
         cov[:n, :n] = self.rho_sd**2 * np.eye(n)
         cov[n:, n:] = self.kappa_sd**2 * np.eye(n)
@@ -88,6 +99,29 @@ class JointPotentialField:
         cov[:n, n:] = cross
         cov[n:, :n] = cross
         return GaussianBelief(np.zeros(2 * n), cov)
+
+    def _build_facies_prior(self) -> GaussianBelief:
+        """C7 wiring: build the joint ``[rho; kappa]`` covariance from the facies-mixture precision instead
+        of the single-``correlation`` coupling. With no ``(rho, kappa)`` point estimate yet at construction
+        time, the initial per-cell responsibilities are the mixture's global facies weights broadcast over
+        every cell; :meth:`refresh_facies_prior` re-fits them (EM) once a posterior mean is available."""
+        n = self.n
+        grid = Field3D(coordinates=self.cells, spacing=1.0, units="", property_name="rho_kappa")
+        k = self.facies.means.shape[0]
+        responsibilities = np.broadcast_to(self.facies.weights, (n, k)).copy()
+        precision = self.facies.precision_sparse(grid, responsibilities=responsibilities).toarray()
+        cov = np.linalg.inv(precision + 1.0e-9 * np.eye(2 * n))
+        return GaussianBelief(np.zeros(2 * n), cov)
+
+    def refresh_facies_prior(self, answer: ReasonedAnswer) -> None:
+        """Re-fit the facies responsibilities (EM) to a joint ``answer``'s posterior mean and rebuild
+        ``self.prior`` from the updated mixture -- alternates the Gauss-Newton/EM loop of DR-ALG C7 with the
+        reasoning layer's belief update. Requires the model to have been built with a ``facies`` prior."""
+        if self.facies is None:
+            raise ValueError("refresh_facies_prior requires a facies-mixture prior (construct with facies=...).")
+        mean = np.asarray(answer.mean, dtype=float)
+        self.facies.em_update(mean[self.rho_index], mean[self.kappa_index])
+        self.prior = self._build_prior()
 
     # -- modality evidence --------------------------------------------------------------------
     def gravity(self, obs: Any, data: Any, *, noise_sd: float, name: str = "gravity") -> Evidence:

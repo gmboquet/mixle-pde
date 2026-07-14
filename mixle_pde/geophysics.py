@@ -618,6 +618,46 @@ def cross_gradient(m1, m2, shape, *, spacing=1.0):
     return torch.cat(comps)
 
 
+class JointInversionResult(list):
+    """Return type of :func:`joint_inversion`: a list of the inverted per-model arrays, unpacked/indexed
+    exactly like the historical bare-``list`` return (``m1, m2 = joint_inversion(...)`` is unaffected), plus
+    ``objective_history`` -- the total objective after each accepted outer iteration (index 0 is the initial,
+    pre-iteration objective) -- so a caller can compare how many iterations two configurations needed to reach
+    a given objective value (C7: ``coupling_in_hessian`` convergence-speed check)."""
+
+    objective_history: list
+
+
+def _cross_gradient_gn_blocks(xs_detached: Sequence, shape, spacing: float, n: int) -> list:
+    """Gauss-Newton curvature blocks for the cross-gradient penalty (DR-ALG C7, step 1).
+
+    For every pair ``(i, j)`` linearizes ``t = cross_gradient(x_i, x_j)`` about the current ``xs_detached``:
+    ``B_i = dt/dx_i`` holding ``x_j`` fixed, ``B_j = dt/dx_j`` holding ``x_i`` fixed. Returns, per model, the
+    accumulated ``B^T B`` curvature (unscaled by ``lam`` -- the caller applies the penalty weight), so adding
+    ``lam * blocks[i]`` into ``Hcache[i]`` is the second-order term the RHS-only path only pushes into the
+    gradient.
+    """
+    import torch
+
+    P = len(xs_detached)
+    blocks = [np.zeros((n, n)) for _ in range(P)]
+    for i in range(P):
+        for j in range(i + 1, P):
+            xi_d, xj_d = xs_detached[i], xs_detached[j]
+
+            def f_i(a, _xj=xj_d):
+                return cross_gradient(a, _xj, shape, spacing=spacing)
+
+            def f_j(b, _xi=xi_d):
+                return cross_gradient(_xi, b, shape, spacing=spacing)
+
+            Bi = torch.autograd.functional.jacobian(f_i, xi_d, vectorize=False).detach().cpu().numpy()
+            Bj = torch.autograd.functional.jacobian(f_j, xj_d, vectorize=False).detach().cpu().numpy()
+            blocks[i] += Bi.T @ Bi
+            blocks[j] += Bj.T @ Bj
+    return blocks
+
+
 def joint_inversion(
     forwards: Sequence[Callable],
     datas: Sequence,
@@ -634,6 +674,7 @@ def joint_inversion(
     jac_every: int = 1,
     line_search: int = 25,
     verbose: bool = False,
+    coupling_in_hessian: bool = True,
 ):
     r"""Joint inversion of several property models, optionally coupled by the cross-gradient.
 
@@ -643,12 +684,19 @@ def joint_inversion(
     models are driven to share boundaries while each keeps its own value scale (no petrophysical law assumed).
     A block Gauss-Newton step over the stacked model updates all of them together.
 
+    ``coupling_in_hessian`` (C7): when ``True`` (the default), the Gauss-Newton curvature of the
+    cross-gradient penalty (:func:`_cross_gradient_gn_blocks`) is added into each model's Hessian block,
+    on top of the existing gradient-only coupling -- second-order structural coupling, which converges in
+    fewer outer iterations than pushing the coupling through the gradient alone. Passing ``False`` reproduces
+    the previous (gradient-only / ``lam * eye(n) * 1e-6`` Hessian jitter) behaviour bit-for-bit.
+
     ``bounds`` is ``None``, a single ``(lo, hi)`` applied to every model, or a length-P sequence of per-model
     ``(lo, hi)`` tuples -- use the per-model form when the models live on different scales (e.g. ERT
     log-conductivity vs seismic slowness), so each is clamped to its own physical range.
 
     Returns:
-        list of inverted models (numpy arrays), one per forward.
+        `JointInversionResult` -- a list of inverted models (numpy arrays), one per forward, plus an
+        `objective_history` attribute.
     """
     import torch
 
@@ -690,8 +738,10 @@ def joint_inversion(
         return tot + xg_pen(xlist)
 
     f_prev = objective(xs)
+    history = [f_prev]
     Hcache = [None] * P
     Jwcache = [None] * P
+    xg_hess_blocks = None
     for it in range(n_iter):
         # per-model Gauss-Newton block (data + smoothness), with the cross-gradient handled by a gradient step
         new = []
@@ -706,6 +756,10 @@ def joint_inversion(
                     pen = pen + 0.5 * lam * (t * t).sum()
             pen.backward()
             xg_grads = [xv[i].grad.detach().cpu().numpy() for i in range(P)]
+        # cross-gradient GN curvature (C7): recomputed on the same cadence as the per-model Jacobian cache
+        refresh_jac = (it % jac_every == 0) or any(J is None for J in Jwcache)
+        if coupling_in_hessian and lam > 0 and refresh_jac:
+            xg_hess_blocks = _cross_gradient_gn_blocks([x.detach() for x in xs], shape, spacing, n)
         for i in range(P):
             x0d = xs[i].detach()
             pred = forwards[i](x0d)
@@ -713,6 +767,8 @@ def joint_inversion(
                 J = torch.autograd.functional.jacobian(forwards[i], x0d, vectorize=False).detach().cpu().numpy()
                 Jwcache[i] = J * ws[i][:, None]
                 Hcache[i] = Jwcache[i].T @ Jwcache[i] + betas[i] * RtR + lam * np.eye(n) * 1e-6
+                if coupling_in_hessian and lam > 0 and xg_hess_blocks is not None:
+                    Hcache[i] = Hcache[i] + lam * xg_hess_blocks[i]
             Jw, H = Jwcache[i], Hcache[i]
             rw = ((pred - datas_t[i]) * torch.as_tensor(ws[i])).detach().cpu().numpy()
             g = Jw.T @ rw + betas[i] * (RtR @ x0d.cpu().numpy()) + xg_grads[i]
@@ -741,4 +797,7 @@ def joint_inversion(
         if not improved:
             break
         f_prev = objective(xs)
-    return [x.detach().cpu().numpy() for x in xs]
+        history.append(f_prev)
+    result = JointInversionResult(x.detach().cpu().numpy() for x in xs)
+    result.objective_history = history
+    return result
