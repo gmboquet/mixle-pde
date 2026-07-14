@@ -29,6 +29,7 @@ converged when the step is small; the posterior covariance is ``Lambda^-1`` at t
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
@@ -186,3 +187,46 @@ def gauss_newton_invert(
         iterations=len(step_norms), converged=converged, step_norms=step_norms, final_data_misfit=misfit
     )
     return posterior, report
+
+
+def gauss_newton_hessian_hvp(
+    grid: Field3D,
+    observations: list[Observation],
+    registry: ForwardOperatorRegistry,
+    prior: FieldGaussianPrior,
+    u: np.ndarray,
+    *,
+    jitter: float = 1.0e-10,
+) -> Callable[[np.ndarray], np.ndarray]:
+    """Matrix-free Hessian-vector product of the Gauss-Newton Hessian ``Lambda`` at ``u``.
+
+    ``Lambda = Q + sum_i A_i^T R_i^-1 A_i`` (the same linearized normal-equations Hessian
+    :func:`gauss_newton_invert` assembles densely each iteration) -- but this returns a closure computing
+    ``Lambda @ v`` by looping over each observation's own (small) local Jacobian, without ever summing
+    into a dense ``(n, n)`` matrix. This is the HVP :func:`mixle_pde.uq_lowrank.randomized_lowrank_hessian`
+    needs to get a low-rank Laplace-approximation posterior at survey scale, where forming ``Lambda``
+    densely (as `gauss_newton_invert` does for its exact small-problem posterior) is infeasible.
+    """
+    n = grid.n
+    Q = prior.precision(grid)
+    phi = grid.from_unconstrained(u)
+    B = _transform_jacobian_diag(grid, u)
+
+    local_ops: list[tuple[np.ndarray, np.ndarray]] = []
+    for obs in observations:
+        op = registry.get(obs.kind)
+        if not op.has_adjoint():
+            raise ValueError(f"observation kind {obs.kind!r} needs a Jacobian for the Gauss-Newton Hessian.")
+        jac = op.local_jacobian(grid, phi, obs)
+        A = jac * B[None, :]  # J @ diag(B), same linearization gauss_newton_invert uses
+        rinv = _noise_precision(obs)
+        local_ops.append((A, rinv))
+
+    def hvp(v: np.ndarray) -> np.ndarray:
+        v = np.asarray(v, dtype=float)
+        out = Q @ v + jitter * v
+        for A, rinv in local_ops:
+            out = out + A.T @ (rinv @ (A @ v))
+        return out
+
+    return hvp

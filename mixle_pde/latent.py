@@ -39,6 +39,7 @@ class SparsePosteriorPrecision:
     precision: Any
     _factor: Any | None = field(default=None, init=False, repr=False)
     _marginal_variance: np.ndarray | None = field(default=None, init=False, repr=False)
+    _marginal_variance_method: str | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         import scipy.sparse as sp
@@ -73,12 +74,28 @@ class SparsePosteriorPrecision:
             return np.asarray(self.factor().solve(arr), dtype=float)
         raise ValueError("rhs must be a vector or a 2D matrix.")
 
-    def marginal_variance(self) -> np.ndarray:
-        """Diagonal of the dense covariance ``precision^-1`` computed by sparse solves."""
-        if self._marginal_variance is None:
-            eye = np.eye(self.n)
-            inv_columns = self.solve(eye)
-            self._marginal_variance = np.clip(np.diag(inv_columns), 0.0, None)
+    def marginal_variance(self, *, method: str = "selected_inversion") -> np.ndarray:
+        """Diagonal of the covariance ``precision^-1``; never forms the dense ``(n, n)`` inverse.
+
+        ``method="selected_inversion"`` (default, C2) runs the Takahashi/Erisman-Tinney recursion over
+        the sparse Cholesky factor's own nonzero pattern -- memory ``O(nnz(L))``, so a survey-scale
+        precision (n ~ 10^5-10^6) never materializes an infeasible dense inverse.
+        ``method="dense"`` keeps the original ``solve(eye)`` path (an explicit opt-in, for small
+        problems or as a reference cross-check).
+        """
+        if method not in ("selected_inversion", "dense"):
+            raise ValueError(f"unknown marginal_variance method {method!r}; expected 'selected_inversion' or 'dense'.")
+        if self._marginal_variance is None or self._marginal_variance_method != method:
+            if method == "dense":
+                eye = np.eye(self.n)
+                inv_columns = self.solve(eye)
+                variance = np.diag(inv_columns)
+            else:
+                from mixle_pde.uq_lowrank import takahashi_selected_inversion
+
+                variance = takahashi_selected_inversion(self.precision)
+            self._marginal_variance = np.clip(np.asarray(variance, dtype=float), 0.0, None)
+            self._marginal_variance_method = method
         return self._marginal_variance.copy()
 
     def covariance_dense(self) -> np.ndarray:
