@@ -30,13 +30,16 @@ from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
+from mixle.reason.posterior_protocol import Posterior
 
 from mixle_pde import multiphysics
 from mixle_pde.dynamics import AdvectionDiffusionOperator
 from mixle_pde.io.artifacts import sha256_of_arrays
+from mixle_pde.surrogate import Surrogate, distill_forward
 
 RESULT_SCHEMA = "mixle_pde.sim_result/v1"
 STORE_DIR_ENV = "MIXLE_PDE_SIM_STORE"
+UQ_LEVEL = 0.9  # central credible-interval mass propagate_uq reports (work-plan P4; not IC-11 frozen)
 
 
 @dataclass
@@ -290,3 +293,103 @@ register_forward("transport", _transport_forward)
 register_forward("dispersion", _transport_forward)
 register_forward("poroelastic", _poroelastic_forward)
 register_forward("coupled", _coupled_forward)
+
+
+# --- P4: simulation UQ + surrogate acceleration --------------------------------------------------
+#
+# Two additive capabilities on top of the P1/P2 scenario runner, neither of which touches `simulate`:
+#
+# `propagate_uq` answers "how uncertain is this what-if", not just "what is the point estimate": it
+# draws `n` samples from an IC-1 `Posterior` over the scenario's leading input, re-runs the whole
+# (possibly coupled) scenario once per draw through the existing `simulate` entry point, and reports
+# the output ensemble's per-node central credible interval -- honest Monte-Carlo forward UQ, no new
+# numerics beyond that pushforward.
+#
+# `register_surrogate` answers "how do I make this what-if fast" without silently trading away
+# correctness: it distills an E6 `Surrogate` for an expensive `teacher` forward and registers a
+# wrapper under `op` that answers from the surrogate when the calibrated gate says the input is
+# trustworthy, and transparently escalates to the real `teacher` otherwise -- the E6 cascade, wired
+# into the `_FORWARDS` registry so `simulate`/`propagate_uq` dispatch to it exactly like any other op.
+
+_SURROGATES: dict[str, Surrogate] = {}
+
+
+def register_surrogate(op: str, *, teacher: Callable, sampler: Callable, budget: int, seed: int = 0) -> None:
+    """Distil a fast surrogate of forward ``op`` (E6 recipe) and register it under ``op`` behind a
+    calibrated deferral gate.
+
+    ``teacher(x) -> y`` is the expensive forward being replaced (a scalar or array-valued function of
+    a plain numeric input, the same shape ``distill_forward`` already expects); ``sampler(n, rng) ->
+    Sequence`` draws candidate inputs to label. The registered wrapper forward reads its physical
+    input ``x`` from the ``"x"`` array of the artifact at ``inputs_ref`` (the same content-addressed
+    convention every other forward reads its state from) and returns ``{"value": ...}``: the fast
+    ``surrogate.predict(x)`` when ``not surrogate.defer(x)``, or the exact ``teacher(x)`` when the
+    calibrated gate defers -- interactive answers on the easy majority, honest escalation on the hard
+    tail, never a silently-wrong number.
+    """
+    surrogate = distill_forward(teacher, sampler, budget=budget, seed=seed)
+    _SURROGATES[op] = surrogate
+
+    def _cascade_forward(inputs_ref: str, params: dict) -> dict[str, np.ndarray]:
+        store_dir = params["_store_dir"]
+        x = np.asarray(read_result_artifact(inputs_ref, store_dir=store_dir)["x"], dtype=float)
+        y = teacher(x) if surrogate.defer(x) else surrogate.predict(x)
+        return {"value": np.atleast_1d(np.asarray(y, dtype=float))}
+
+    register_forward(op, _cascade_forward)
+
+
+def propagate_uq(scenario: Scenario, input_posterior: Posterior, *, n: int, rng) -> SimResult:
+    """Push ``n`` IC-1 posterior draws of the leading input through the scenario forwards.
+
+    Draws ``input_posterior.samples(n, rng)`` (IC-1, a ``(n, d)`` matrix in physical units), writes
+    each draw as an ``"x"`` artifact, and re-runs the *entire* scenario (coupled or not) once per draw
+    through the existing ``simulate`` entry point with the leading step's ``inputs_ref`` rewritten
+    onto that draw -- the same forward dispatch every other caller of this module goes through, so a
+    surrogate registered via ``register_surrogate`` is exercised exactly as it would be for a single
+    what-if. ``SimResult.result_ref`` is the ensemble mean (a genuine content-hashed artifact, so it
+    can be read back like any other result); ``SimResult.uncertainty`` maps each output array key to
+    its per-node ``(lo, hi)`` central credible interval at :data:`UQ_LEVEL` mass, computed empirically
+    from the output ensemble -- no analytic UQ, just the Monte-Carlo pushforward the work order calls
+    for.
+    """
+    if n <= 0:
+        raise ValueError("propagate_uq needs n >= 1 posterior draws")
+    draws = np.atleast_2d(np.asarray(input_posterior.samples(n, rng), dtype=float))
+    store_dir = _default_store_dir()
+    leading = scenario.steps[0]
+
+    member_refs: list[str] = []
+    member_arrays: list[dict[str, np.ndarray]] = []
+    for draw in draws:
+        x_ref = write_result_artifact(
+            {"x": np.asarray(draw, dtype=float)},
+            grid={"shape": [int(np.asarray(draw).shape[0])]},
+            units="",
+            provenance={"op": "propagate_uq:input-draw"},
+            store_dir=store_dir,
+        )
+        draw_steps = [ScenarioStep(op=leading.op, inputs_ref=x_ref, params=leading.params), *scenario.steps[1:]]
+        draw_scenario = Scenario(steps=draw_steps, couplings=scenario.couplings, provenance=scenario.provenance)
+        member_result = simulate(draw_scenario)
+        member_refs.append(member_result.result_ref)
+        member_arrays.append(read_result_artifact(member_result.result_ref, store_dir=store_dir))
+
+    keys = member_arrays[0].keys()
+    stacked = {k: np.stack([m[k] for m in member_arrays], axis=0) for k in keys}
+    alpha = (1.0 - UQ_LEVEL) / 2.0
+    uncertainty = {k: (np.quantile(v, alpha, axis=0), np.quantile(v, 1.0 - alpha, axis=0)) for k, v in stacked.items()}
+    mean_arrays = {k: v.mean(axis=0) for k, v in stacked.items()}
+
+    ref = write_result_artifact(
+        mean_arrays,
+        grid={"shape": list(next(iter(mean_arrays.values())).shape)},
+        units="",
+        provenance={"op": "propagate_uq", "n": n, "member_refs": member_refs, **scenario.provenance},
+        store_dir=store_dir,
+    )
+    return SimResult(
+        result_ref=ref,
+        uncertainty=uncertainty,
+        provenance={"op": "propagate_uq", "n": n, "level": UQ_LEVEL, "member_refs": member_refs},
+    )
