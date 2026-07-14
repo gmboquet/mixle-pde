@@ -380,6 +380,7 @@ def dc_resistivity_forward_operator(
     log_data: bool = True,
     clamp: float | None = 12.0,
     finite_difference_step: float = 1.0e-4,
+    adjoint: bool = False,
 ) -> ForwardOperator:
     """Wrap :func:`mixle_pde.geophysics.dc_resistivity` as a nonlinear observation operator.
 
@@ -388,8 +389,13 @@ def dc_resistivity_forward_operator(
     ERT it is only metadata with one row per quadrupole (for example, survey midpoints). The electrode
     geometry lives in ``schedule`` as node-index quadrupoles ``(a, b, m, n)``.
 
-    The local Jacobian is central finite-difference. That is intentionally a small/medium reference path
-    for posterior construction and validation; production-scale ERT should use an adjoint sensitivity.
+    The local Jacobian is central finite-difference by default. That is intentionally a small/medium
+    reference path for posterior construction and validation. Pass ``adjoint=True`` for production
+    scale: the Jacobian is then computed by :func:`mixle_pde.adjoint.torch_adjoint_jacobian` -- one
+    differentiable forward (reusing :func:`mixle_pde.geophysics.dc_resistivity`'s existing
+    ``pde_solve.sparse_solve`` factorization per unique current injection) plus one O(1) adjoint solve
+    per quadrupole, in place of ``2 * n_model`` finite-difference evaluations. Numerically equivalent to
+    the finite-difference Jacobian (same ``local_jacobian`` contract); only the cost differs.
     """
     if finite_difference_step <= 0.0:
         raise ValueError("finite_difference_step must be positive.")
@@ -423,11 +429,24 @@ def dc_resistivity_forward_operator(
             )
         return np.asarray(out.detach().cpu().numpy(), dtype=float)
 
+    def _predict_torch(log_sigma: Any) -> Any:
+        from mixle_pde.geophysics import dc_resistivity
+
+        return dc_resistivity(
+            log_sigma,
+            shape,
+            sched,
+            spacing=spacing,
+            sigma_ref=sigma_ref,
+            log_data=log_data,
+            clamp=clamp,
+        )
+
     def predict(grid: Field3D, field_values: np.ndarray, obs_locations: np.ndarray) -> np.ndarray:
         _check(grid, np.atleast_2d(np.asarray(obs_locations, dtype=float)))
         return _predict_array(np.asarray(field_values, dtype=float))
 
-    def jacobian_at_values(grid: Field3D, field_values: np.ndarray, obs_locations: np.ndarray) -> np.ndarray:
+    def jacobian_at_values_fd(grid: Field3D, field_values: np.ndarray, obs_locations: np.ndarray) -> np.ndarray:
         _check(grid, np.atleast_2d(np.asarray(obs_locations, dtype=float)))
         x = np.asarray(field_values, dtype=float).reshape(-1)
         if x.shape != (n_model,):
@@ -443,10 +462,28 @@ def dc_resistivity_forward_operator(
             jac[:, i] = (_predict_array(plus) - _predict_array(minus)) / (2.0 * step)
         return jac
 
+    def jacobian_at_values_adjoint(grid: Field3D, field_values: np.ndarray, obs_locations: np.ndarray) -> np.ndarray:
+        from mixle_pde.adjoint import torch_adjoint_jacobian
+
+        _check(grid, np.atleast_2d(np.asarray(obs_locations, dtype=float)))
+        x = np.asarray(field_values, dtype=float).reshape(-1)
+        if x.shape != (n_model,):
+            raise ValueError(f"field_values must have shape ({n_model},).")
+        return torch_adjoint_jacobian(_predict_torch, x, n_obs=len(sched))
+
+    if adjoint:
+        return ForwardOperator(
+            "dc_resistivity",
+            predict,
+            jacobian_at_values=jacobian_at_values_adjoint,
+            differentiable=True,
+            jacobian_kind="adjoint",
+            has_true_adjoint=True,
+        )
     return ForwardOperator(
         "dc_resistivity",
         predict,
-        jacobian_at_values=jacobian_at_values,
+        jacobian_at_values=jacobian_at_values_fd,
         differentiable=True,
         jacobian_kind="finite_difference",
         finite_difference_step=finite_difference_step,
@@ -760,6 +797,7 @@ def mt_3d_forward_operator(
     mu: float | None = None,
     gauge: float = 1.0,
     finite_difference_step: float = 1.0e-4,
+    adjoint: bool = False,
 ) -> ForwardOperator:
     """Wrap the 3-D curl-curl MT forward as a nonlinear posterior observation operator.
 
@@ -769,10 +807,12 @@ def mt_3d_forward_operator(
     Supported components are ``"apparent_resistivity"``, ``"log_apparent_resistivity"``, and
     ``"phase"``.
 
-    The local Jacobian is central finite-difference in the log-conductivity parameters. This is a
-    reference path for posterior construction and validation; production 3-D MT inversion should use
-    adjoint sensitivities from the curl-curl solve. (finite-difference Jacobian: O(2n) forward solves;
-    adjoint sensitivities are C1)
+    The local Jacobian is central finite-difference in the log-conductivity parameters by default.
+    Pass ``adjoint=True`` for production 3-D MT inversion: the Jacobian is then computed by
+    :func:`mixle_pde.adjoint.torch_adjoint_jacobian` from a grad-enabled forward -- one curl-curl
+    factorization per sounding frequency (reusing :func:`mixle_pde.em_diffusion_3d.mt_3d`'s existing
+    ``pde_solve.sparse_solve`` call) plus one O(1) adjoint solve per frequency, instead of
+    ``2 * n_model`` finite-difference evaluations.
     """
     if finite_difference_step <= 0.0:
         raise ValueError("finite_difference_step must be positive.")
@@ -831,11 +871,39 @@ def mt_3d_forward_operator(
             predicted = torch.stack(out)
         return np.asarray(predicted.detach().cpu().numpy(), dtype=float)
 
+    def _predict_torch(log_sigma: Any) -> Any:
+        import torch
+
+        from mixle_pde.em_diffusion_3d import MU0, mt_3d
+
+        if log_sigma.shape != (n_model,):
+            raise ValueError(f"field_values must have shape ({n_model},).")
+        permeability = MU0 if mu is None else float(mu)
+        out = []
+        for freq in freqs:
+            rho_a, phase, _ = mt_3d(
+                log_sigma,
+                shape,
+                float(freq),
+                polarization=polarization,
+                spacing=spacing,
+                sigma_ref=float(sigma_ref),
+                mu=permeability,
+                gauge=float(gauge),
+            )
+            if component == "apparent_resistivity":
+                out.append(rho_a)
+            elif component == "log_apparent_resistivity":
+                out.append(torch.log(rho_a))
+            else:
+                out.append(phase)
+        return torch.stack(out)
+
     def predict(grid: Field3D, field_values: np.ndarray, obs_locations: np.ndarray) -> np.ndarray:
         _check(grid, np.atleast_2d(np.asarray(obs_locations, dtype=float)))
         return _predict_array(np.asarray(field_values, dtype=float))
 
-    def jacobian_at_values(grid: Field3D, field_values: np.ndarray, obs_locations: np.ndarray) -> np.ndarray:
+    def jacobian_at_values_fd(grid: Field3D, field_values: np.ndarray, obs_locations: np.ndarray) -> np.ndarray:
         _check(grid, np.atleast_2d(np.asarray(obs_locations, dtype=float)))
         x = np.asarray(field_values, dtype=float).reshape(-1)
         if x.shape != (n_model,):
@@ -851,10 +919,28 @@ def mt_3d_forward_operator(
             jac[:, i] = (_predict_array(plus) - _predict_array(minus)) / (2.0 * step)
         return jac
 
+    def jacobian_at_values_adjoint(grid: Field3D, field_values: np.ndarray, obs_locations: np.ndarray) -> np.ndarray:
+        from mixle_pde.adjoint import torch_adjoint_jacobian
+
+        _check(grid, np.atleast_2d(np.asarray(obs_locations, dtype=float)))
+        x = np.asarray(field_values, dtype=float).reshape(-1)
+        if x.shape != (n_model,):
+            raise ValueError(f"field_values must have shape ({n_model},).")
+        return torch_adjoint_jacobian(_predict_torch, x, n_obs=int(freqs.size))
+
+    if adjoint:
+        return ForwardOperator(
+            kind,
+            predict,
+            jacobian_at_values=jacobian_at_values_adjoint,
+            differentiable=True,
+            jacobian_kind="adjoint",
+            has_true_adjoint=True,
+        )
     return ForwardOperator(
         kind,
         predict,
-        jacobian_at_values=jacobian_at_values,
+        jacobian_at_values=jacobian_at_values_fd,
         differentiable=True,
         jacobian_kind="finite_difference",
         finite_difference_step=finite_difference_step,
@@ -875,6 +961,7 @@ def csem_3d_forward_operator(
     gauge: float = 1.0,
     amplitude_floor: float = 1.0e-30,
     finite_difference_step: float = 1.0e-4,
+    adjoint: bool = False,
 ) -> ForwardOperator:
     """Wrap the 3-D curl-curl CSEM forward as a nonlinear posterior observation operator.
 
@@ -884,10 +971,12 @@ def csem_3d_forward_operator(
     receiver metadata with one row per receiver edge. Supported real-valued components are
     ``"real"``, ``"imag"``, ``"amplitude"``, and ``"log_amplitude"``.
 
-    The local Jacobian is central finite-difference in log-conductivity. It is a deterministic
-    reference path for posterior construction; production CSEM inversion should use an adjoint
-    sensitivity from the curl-curl solve. (finite-difference Jacobian: O(2n) forward solves; adjoint
-    sensitivities are C1)
+    The local Jacobian is central finite-difference in log-conductivity by default. Pass
+    ``adjoint=True`` for production CSEM inversion: the Jacobian is then computed by
+    :func:`mixle_pde.adjoint.torch_adjoint_jacobian` from a grad-enabled forward -- one curl-curl
+    factorization (reusing :func:`mixle_pde.em_diffusion_3d.csem_3d`'s existing
+    ``pde_solve.sparse_solve`` call) plus one O(1) adjoint solve per receiver edge, instead of
+    ``2 * n_model`` finite-difference evaluations.
     """
     if finite_difference_step <= 0.0:
         raise ValueError("finite_difference_step must be positive.")
@@ -958,11 +1047,38 @@ def csem_3d_forward_operator(
                 out = torch.log(torch.clamp(field.abs(), min=float(amplitude_floor)))
         return np.asarray(out.detach().cpu().numpy(), dtype=float)
 
+    def _predict_torch(log_sigma: Any) -> Any:
+        import torch
+
+        from mixle_pde.em_diffusion_3d import MU0, csem_3d
+
+        if log_sigma.shape != (n_model,):
+            raise ValueError(f"field_values must have shape ({n_model},).")
+        permeability = MU0 if mu is None else float(mu)
+        field = csem_3d(
+            log_sigma,
+            shape,
+            float(freq),
+            source_edges=src,
+            source_amp=source_amp,
+            spacing=spacing,
+            sigma_ref=float(sigma_ref),
+            mu=permeability,
+            gauge=float(gauge),
+        )[list(rcv)]
+        if component == "real":
+            return field.real
+        if component == "imag":
+            return field.imag
+        if component == "amplitude":
+            return field.abs()
+        return torch.log(torch.clamp(field.abs(), min=float(amplitude_floor)))
+
     def predict(grid: Field3D, field_values: np.ndarray, obs_locations: np.ndarray) -> np.ndarray:
         _check(grid, np.atleast_2d(np.asarray(obs_locations, dtype=float)))
         return _predict_array(np.asarray(field_values, dtype=float))
 
-    def jacobian_at_values(grid: Field3D, field_values: np.ndarray, obs_locations: np.ndarray) -> np.ndarray:
+    def jacobian_at_values_fd(grid: Field3D, field_values: np.ndarray, obs_locations: np.ndarray) -> np.ndarray:
         _check(grid, np.atleast_2d(np.asarray(obs_locations, dtype=float)))
         x = np.asarray(field_values, dtype=float).reshape(-1)
         if x.shape != (n_model,):
@@ -978,10 +1094,28 @@ def csem_3d_forward_operator(
             jac[:, i] = (_predict_array(plus) - _predict_array(minus)) / (2.0 * step)
         return jac
 
+    def jacobian_at_values_adjoint(grid: Field3D, field_values: np.ndarray, obs_locations: np.ndarray) -> np.ndarray:
+        from mixle_pde.adjoint import torch_adjoint_jacobian
+
+        _check(grid, np.atleast_2d(np.asarray(obs_locations, dtype=float)))
+        x = np.asarray(field_values, dtype=float).reshape(-1)
+        if x.shape != (n_model,):
+            raise ValueError(f"field_values must have shape ({n_model},).")
+        return torch_adjoint_jacobian(_predict_torch, x, n_obs=len(rcv))
+
+    if adjoint:
+        return ForwardOperator(
+            kind,
+            predict,
+            jacobian_at_values=jacobian_at_values_adjoint,
+            differentiable=True,
+            jacobian_kind="adjoint",
+            has_true_adjoint=True,
+        )
     return ForwardOperator(
         kind,
         predict,
-        jacobian_at_values=jacobian_at_values,
+        jacobian_at_values=jacobian_at_values_fd,
         differentiable=True,
         jacobian_kind="finite_difference",
         finite_difference_step=finite_difference_step,
