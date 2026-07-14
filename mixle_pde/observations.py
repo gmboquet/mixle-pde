@@ -26,6 +26,7 @@ from typing import Any
 import numpy as np
 
 from mixle_pde.latent import Field3D
+from mixle_pde.model_error import inflated_noise_cov
 
 
 @dataclass
@@ -138,23 +139,35 @@ class SurveyGeometry:
         return SurveyGeometry(points=self.points, crs=self.crs, node_index=node_index, edge_index=self.edge_index)
 
 
-def gaussian_log_likelihood(observation: Observation, predicted: np.ndarray) -> float:
-    """``log p(observation.value | predicted)`` under the observation's OWN noise model.
+def gaussian_log_likelihood(
+    observation: Observation, predicted: np.ndarray, *, model_error_cov: np.ndarray | None = None
+) -> float:
+    """``log p(observation.value | predicted)`` under the observation's noise model.
 
     The one common likelihood every observation kind shares regardless of the physics that produced
     ``predicted`` -- exact for the declared noise model (diagonal or full covariance), never assuming
     independence when a full covariance was supplied.
+
+    ``model_error_cov``, when given, is a theory-error (model-discrepancy) covariance -- diagonal
+    ``(n,)`` or full ``(n, n)`` -- that is added to ``observation.noise_cov`` (see
+    :func:`mixle_pde.model_error.inflated_noise_cov`) before scoring, so a mis-specified forward
+    operator no longer buys an overconfident posterior. Default ``None`` reproduces today's result
+    exactly (score against the instrument noise alone).
     """
     predicted = np.atleast_1d(np.asarray(predicted, dtype=float))
     if predicted.shape != observation.value.shape:
         raise ValueError(f"predicted must have shape {observation.value.shape}, got {predicted.shape}.")
     residual = observation.value - predicted
     n = observation.n
-    if observation.is_diagonal:
-        var = observation.noise_cov
+    if model_error_cov is None:
+        total_cov = observation.noise_cov
+    else:
+        total_cov = inflated_noise_cov(observation.noise_cov, np.asarray(model_error_cov, dtype=float))
+    if total_cov.ndim == 1:
+        var = total_cov
         return float(-0.5 * np.sum(residual**2 / var + np.log(2.0 * np.pi * var)))
-    prec = np.linalg.inv(observation.noise_cov)
-    _, logdet = np.linalg.slogdet(observation.noise_cov)
+    prec = np.linalg.inv(total_cov)
+    _, logdet = np.linalg.slogdet(total_cov)
     return float(-0.5 * (residual @ prec @ residual + logdet + n * np.log(2.0 * np.pi)))
 
 
