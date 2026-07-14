@@ -126,6 +126,7 @@ from mixle_pde.field_mcmc import (
 )
 from mixle_pde.field_priors import (
     CrossPropertyPrior,
+    FaciesMixturePrior,
     SpatioTemporalGaussianPrior,
     depth_weighted_marginal_precision,
     depth_weighted_marginal_precision_sparse,
@@ -174,6 +175,7 @@ from mixle_pde.gas_dynamics import (
     solve_reactive_euler_1d,
 )
 from mixle_pde.geophysics import (
+    JointInversionResult,
     cross_gradient,
     dc_resistivity,
     depth_weighting,
@@ -386,6 +388,7 @@ __all__ = [
     "assimilate_4d_linear_dynamics",
     "particle_assimilate_4d",
     "CrossPropertyPrior",
+    "FaciesMixturePrior",
     "SpatioTemporalGaussianPrior",
     "depth_weights",
     "depth_weighted_marginal_precision",
@@ -480,6 +483,7 @@ __all__ = [
     "cross_gradient",
     "dc_resistivity",
     "joint_inversion",
+    "JointInversionResult",
     "regularized_gauss_newton",
     "roughness_operator",
     "straight_ray_operator",
