@@ -418,6 +418,39 @@ class SourcePosterior:
         draws = self.samples(n, rng)
         return _DerivedQuantity(samples=np.asarray(fn(draws)), prior_dominated=self.prior_dominated)
 
+    def to_doe_prior(self) -> Any:
+        """Bridge this real ``(x, y, rate)`` + separately-reported ``onset`` posterior into
+        :mod:`mixle_pde.monitoring_design`'s (G6) expected 4-parameter ``(x, y, log_rate, onset)``
+        linear-Gaussian ``plume_prior`` convention, so ``design_monitoring_network`` can be called
+        directly on a real fitted posterior from :func:`invert_source`.
+
+        G6 was built against this 4-param ``theta`` as a stand-in "until G2 lands" (its own module
+        docstring); G2 has since landed with a different convention -- this vector's 3rd entry is raw
+        ``rate`` (not ``log_rate``), and ``onset`` is reported separately with no cross-covariance to
+        the (location, rate) block, a deliberate simplification G2 documents on itself, not an
+        oversight. The bridge here is exact where G2 gives exact information (the location/rate
+        2x2 block, log-transformed by a first-order delta-method approximation for the rate
+        variance) and honest where it doesn't (onset's covariance with everything else is unknown, so
+        it's placed on the diagonal only, not invented as an off-diagonal zero pretending to be a
+        measurement).
+        """
+        from mixle_pde.monitoring_design import GaussianSourcePosterior
+
+        rate = float(self.mean[2])
+        log_rate = float(np.log(max(rate, 1e-6)))
+        onset_mean, onset_sd = self.onset
+
+        mean4 = np.array([self.mean[0], self.mean[1], log_rate, onset_mean])
+        cov4 = np.zeros((4, 4))
+        cov4[:2, :2] = self.cov[:2, :2]
+        # delta method: Var(log rate) ~= Var(rate) / rate^2
+        cov4[2, 2] = float(self.cov[2, 2]) / max(rate, 1e-6) ** 2
+        cov4[:2, 2] = self.cov[:2, 2] / max(rate, 1e-6)
+        cov4[2, :2] = cov4[:2, 2]
+        cov4[3, 3] = float(onset_sd) ** 2
+        cov4 += np.eye(4) * 1e-6  # keep positive-definite through the delta-method approximation above
+        return GaussianSourcePosterior(mean4, cov4)
+
 
 # --------------------------------------------------------------------------- the inversion
 def _group_wells(observations: list[Observation]) -> list[list[Observation]]:
