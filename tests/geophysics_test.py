@@ -16,9 +16,12 @@ if HAS_TORCH:
     from mixle_pde.geophysics import (
         cross_gradient,
         dc_resistivity,
+        depth_weighted_roughness,
         depth_weighting,
         eikonal_traveltime,
         gravity_point_sensitivity,
+        gravity_prism_sensitivity,
+        invert_potential_field,
         joint_inversion,
         magnetic_dipole_sensitivity,
         regularized_gauss_newton,
@@ -294,3 +297,80 @@ class JointInversionBoundsTestCase(unittest.TestCase):
         # a single (lo, hi) still applies to every model (back-compatible)
         n1, n2 = joint_inversion([f1, f2], [d1, d2], [np.zeros(N), np.zeros(N)], shape, bounds=(0.0, 1.0), n_iter=4)
         self.assertLessEqual(max(n1.max(), n2.max()), 1.0 + 1e-9)
+
+
+@unittest.skipUnless(HAS_TORCH, "requires PyTorch")
+class DepthWeightingTestCase(unittest.TestCase):
+    """Regression test for a real, verified bug: `depth_weighting` existed but nothing wired it into
+    an inversion, so recovered density/susceptibility systematically piled up near the surface
+    regardless of true source depth. `invert_potential_field` fixes this at the source."""
+
+    def test_weight_decays_monotonically_from_the_surface(self):
+        # locks in the corrected docstring's claim: largest near z0, decaying with |z - z0|.
+        cell_z = np.array([0.0, -5.0, -15.0, -30.0, -55.0])
+        w = depth_weighting(cell_z, z0=2.0, nu=2.0)
+        self.assertTrue(np.all(np.diff(w) < 0), "weight must strictly decrease with depth")
+        self.assertAlmostEqual(w[0], 1.0)  # normalized to 1 at its max (nearest the surface)
+
+    def _vms_lens_scenario(self):
+        """The exact synthetic VMS-lens geometry that exposed the depth bias in practice: a
+        20x3x12 grid, a 700 kg/m^3 density contrast lens at 25-45m depth (centre 35m)."""
+        h = 5.0
+        nx, ny, nz = 20, 3, 12
+        body_x, body_z = (8, 12), (5, 9)
+        xs = np.arange(nx) * h
+        zs = -np.arange(nz) * h
+        mins, maxs = [], []
+        for i in range(nx):
+            for j in range(ny):
+                for k in range(nz):
+                    mins.append([xs[i], (j - ny / 2) * h, zs[k] - h])
+                    maxs.append([xs[i] + h, (j - ny / 2) * h + h, zs[k]])
+        cell_mins, cell_maxs = np.array(mins), np.array(maxs)
+        true_mask = np.zeros((nx, ny, nz), dtype=bool)
+        true_mask[body_x[0]:body_x[1], :, body_z[0]:body_z[1]] = True
+        true_mask_flat = true_mask.reshape(-1)
+        rho_true = np.where(true_mask_flat, 700.0, 0.0)
+        obs = np.column_stack([xs, np.zeros_like(xs), np.full_like(xs, 2.0)])
+        g = gravity_prism_sensitivity(obs, cell_mins, cell_maxs)
+        true_depth_center = (body_z[0] + body_z[1]) / 2.0 * h  # 35.0 m
+        return cell_mins, cell_maxs, g, rho_true, true_mask_flat, true_depth_center, nx, ny, nz, h
+
+    def _recovered_depth_centroid(self, est, true_mask_flat, nx, ny, nz, h):
+        w = np.clip(est, 0.0, None).reshape(nx, ny, nz).sum(axis=1)  # sum over the thin y axis
+        zs = -np.arange(nz) * h
+        w_sum = w.sum()
+        self.assertGreater(w_sum, 0.0, "recovered model has no positive mass to form a centroid")
+        return -float(np.sum(w.sum(axis=0) * zs) / w_sum)  # positive-down depth
+
+    def test_invert_potential_field_recovers_depth_far_better_than_unweighted(self):
+        cell_mins, cell_maxs, g, rho_true, true_mask_flat, true_depth, nx, ny, nz, h = self._vms_lens_scenario()
+        n_cells = nx * ny * nz
+        clean = g @ rho_true
+        rng = np.random.RandomState(0)
+        noise_std = 0.02 * np.std(clean) + 1e-4
+        y = clean + noise_std * rng.randn(*clean.shape)
+
+        # unweighted (the bug this test locks in a fix for): plain roughness, no depth compensation.
+        roughness_plain = roughness_operator((nx, ny, nz), spacing=h)
+        est_unweighted, _ = regularized_gauss_newton(
+            lambda m: torch.as_tensor(g) @ m, y, np.zeros(n_cells), noise=noise_std, beta=0.05,
+            roughness=roughness_plain, lower=0.0, upper=2000.0, n_iter=8, jac_every=3,
+        )
+        depth_unweighted = self._recovered_depth_centroid(est_unweighted, true_mask_flat, nx, ny, nz, h)
+
+        # depth-weighted (the fix): same data, same beta, only the roughness operator differs.
+        est_weighted, _ = invert_potential_field(
+            g, y, cell_mins, cell_maxs, noise=noise_std, beta=0.05, z0=2.0, nu=2.0,
+            lower=0.0, upper=2000.0, n_iter=8, jac_every=3,
+        )
+        depth_weighted_result = self._recovered_depth_centroid(est_weighted, true_mask_flat, nx, ny, nz, h)
+
+        error_unweighted = abs(depth_unweighted - true_depth)
+        error_weighted = abs(depth_weighted_result - true_depth)
+        # the unweighted baseline must itself show the real, previously-observed bias (recovered
+        # shallower than truth by a wide margin) -- otherwise this isn't testing what it claims to.
+        self.assertGreater(error_unweighted, 4.0, f"expected the unweighted baseline to show the known shallow bias; got depth={depth_unweighted:.1f}m vs true={true_depth:.1f}m")
+        # the fix must recover depth much more accurately, not just nominally better.
+        self.assertLess(error_weighted, 0.5 * error_unweighted, f"depth-weighted error ({error_weighted:.1f}m) should be well under half the unweighted error ({error_unweighted:.1f}m)")
+        self.assertLess(error_weighted, 3.0, f"depth-weighted recovery should land within 3m of the true {true_depth}m depth; got {depth_weighted_result:.1f}m")

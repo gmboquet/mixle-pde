@@ -47,8 +47,10 @@ __all__ = [
     "gravity_prism_sensitivity",
     "magnetic_prism_sensitivity",
     "depth_weighting",
+    "depth_weighted_roughness",
     "roughness_operator",
     "regularized_gauss_newton",
+    "invert_potential_field",
     "cross_gradient",
     "joint_inversion",
 ]
@@ -259,8 +261,9 @@ def magnetic_prism_sensitivity(obs, cell_mins, cell_maxs, *, inclination, declin
 def depth_weighting(cell_z, z0, *, nu=3.0, eps=None):
     r"""Li & Oldenburg (1996, 1998) depth weighting ``w(z) = (|z - z0| + eps)^{-nu/2}``, normalized by its
     maximum. Potential-field kernels decay with depth, so an unweighted inversion piles all structure at the
-    surface; folding ``w`` into the model regularization compensates. Use ``nu=3`` for magnetics, ``nu=2`` for
-    gravity (the Li & Oldenburg / SimPEG values).
+    surface; multiplying ``w`` into each cell's *column* of the model regularization compensates -- see
+    :func:`depth_weighted_roughness`. Use ``nu=3`` for magnetics, ``nu=2`` for gravity (the Li & Oldenburg /
+    SimPEG values).
 
     Args:
         cell_z: (n_cells,) vertical coordinate of each cell centre (same sign convention as ``z0``).
@@ -269,7 +272,14 @@ def depth_weighting(cell_z, z0, *, nu=3.0, eps=None):
         eps: offset preventing a singularity at ``z = z0``; defaults to half the smallest cell spacing.
 
     Returns:
-        (n_cells,) weights in (0, 1], largest at depth.
+        (n_cells,) weights in (0, 1], **largest near the surface/observation height and decaying with
+        depth** -- mirroring how the potential-field kernel's own sensitivity decays with depth, so that
+        :func:`depth_weighted_roughness` penalizes shallow structure more than deep structure of the same
+        magnitude (a smaller ``w`` at depth means a deep cell contributes less to the weighted roughness
+        norm for the same density value, letting it absorb more of the fit without being fought by the
+        regularizer). Earlier revisions of this docstring said the opposite ("largest at depth") -- that
+        was a documentation error, not a change in the formula; verified numerically (``w`` is
+        monotonically decreasing in ``|z - z0|`` by construction).
     """
     z = np.asarray(cell_z, float)
     if eps is None:
@@ -277,6 +287,31 @@ def depth_weighting(cell_z, z0, *, nu=3.0, eps=None):
         eps = 0.5 * (dz.min() if len(dz) else 1.0)
     w = (np.abs(z - z0) + eps) ** (-nu / 2.0)
     return w / w.max()
+
+
+def depth_weighted_roughness(roughness, cell_z, z0, *, nu=3.0, eps=None):
+    """Scale a :func:`roughness_operator`'s columns by :func:`depth_weighting`, so the resulting operator
+    is ready to pass straight into :func:`regularized_gauss_newton`'s ``roughness=`` argument.
+
+    This is the piece that was missing before: :func:`depth_weighting` existed but nothing in this module
+    (or any caller) actually wired it into an inversion, so every potential-field inversion here
+    regularized shallow and deep structure identically -- and, because shallow cells have far larger
+    sensitivity, recovered density/susceptibility systematically piled up near the surface regardless of
+    the true source depth. Passing ``depth_weighted_roughness(...)`` instead of the plain
+    :func:`roughness_operator` output fixes that at the source.
+
+    Args:
+        roughness: a ``(k, n_cells)`` scipy-sparse operator, e.g. :func:`roughness_operator`'s output.
+        cell_z: (n_cells,) vertical coordinate of each cell centre (same convention as :func:`depth_weighting`).
+        z0: reference level (e.g. the observation height).
+        nu: exponent (3 magnetics, 2 gravity) -- forwarded to :func:`depth_weighting`.
+        eps: forwarded to :func:`depth_weighting`.
+
+    Returns:
+        A ``(k, n_cells)`` scipy-sparse matrix: ``roughness`` with column ``j`` scaled by ``w[j]``.
+    """
+    w = depth_weighting(cell_z, z0, nu=nu, eps=eps)
+    return roughness.multiply(w[None, :]).tocsr()
 
 
 # --------------------------------------------------------------------------------------------------
@@ -759,6 +794,82 @@ def regularized_gauss_newton(
     except np.linalg.LinAlgError:
         std = np.full(n, np.nan)
     return x.detach().cpu().numpy(), std
+
+
+def invert_potential_field(
+    sensitivity,
+    data,
+    cell_mins,
+    cell_maxs,
+    *,
+    noise=1.0,
+    beta=1.0,
+    z0=0.0,
+    nu=2.0,
+    lower=None,
+    upper=None,
+    n_iter=8,
+    jac_every=3,
+    **gn_kwargs,
+):
+    """Regularized potential-field inversion with depth weighting applied by default.
+
+    A thin composition of :func:`roughness_operator`, :func:`depth_weighted_roughness`, and
+    :func:`regularized_gauss_newton` -- the exact combination every gravity/magnetic inversion in this
+    codebase needs, previously left for each caller to assemble by hand (and, in practice, several
+    callers omitted the depth-weighting step entirely, which is what let recovered density/susceptibility
+    systematically pile up near the surface regardless of the true source depth -- see the module-level
+    finding this function exists to fix at the source rather than leave to be rediscovered per caller).
+
+    Args:
+        sensitivity: ``(n_obs, n_cells)`` linear sensitivity matrix (e.g. :func:`gravity_prism_sensitivity`
+            or :func:`magnetic_prism_sensitivity` output). Since this forward is exactly linear,
+            ``forward(m) = sensitivity @ m`` is built internally -- no separate forward callable needed.
+        data: ``(n_obs,)`` observed data.
+        cell_mins, cell_maxs: ``(n_cells, 3)`` cell corners, the same arrays passed to the sensitivity
+            function -- used to derive each cell's centre depth for :func:`depth_weighting`.
+        noise: data standard deviation (scalar or per-datum array).
+        beta: regularization weight (forwarded to :func:`regularized_gauss_newton`).
+        z0: reference level for depth weighting (default the coordinate origin; pass the true
+            observation height if it differs).
+        nu: depth-weighting exponent (2.0 gravity, 3.0 magnetics -- the Li & Oldenburg / SimPEG values).
+        lower, upper: optional box bounds on the model.
+        n_iter, jac_every: forwarded to :func:`regularized_gauss_newton`.
+        **gn_kwargs: any other :func:`regularized_gauss_newton` keyword (``ref``, ``line_search``,
+            ``rtol``, ``verbose``, ``reweight``).
+
+    Returns:
+        ``(model, std)`` -- same shape/meaning as :func:`regularized_gauss_newton`'s return.
+    """
+    import torch
+
+    cell_mins = np.asarray(cell_mins, dtype=float)
+    cell_maxs = np.asarray(cell_maxs, dtype=float)
+    cell_z = 0.5 * (cell_mins[:, 2] + cell_maxs[:, 2])
+    n_cells = sensitivity.shape[1]
+
+    # roughness_operator needs a structured (nx, ny, nz) shape; potential-field callers here always
+    # build cell_mins/cell_maxs from such a grid, so recover it from the unique per-axis coordinates
+    # rather than require callers to pass the shape redundantly.
+    def _axis_count(col):
+        return len(np.unique(np.round(col, 6)))
+
+    shape = (_axis_count(cell_mins[:, 0]), _axis_count(cell_mins[:, 1]), _axis_count(cell_mins[:, 2]))
+    if int(np.prod(shape)) != n_cells:
+        raise ValueError(
+            f"invert_potential_field could not recover a structured grid shape from cell_mins/cell_maxs "
+            f"(got {shape} = {int(np.prod(shape))} cells, sensitivity has {n_cells}); pass a pre-built "
+            f"depth-weighted roughness operator to regularized_gauss_newton directly for irregular grids."
+        )
+    spacing = tuple(float(np.unique(np.round(cell_maxs[:, ax] - cell_mins[:, ax], 6))[0]) for ax in range(3))
+
+    roughness = depth_weighted_roughness(roughness_operator(shape, spacing=spacing), cell_z, z0, nu=nu)
+    g = torch.as_tensor(np.asarray(sensitivity, dtype=float))
+
+    return regularized_gauss_newton(
+        lambda m: g @ m, data, np.zeros(n_cells), noise=noise, beta=beta, roughness=roughness,
+        lower=lower, upper=upper, n_iter=n_iter, jac_every=jac_every, **gn_kwargs,
+    )
 
 
 # --------------------------------------------------------------------------------------------------
