@@ -277,6 +277,13 @@ from mixle_pde.potential_fields import (
     magnetic_gradient_tensor,
     magnetic_vector_sensitivity,
 )
+from mixle_pde.problem_adapter import (
+    PDEBackendProfile,
+    PDECompatibilityReport,
+    UnsupportedPDEProblem,
+    inspect_math_problem,
+    require_compatible,
+)
 from mixle_pde.propagation_inverse import ocean_sound_speed_inversion, refractivity_from_clutter
 from mixle_pde.ray_scattering import knife_edge_diffraction, multipath_power, po_rcs, two_ray_pattern
 
@@ -484,6 +491,11 @@ __all__ = [
     "KirchhoffPlate",
     "Differential",
     "CoupledPDESystem",
+    "PDEBackendProfile",
+    "PDECompatibilityReport",
+    "UnsupportedPDEProblem",
+    "inspect_math_problem",
+    "require_compatible",
     "solve_poisson",
     "gravity_point_sensitivity",
     "magnetic_dipole_sensitivity",
