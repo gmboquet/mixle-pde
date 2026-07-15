@@ -216,19 +216,44 @@ def design_monitoring_network(
     budget: float,
     k: int,
     criterion: str = "eig",
+    min_separation: float = 0.0,
+    existing_sites: Any = None,
 ) -> list[int]:
     """Greedily choose monitoring sites maximizing expected information gain about the source.
 
     ``candidate_sites`` is an ``(n, 2)`` array of candidate well/sensor coordinates.
     ``plume_prior`` is an IC-1 `Posterior` over ``theta = (x0, y0, log_rate, onset)`` -- e.g. G2's
-    ``invert_source`` output, or :class:`GaussianSourcePosterior` before G2 lands. ``criterion``
-    is ``"eig"`` (linear-Gaussian Bayesian D-optimality, the default -- exact and cheap) or
-    ``"nmc"`` (nested-Monte-Carlo EIG for the nonlinear forward model -- more expensive).
+    ``invert_source`` output (via :meth:`~mixle_pde.groundwater.SourcePosterior.to_doe_prior`), or
+    :class:`GaussianSourcePosterior` before G2 lands. ``criterion`` is ``"eig"`` (linear-Gaussian
+    Bayesian D-optimality, the default -- exact and cheap) or ``"nmc"`` (nested-Monte-Carlo EIG for
+    the nonlinear forward model -- more expensive).
+
+    **A real limitation, not a hypothetical one**: this greedy search scores every candidate by how
+    much it would tighten the posterior *around the current prior mean* -- it has no way to ask
+    "what would tell me my current belief is wrong." Chained into a sequential design loop (repeatedly
+    re-fitting a nonlinear posterior and calling this again with the updated prior), if an early fit
+    lands in a wrong local optimum, this criterion can systematically pick sites that reinforce that
+    wrong optimum rather than ones that would expose it -- observed in practice over several rounds
+    before the underlying nonlinear solver broke out on its own (see
+    ``experiments/adaptive-groundwater-monitoring`` in the top-level repo for a worked, real example:
+    uncertainty *grew* for 3 rounds before the fit corrected itself). ``min_separation``/
+    ``existing_sites`` below reduce the risk (candidates get some minimum spatial diversity from
+    what's already been surveyed, so the network can't cluster entirely around one possibly-wrong
+    location) -- they do not eliminate it. This criterion is exact for a *linear* Gaussian forward
+    (see ``mixle_pde.geophysics.invert_potential_field`` for that regime, where the analogous design
+    is estimate-independent and this failure mode cannot occur); it is only a locally-greedy
+    approximation for the nonlinear ``"eig"``/``"nmc"`` case used here.
 
     ``budget``/``k`` both cap the site count: real per-site cost models are out of scope (see
     module docstring / work-plan Non-goals), so with no cost model to convert a monetary
     ``budget`` into a site count, a unit cost per site is assumed and the network is capped at
     ``min(k, budget, n_candidates)`` sites.
+
+    ``min_separation`` (default ``0.0``, disabled): when positive, a candidate within
+    ``min_separation`` of any already-chosen site (within this call) *or* of any site in
+    ``existing_sites`` (an ``(m, 2)`` array of prior-round sites, e.g. wells already drilled) is
+    excluded from consideration at that greedy step -- a simple, real spatial-diversity constraint
+    that stops the design from clustering entirely around one neighborhood every round.
 
     Returns the chosen site indices into ``candidate_sites``, in the order added by the greedy
     submodular search (largest marginal information gain first).
@@ -241,6 +266,17 @@ def design_monitoring_network(
     max_sites = max(0, min(int(k), int(budget), n_candidates))
     if max_sites == 0:
         return []
+
+    prior_sites = np.atleast_2d(np.asarray(existing_sites, dtype=np.float64)) if existing_sites is not None and np.size(existing_sites) else np.zeros((0, sites.shape[1]))
+
+    def _too_close(cand_idx: int, chosen_idx: list[int]) -> bool:
+        if min_separation <= 0.0:
+            return False
+        against = np.concatenate([sites[chosen_idx], prior_sites], axis=0) if chosen_idx or prior_sites.shape[0] else np.zeros((0, sites.shape[1]))
+        if against.shape[0] == 0:
+            return False
+        d = np.linalg.norm(against - sites[cand_idx], axis=1)
+        return bool(np.min(d) < min_separation)
 
     theta0 = np.asarray(plume_prior.mean, dtype=np.float64)
     prior_cov = np.asarray(plume_prior.cov, dtype=np.float64)
@@ -261,8 +297,10 @@ def design_monitoring_network(
     remaining = list(range(n_candidates))
     base_score = score(chosen)
     while len(chosen) < max_sites and remaining:
+        eligible = [c for c in remaining if not _too_close(c, chosen)]
+        pool = eligible or remaining  # if the separation constraint would empty the pool, relax it
         best_idx, best_gain = None, -np.inf
-        for cand in remaining:
+        for cand in pool:
             gain = score(chosen + [cand]) - base_score
             if gain > best_gain:
                 best_gain, best_idx = gain, cand
