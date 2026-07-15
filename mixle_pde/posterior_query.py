@@ -363,9 +363,7 @@ def region_mass(
     weights = np.where(mask, vols, 0.0)
     if isinstance(posterior, PosteriorFieldSamples3D):
         return sampled_derived_quantity(posterior, weights)
-    return derived_quantity(
-        posterior, weights, n=n, rng=rng, prior_var=prior_var, posterior_var=posterior_var
-    )
+    return derived_quantity(posterior, weights, n=n, rng=rng, prior_var=prior_var, posterior_var=posterior_var)
 
 
 def region_mass_time_series(posterior: Posterior4D, mask, cell_volumes) -> DerivedTimeSeries:

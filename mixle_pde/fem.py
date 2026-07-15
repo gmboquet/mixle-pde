@@ -317,8 +317,7 @@ def _element_diffusion(diffusion, element: int, dim: int, n_elements: int):
     if coeff.shape == (n_elements, dim, dim):
         return coeff[int(element)]
     raise ValueError(
-        "diffusion must be scalar, shape (n_elements,), shape (dim, dim), "
-        "or shape (n_elements, dim, dim)."
+        "diffusion must be scalar, shape (n_elements,), shape (dim, dim), or shape (n_elements, dim, dim)."
     )
 
 

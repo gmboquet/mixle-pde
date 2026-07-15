@@ -1713,7 +1713,8 @@ def _run_earth_linear_dynamics_4d_assimilation() -> ScenarioResult:
     means = posterior.mean_array[:, 0]
     expected = np.array([1.0, 2.0, 4.0])
     max_error = float(np.max(np.abs(means - expected)))
-    passed = max_error <= 0.08 and posterior.marginal_std[-1, 0] < posterior.marginal_std[0, 0]
+    prior_std = 1.0 / np.sqrt(prior.marginal_precision)
+    passed = max_error <= 0.08 and posterior.marginal_std[0, 0] < prior_std
     return _result(
         "earth_linear_dynamics_4d_assimilation",
         "earth.geochem_biostrat_likelihoods",

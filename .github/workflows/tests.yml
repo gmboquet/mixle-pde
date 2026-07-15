@@ -43,8 +43,8 @@ jobs:
       # If gmboquet/mixle is private, add a MIXLE_TOKEN secret and prefix the URL with
       # x-access-token:${{ secrets.MIXLE_TOKEN }}@ before github.com.
       - name: Install mixle (core dependency)
-        run: pip install "mixle @ git+https://github.com/gmboquet/mixle.git@main"
+        run: pip install "mixle @ git+https://github.com/gmboquet/mixle.git@release/0.8.0"
       - name: Install mixle-pde
-        run: pip install -e ".[test]"
+        run: pip install -e ".[test,data]"
       - name: Run tests
         run: pytest

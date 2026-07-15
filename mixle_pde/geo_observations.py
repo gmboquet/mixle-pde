@@ -391,9 +391,8 @@ class FossilAssemblage:
         local = _normalize_probability(predicted_probability, name="predicted_probability", eps=eps)
         detected = _normalize_probability(local * self.detection_probability, name="detected_probability", eps=eps)
         expected = (
-            (1.0 - self.reworking_probability) * detected
-            + self.reworking_probability * self.background_probability
-        )
+            1.0 - self.reworking_probability
+        ) * detected + self.reworking_probability * self.background_probability
         return _normalize_probability(expected, name="expected_probability", eps=eps)
 
 

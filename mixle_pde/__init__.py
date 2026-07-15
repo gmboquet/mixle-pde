@@ -71,6 +71,12 @@ from mixle_pde.dynamics import (
     make_operator,
     register_dynamics_operator,
 )
+from mixle_pde.earth_scenarios import (
+    Synthetic3DInversionResult,
+    Synthetic4DAssimilationResult,
+    run_synthetic_3d_geochem_geophysics_inversion,
+    run_synthetic_4d_biostrat_assimilation,
+)
 from mixle_pde.elastic import ElasticWave3D
 
 # new inverse-PDE families (wave 1): nonlinear-steady primitive, diffusive EM, transient heat, rock physics,
@@ -95,11 +101,15 @@ from mixle_pde.env_data import (
     load_woa_argo,
     seabed_mask,
 )
-from mixle_pde.earth_scenarios import (
-    Synthetic3DInversionResult,
-    Synthetic4DAssimilationResult,
-    run_synthetic_3d_geochem_geophysics_inversion,
-    run_synthetic_4d_biostrat_assimilation,
+from mixle_pde.fem import (
+    assemble_simplex_fem_matrices,
+    assemble_simplex_load_vector,
+    assemble_simplex_mass_matrix,
+    assemble_simplex_stiffness_matrix,
+    simplex_p1_gradients,
+    simulate_simplex_diffusion,
+    solve_simplex_poisson,
+    step_simplex_diffusion,
 )
 from mixle_pde.field_assimilation import (
     ParticleAssimilationReport,
@@ -133,18 +143,16 @@ from mixle_pde.field_priors import (
     depth_weights,
     joint_linear_gaussian_invert,
 )
-from mixle_pde.fem import (
-    assemble_simplex_fem_matrices,
-    assemble_simplex_load_vector,
-    assemble_simplex_mass_matrix,
-    assemble_simplex_stiffness_matrix,
-    simulate_simplex_diffusion,
-    solve_simplex_poisson,
-    step_simplex_diffusion,
-    simplex_p1_gradients,
-)
 from mixle_pde.flow import NavierStokes2D
 from mixle_pde.flow3d import NavierStokes3D
+from mixle_pde.gas_dynamics import (
+    CombustionResult,
+    engine_cylinder_volume,
+    exact_riemann_solution,
+    simulate_zero_d_combustion,
+    solve_euler_1d,
+    solve_reactive_euler_1d,
+)
 from mixle_pde.geo_observations import (
     BiostratConstraint,
     FaciesIntervalConstraint,
@@ -165,14 +173,6 @@ from mixle_pde.geo_observations import (
     multi_element_assay_log_likelihood,
     multi_element_assay_posterior_predictive,
     stratigraphic_correlation_log_likelihood,
-)
-from mixle_pde.gas_dynamics import (
-    CombustionResult,
-    engine_cylinder_volume,
-    exact_riemann_solution,
-    simulate_zero_d_combustion,
-    solve_euler_1d,
-    solve_reactive_euler_1d,
 )
 from mixle_pde.geophysics import (
     JointInversionResult,

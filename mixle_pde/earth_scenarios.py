@@ -18,14 +18,19 @@ from mixle_pde.field_assimilation import PosteriorFieldSamples4D, assimilate_4d_
 from mixle_pde.field_inversion import FieldGaussianPrior, linear_gaussian_invert
 from mixle_pde.geo_observations import BiostratConstraint, GeochemAssay
 from mixle_pde.latent import Field3D, PosteriorField3D, PosteriorFieldSamples3D
-from mixle_pde.observations import ForwardOperatorRegistry, Observation, borehole_forward_operator, gravity_forward_operator
+from mixle_pde.observations import (
+    ForwardOperatorRegistry,
+    Observation,
+    borehole_forward_operator,
+    gravity_forward_operator,
+)
 from mixle_pde.sample_update import (
     SampleUpdateReport,
     biostrat_constraint_likelihood,
     geochem_assay_likelihood,
     timed_likelihood,
-    update_sampled_field_posterior_with_observations,
     update_sampled_field_posterior_4d,
+    update_sampled_field_posterior_with_observations,
 )
 
 
@@ -85,7 +90,7 @@ def run_synthetic_3d_geochem_geophysics_inversion(
         "gravity",
         surface,
         gravity_op.jacobian(grid, surface) @ truth,
-        np.full(surface.shape[0], 1.0e-4**2),
+        np.full(surface.shape[0], 1.0e-3**2),
         units="mGal",
     )
     prior = FieldGaussianPrior(mean=1.0, smoothness_precision=0.02, marginal_precision=0.2, length_scale=120.0)
