@@ -7,6 +7,15 @@
 - Added portable `mixle.sim.finite-linear-system/v1` validation, native execution, and residual receipts.
 - Added a receipt-bearing P1 Poisson compatibility wrapper with legacy numerical parity.
 - Preserved existing solver APIs while documenting cross-project semantic ownership and migration gates.
+- Added `pyproject.toml` optional-dependency extras `fem`, `mesh`, `mpi`, `fvm`, `coupling`, `inverse`,
+  `surrogate`, and `all` (MP-A5): mixle-pde's batteries-included capability-family deployment
+  profile. `segy`, `las`, and `potfield` extras were also added to close a gap where
+  `mixle_pde.io.segy`/`.las`/`.reductions` already pointed users at those extra names in their
+  `ImportError` messages without the extras existing.
+- Added `tests/packaging_test.py`: static extras-declaration checks, a package-wide static check that no
+  module imports a heavy optional backend at module scope, and (network-gated) `pip install
+  --dry-run` resolver-compatibility checks for every new extra and combinations of them.
+- `data` no longer redundantly re-lists `pyproj`, which is already an unconditional base dependency.
 
 ## 0.6.3 PDE modeling branch - 2026-07-08
 

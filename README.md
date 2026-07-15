@@ -26,6 +26,40 @@ pip install -e ".[test]"    # with the test extras
 pip install -e ".[docs]"    # with the docs extras
 ```
 
+A base install (zero extras) imports `mixle_pde` and runs the `mixle_pde.problem_adapter`
+compatibility-boundary tests with no optional backend present -- every heavy dependency below is a
+lazy, guarded import behind the module that needs it, never a hard requirement of the package.
+
+### Optional extras
+
+mixle-pde is the batteries-included PDE deployment profile: capability-family extras layer
+solver accelerators and differentiable backends on top of the numpy/scipy/pyproj base, and
+data-format extras layer geoscience file-format ingest. Mix and match; none is required by the
+others or by the core test suite.
+
+| Extra | Unlocks |
+| --- | --- |
+| `fem` | AMG (`pyamg`) and CHOLMOD (`scikit-sparse`) accelerators for large assembled FEM/simplex systems |
+| `mesh` | AMG preconditioning (`pyamg`) for mesh-scale assembled linear systems |
+| `mpi` | Forward-declared distributed mesh/solve transport (`mpi4py`); no backend is wired to it yet |
+| `fvm` | Differentiable finite-volume forwards (`torch`) plus AMG scale-up (`pyamg`) |
+| `coupling` | Differentiable coupled/multiphysics forwards (`torch`) |
+| `inverse` | Differentiable adjoints, randomized-SVD low-rank UQ, and sparse-scale posterior solves (`torch`, `scikit-learn`, `pyamg`, `scikit-sparse`) |
+| `surrogate` | Neural surrogate distillation and calibration (`torch`, `scikit-learn`) |
+| `all` | The union of the seven capability extras above |
+| `raster` / `netcdf` / `grib` / `segy` / `las` / `potfield` | Single-format geoscience data ingest (`mixle_pde.io.*`, `mixle_pde.env_data`, `mixle_pde.reductions`) |
+| `data` | Convenience bundle of every data-format backend above |
+
+```bash
+pip install -e ".[fem]"
+pip install -e ".[inverse,surrogate]"
+pip install -e ".[all]"
+```
+
+Commercial/optional adapters (e.g. the sibling `mixle_mlops` task-cascade integration
+`mixle_pde.surrogate` can optionally bind to) are never declared as a dependency of any extra and
+are never required to install or test mixle-pde.
+
 ## Documentation
 
 The Sphinx manual starts at [`docs/index.rst`](docs/index.rst). It includes installation notes, the
