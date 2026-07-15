@@ -34,7 +34,7 @@ def _small_posterior() -> PosteriorField3D:
     a = rng.standard_normal((grid.n, grid.n))
     cov = a @ a.T + 0.5 * np.eye(grid.n)
     mean = rng.standard_normal(grid.n)
-    return PosteriorField3D(grid=grid, mean=mean, cov=cov)
+    return PosteriorField3D(grid=grid, mean=mean, dense_cov=cov)
 
 
 def test_round_trip_mean_and_covariance(tmp_path):
