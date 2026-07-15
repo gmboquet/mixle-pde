@@ -42,6 +42,19 @@ Capability and mesh support
     for release review and demo gating, not as a replacement for problem-level
     numerical validation.
 
+``mixle_pde.verification.capability_inventory``
+    The frozen, per-module capability and limitation matrix (method,
+    dimension, cell/grid type, boundary-condition support, differentiability,
+    complex support, steady/transient status, parallel status, and
+    verification level) for every public top-level solver kernel module in
+    this package, generated to ``docs/capability-matrix.json``. This is a
+    different granularity than ``capabilities``: ``capabilities`` groups
+    symbols into a handful of release-facing capability bundles with
+    demo-scale readiness scenarios, while ``capability_inventory`` is a
+    module-by-module fact base of what each legacy kernel actually supports
+    today, used by ``mixle_pde.problem_adapter.PDEBackendProfile`` callers
+    that need to negotiate against real (not aspirational) capabilities.
+
 Documentation Boundaries
 ------------------------
 
