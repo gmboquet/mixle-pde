@@ -16,7 +16,6 @@ if HAS_TORCH:
     from mixle_pde.geophysics import (
         cross_gradient,
         dc_resistivity,
-        depth_weighted_roughness,
         depth_weighting,
         eikonal_traveltime,
         gravity_point_sensitivity,
@@ -328,7 +327,7 @@ class DepthWeightingTestCase(unittest.TestCase):
                     maxs.append([xs[i] + h, (j - ny / 2) * h + h, zs[k]])
         cell_mins, cell_maxs = np.array(mins), np.array(maxs)
         true_mask = np.zeros((nx, ny, nz), dtype=bool)
-        true_mask[body_x[0]:body_x[1], :, body_z[0]:body_z[1]] = True
+        true_mask[body_x[0] : body_x[1], :, body_z[0] : body_z[1]] = True
         true_mask_flat = true_mask.reshape(-1)
         rho_true = np.where(true_mask_flat, 700.0, 0.0)
         obs = np.column_stack([xs, np.zeros_like(xs), np.full_like(xs, 2.0)])
@@ -354,15 +353,33 @@ class DepthWeightingTestCase(unittest.TestCase):
         # unweighted (the bug this test locks in a fix for): plain roughness, no depth compensation.
         roughness_plain = roughness_operator((nx, ny, nz), spacing=h)
         est_unweighted, _ = regularized_gauss_newton(
-            lambda m: torch.as_tensor(g) @ m, y, np.zeros(n_cells), noise=noise_std, beta=0.05,
-            roughness=roughness_plain, lower=0.0, upper=2000.0, n_iter=8, jac_every=3,
+            lambda m: torch.as_tensor(g) @ m,
+            y,
+            np.zeros(n_cells),
+            noise=noise_std,
+            beta=0.05,
+            roughness=roughness_plain,
+            lower=0.0,
+            upper=2000.0,
+            n_iter=8,
+            jac_every=3,
         )
         depth_unweighted = self._recovered_depth_centroid(est_unweighted, true_mask_flat, nx, ny, nz, h)
 
         # depth-weighted (the fix): same data, same beta, only the roughness operator differs.
         est_weighted, _ = invert_potential_field(
-            g, y, cell_mins, cell_maxs, noise=noise_std, beta=0.05, z0=2.0, nu=2.0,
-            lower=0.0, upper=2000.0, n_iter=8, jac_every=3,
+            g,
+            y,
+            cell_mins,
+            cell_maxs,
+            noise=noise_std,
+            beta=0.05,
+            z0=2.0,
+            nu=2.0,
+            lower=0.0,
+            upper=2000.0,
+            n_iter=8,
+            jac_every=3,
         )
         depth_weighted_result = self._recovered_depth_centroid(est_weighted, true_mask_flat, nx, ny, nz, h)
 
@@ -370,7 +387,19 @@ class DepthWeightingTestCase(unittest.TestCase):
         error_weighted = abs(depth_weighted_result - true_depth)
         # the unweighted baseline must itself show the real, previously-observed bias (recovered
         # shallower than truth by a wide margin) -- otherwise this isn't testing what it claims to.
-        self.assertGreater(error_unweighted, 4.0, f"expected the unweighted baseline to show the known shallow bias; got depth={depth_unweighted:.1f}m vs true={true_depth:.1f}m")
+        self.assertGreater(
+            error_unweighted,
+            4.0,
+            f"expected the unweighted baseline to show the known shallow bias; got depth={depth_unweighted:.1f}m vs true={true_depth:.1f}m",
+        )
         # the fix must recover depth much more accurately, not just nominally better.
-        self.assertLess(error_weighted, 0.5 * error_unweighted, f"depth-weighted error ({error_weighted:.1f}m) should be well under half the unweighted error ({error_unweighted:.1f}m)")
-        self.assertLess(error_weighted, 3.0, f"depth-weighted recovery should land within 3m of the true {true_depth}m depth; got {depth_weighted_result:.1f}m")
+        self.assertLess(
+            error_weighted,
+            0.5 * error_unweighted,
+            f"depth-weighted error ({error_weighted:.1f}m) should be well under half the unweighted error ({error_unweighted:.1f}m)",
+        )
+        self.assertLess(
+            error_weighted,
+            3.0,
+            f"depth-weighted recovery should land within 3m of the true {true_depth}m depth; got {depth_weighted_result:.1f}m",
+        )

@@ -114,7 +114,13 @@ def test_min_separation_enforces_spatial_diversity_against_existing_sites():
     assert unconstrained == [0]  # confirms the pathology: it picks right on top of the existing site
 
     constrained = design_monitoring_network(
-        candidates, prior, budget=1, k=1, criterion="eig", min_separation=5.0, existing_sites=existing,
+        candidates,
+        prior,
+        budget=1,
+        k=1,
+        criterion="eig",
+        min_separation=5.0,
+        existing_sites=existing,
     )
     assert constrained[0] != 0
     chosen_xy = candidates[constrained[0]]
@@ -128,7 +134,13 @@ def test_min_separation_relaxes_rather_than_fails_when_pool_would_empty():
     candidates = np.array([[80.0, 0.0], [80.5, 0.1]])
     existing = np.array([[80.0, 0.0], [80.5, 0.1]])
     chosen = design_monitoring_network(
-        candidates, prior, budget=1, k=1, criterion="eig", min_separation=1000.0, existing_sites=existing,
+        candidates,
+        prior,
+        budget=1,
+        k=1,
+        criterion="eig",
+        min_separation=1000.0,
+        existing_sites=existing,
     )
     assert len(chosen) == 1  # relaxed, not empty
 

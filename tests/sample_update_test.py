@@ -20,7 +20,6 @@ from mixle_pde.sample_update import (
     geochronology_age_likelihood,
     stratigraphic_correlation_likelihood,
     timed_likelihood,
-    update_sampled_field_posterior,
     update_sampled_field_posterior_4d,
     update_sampled_field_posterior_with_observations,
 )
@@ -96,7 +95,9 @@ class SampledPosteriorUpdateTest(unittest.TestCase):
         self.assertEqual(updated.samples.shape, (32, 2, 1))
         self.assertEqual(report.likelihood_count, 1)
         self.assertLess(report.effective_sample_size, posterior.n_samples)
-        self.assertTrue(np.all((updated.physical_samples[:, 1, 0] >= 50.0) & (updated.physical_samples[:, 1, 0] <= 60.0)))
+        self.assertTrue(
+            np.all((updated.physical_samples[:, 1, 0] >= 50.0) & (updated.physical_samples[:, 1, 0] <= 60.0))
+        )
 
     def test_typed_age_facies_and_stratigraphic_likelihood_factories(self):
         grid = Field3D(

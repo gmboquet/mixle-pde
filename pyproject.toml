@@ -7,7 +7,7 @@ name = "mixle-pde"
 version = "0.7.0"
 description = "PDE/ODE-constrained Bayesian inverse problems for mixle (a mixle.ppl plugin)."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "MIT"
 authors = [{ name = "Grant Boquet", email = "grant.boquet@gmail.com" }]
 keywords = ["pde", "inverse problems", "bayesian", "mixle"]
