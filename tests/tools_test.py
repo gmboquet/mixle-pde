@@ -1,12 +1,8 @@
 """Tests for the real IC-3 physics-tool handlers (work-plan E4).
 
-``mixle_pde.io.artifacts`` (IC-2, workstream E2) is a sibling PR that has not merged as of this ticket,
-so these tests install a minimal in-memory stand-in for it -- the same technique
-``mixle-mlops/tests/test_e4_physics_tools.py`` already uses to test its own (mlops-side) wiring against a
-not-yet-landed ``mixle_pde.tools``. Once E2 lands, ``tools.py``'s ``_artifacts_module`` (a plain
-``from mixle_pde.io import artifacts``) picks up the real module unchanged and every test below still
-holds -- only ``test_artifacts_missing_raises_clear_import_error`` (which relies on the real module being
-absent) will need E2's own test suite to keep covering that path once it lands.
+The artifact module is now part of the package. Most tool tests still inject a minimal in-memory
+stand-in to isolate tool behavior; the missing-dependency test explicitly masks the real module so
+the optional-import error remains covered without depending on an obsolete package state.
 """
 
 from __future__ import annotations
@@ -288,7 +284,11 @@ def test_forward_model_unsupported_modality(tmp_path, fake_artifacts):
         tools.forward_model("seismic", posterior_ref, "unused")
 
 
-def test_artifacts_missing_raises_clear_import_error(tmp_path):
+def test_artifacts_missing_raises_clear_import_error(tmp_path, monkeypatch):
+    import mixle_pde.io as io_package
+
+    monkeypatch.delattr(io_package, "artifacts", raising=False)
+    monkeypatch.setitem(sys.modules, "mixle_pde.io.artifacts", None)
     dataset_ref = _tiny_gravity_dataset(tmp_path)
     with pytest.raises(ImportError, match="mixle_pde.io.artifacts"):
         tools.run_inversion(dataset_ref, "gravity", "smooth")
