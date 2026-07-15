@@ -267,12 +267,20 @@ def design_monitoring_network(
     if max_sites == 0:
         return []
 
-    prior_sites = np.atleast_2d(np.asarray(existing_sites, dtype=np.float64)) if existing_sites is not None and np.size(existing_sites) else np.zeros((0, sites.shape[1]))
+    prior_sites = (
+        np.atleast_2d(np.asarray(existing_sites, dtype=np.float64))
+        if existing_sites is not None and np.size(existing_sites)
+        else np.zeros((0, sites.shape[1]))
+    )
 
     def _too_close(cand_idx: int, chosen_idx: list[int]) -> bool:
         if min_separation <= 0.0:
             return False
-        against = np.concatenate([sites[chosen_idx], prior_sites], axis=0) if chosen_idx or prior_sites.shape[0] else np.zeros((0, sites.shape[1]))
+        against = (
+            np.concatenate([sites[chosen_idx], prior_sites], axis=0)
+            if chosen_idx or prior_sites.shape[0]
+            else np.zeros((0, sites.shape[1]))
+        )
         if against.shape[0] == 0:
             return False
         d = np.linalg.norm(against - sites[cand_idx], axis=1)

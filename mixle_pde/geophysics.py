@@ -867,8 +867,17 @@ def invert_potential_field(
     g = torch.as_tensor(np.asarray(sensitivity, dtype=float))
 
     return regularized_gauss_newton(
-        lambda m: g @ m, data, np.zeros(n_cells), noise=noise, beta=beta, roughness=roughness,
-        lower=lower, upper=upper, n_iter=n_iter, jac_every=jac_every, **gn_kwargs,
+        lambda m: g @ m,
+        data,
+        np.zeros(n_cells),
+        noise=noise,
+        beta=beta,
+        roughness=roughness,
+        lower=lower,
+        upper=upper,
+        n_iter=n_iter,
+        jac_every=jac_every,
+        **gn_kwargs,
     )
 
 
