@@ -9,14 +9,16 @@ provenance-tracked by construction. ``register_forward`` is the "register, don't
 mixle_pde forward operator dispatches through -- the same precedent as
 ``dynamics.register_dynamics_operator``.
 
-P1 (the upstream owner of this module's single-step path) had not landed on release/0.8.0 at the time
-the coupled-DAG runner (P2) was implemented, so this file also carries the minimal P1 substrate P2
-builds on: ``register_forward``/``_FORWARDS``, the coupling-free half of ``simulate``, and
-``write_result_artifact``/``read_result_artifact``. Three simple, honest forwards ("flow", "transport"/
-"dispersion", "poroelastic") are registered so the coupled scenario has real physics to run -- steady
-groundwater-head diffusion, advection-diffusion transport, and quasi-static consolidation subsidence --
-short of the full torch-differentiable machinery (``flow.NavierStokes2D``, ``poroelastic.BiotPoroelastic1D``,
-...) that is P1's own scope. See the PR notes for the reasoning.
+P1's own full-fidelity forwards are registered below: ``flow`` -> ``flow.NavierStokes2D`` (vorticity-
+streamfunction), ``transport``/``dispersion`` -> ``dynamics.AdvectionDiffusionOperator``, ``wave`` ->
+``wave.WaveEquation2D``, ``em`` -> ``em_diffusion.mt_2d_te`` (or ``maxwell.Maxwell3D`` FDTD), ``poroelastic``
+-> ``poroelastic.BiotPoroelastic1D``, and ``model`` -> ``mixle.inference.simulate.simulate``. An earlier,
+temporary substrate registered simplified stand-ins (steady Poisson diffusion) for ``flow``/``poroelastic``
+under the same op names before P1 itself landed; those are replaced here by the real solvers the spec always
+called for. ``_primary_field`` resolves a forward's input array across a small priority list of upstream key
+names (``"field"``, or a producer-specific name like ``"psi"``) rather than hard-coding one producer's output
+shape, so ``transport`` can consume either a raw ``"field"`` artifact (standalone) or an upstream ``flow``
+step's streamfunction (coupled) without either caller needing to know about the other.
 """
 
 from __future__ import annotations
@@ -68,7 +70,14 @@ _FORWARDS: dict[str, Callable[[str, dict], dict[str, np.ndarray]]] = {}
 
 def register_forward(op: str, fn: Callable[[str, dict], dict[str, np.ndarray]]) -> None:
     """Register a forward operator under an ``op`` name so ``simulate`` (and the MCP tool) can dispatch."""
+    if not callable(fn):
+        raise TypeError("forward must be callable")
     _FORWARDS[op] = fn
+
+
+def available_forwards() -> list[str]:
+    """The sorted names of every registered forward operator."""
+    return sorted(_FORWARDS)
 
 
 def _default_store_dir() -> str:
@@ -101,9 +110,22 @@ def write_result_artifact(
     return ref
 
 
+def _resolve_artifact_path(ref: str, store_dir: str) -> str:
+    """Resolve ``ref`` -- a bare content-hash living in ``store_dir``, or a filesystem path (absolute,
+    relative with a path separator, or simply an existing ``<ref>.npz``) -- to the ``.npz``-less base
+    path. Lets a scenario step point directly at an arbitrary artifact file (a fixture, a raw upstream
+    dataset) without first having to run it through ``write_result_artifact``."""
+    candidate = ref[: -len(".npz")] if ref.endswith(".npz") else ref
+    if os.path.isabs(candidate) or os.sep in candidate or os.path.exists(candidate + ".npz"):
+        return candidate
+    return os.path.join(store_dir, candidate)
+
+
 def read_result_artifact(ref: str, *, store_dir: str) -> dict[str, np.ndarray]:
-    """Read back the arrays written by ``write_result_artifact`` for content hash ``ref``."""
-    with np.load(os.path.join(store_dir, f"{ref}.npz")) as data:
+    """Read back the arrays written by ``write_result_artifact`` for content hash ``ref``, or any raw
+    ``.npz`` file ``ref`` resolves to (see ``_resolve_artifact_path``)."""
+    path = _resolve_artifact_path(ref, store_dir)
+    with np.load(f"{path}.npz") as data:
         return {k: np.asarray(data[k]) for k in data.files}
 
 
@@ -116,7 +138,7 @@ def read_result_header(ref: str, *, store_dir: str) -> dict[str, Any]:
 def _dispatch(step: ScenarioStep, *, store_dir: str) -> dict[str, np.ndarray]:
     fn = _FORWARDS.get(step.op)
     if fn is None:
-        raise ValueError(f"no forward registered for op {step.op!r}; registered: {sorted(_FORWARDS)}")
+        raise KeyError(f"no forward registered for op {step.op!r}; registered ops: {available_forwards()}")
     return fn(step.inputs_ref, {**step.params, "_store_dir": store_dir})
 
 
@@ -135,6 +157,11 @@ def simulate(scenario: Scenario) -> SimResult:
     """
     if scenario.couplings:
         return _run_coupled_dag(scenario)
+    if len(scenario.steps) != 1:
+        raise ValueError(
+            "simulate() without couplings requires exactly one ScenarioStep; a multi-step scenario needs "
+            "scenario.couplings to route through _run_coupled_dag."
+        )
     store_dir = _default_store_dir()
     step = scenario.steps[0]
     arrays = _dispatch(step, store_dir=store_dir)
@@ -217,61 +244,216 @@ def _run_coupled_dag(scenario: Scenario) -> SimResult:
     )
 
 
-# --- built-in forwards (the minimal P1 substrate the coupled DAG runs against) -----------------------
+# --- built-in forwards ---------------------------------------------------------------------------
+
+
+def _primary_field(arrays: dict[str, np.ndarray], *, keys: tuple[str, ...] = ("field",)) -> np.ndarray:
+    """Pick the array a scalar-field-consuming forward should evolve: the first of ``keys`` present in
+    ``arrays``, else the sole array if there is exactly one. ``keys`` lets a forward accept a specific
+    upstream producer's output name (e.g. ``"psi"`` from ``flow``) ahead of the generic ``"field"``
+    convention, without either the consumer or the producer needing to know about the other."""
+    for key in keys:
+        if key in arrays:
+            return np.asarray(arrays[key], dtype=float)
+    if len(arrays) == 1:
+        return np.asarray(next(iter(arrays.values())), dtype=float)
+    raise KeyError(f"expected one of {keys!r} (or exactly one array) in the input artifact; got {sorted(arrays)}")
+
+
+def _to_numpy(x: Any) -> np.ndarray:
+    return x.detach().numpy() if hasattr(x, "detach") else np.asarray(x)
 
 
 def _flow_forward(inputs_ref: str, params: dict) -> dict[str, np.ndarray]:
-    """Steady-state dewatering head: ``-div(K grad h) = source`` (``multiphysics.solve_poisson``)."""
-    shape = tuple(params.get("shape", (33,)))
-    source = params.get("source", 1.0)
-    conductivity = params.get("conductivity", 1.0)
-    dirichlet = params.get("dirichlet", 0.0)
-    spacing = params.get("spacing", 1.0)
-    head = multiphysics.solve_poisson(shape, source, conductivity=conductivity, dirichlet=dirichlet, spacing=spacing)
-    return {"head": head}
+    """The flow forward: step ``flow.NavierStokes2D`` (vorticity-streamfunction) ``params["steps"]``
+    times from an initial vorticity field read from ``inputs_ref`` (key ``"omega"`` or ``"field"``, or
+    the sole array)."""
+    from mixle_pde.flow import NavierStokes2D
+    from mixle_pde.ops import make_ops
+
+    data = read_result_artifact(inputs_ref, store_dir=params["_store_dir"])
+    omega0 = _primary_field(data, keys=("omega", "field"))
+    n = int(params.get("n", int(round(omega0.shape[0] ** 0.5))))
+    ns = NavierStokes2D(
+        n,
+        viscosity=float(params.get("viscosity", 0.1)),
+        dt=float(params.get("dt", 0.01)),
+        spacing=params.get("spacing"),
+        implicit_diffusion=bool(params.get("implicit_diffusion", False)),
+    )
+    ops = make_ops()
+    omega = ops.tensor(omega0)
+    for _ in range(int(params.get("steps", 1))):
+        omega = ns.step(omega, ops)
+    psi = ns.streamfunction(omega, ops)
+    return {"omega": _to_numpy(omega), "psi": _to_numpy(psi)}
 
 
 def _transport_forward(inputs_ref: str, params: dict) -> dict[str, np.ndarray]:
-    """Contaminant advection-diffusion (``dynamics.AdvectionDiffusionOperator``), driven by the upstream
-    head field's hydraulic gradient when no explicit ``velocity`` is given."""
-    store_dir = params["_store_dir"]
-    upstream = read_result_artifact(inputs_ref, store_dir=store_dir)
-    head = np.asarray(upstream["head"], dtype=float).reshape(-1)
-    n = int(params.get("n", head.shape[0]))
-    length = float(params.get("length", 1.0))
-    h = length / max(n - 1, 1)
-    velocity = params.get("velocity")
-    if velocity is None:
-        grad = np.gradient(head[:n], h) if n > 1 else np.zeros(1)
-        velocity = -float(np.mean(grad))
-    diffusivity = float(params.get("diffusivity", 1e-3))
-    dt = float(params.get("dt", 1.0))
-    n_steps = int(params.get("steps", 1))
-    operator = AdvectionDiffusionOperator(diffusivity=diffusivity, velocity=float(velocity), n=n, length=length)
+    """The transport/dispersion forward: step ``dynamics.AdvectionDiffusionOperator``
+    ``params["steps"]`` times. Loads the initial scalar field from ``inputs_ref`` (key ``"field"`` for
+    a standalone/raw input, or ``"psi"``/``"head"`` from an upstream ``flow``-style producer, or the
+    sole array), builds the one-step transition matrix (implicit Euler by default), and applies it."""
+    data = read_result_artifact(inputs_ref, store_dir=params["_store_dir"])
+    field0 = _primary_field(data, keys=("field", "psi", "head"))
+    n = int(params.get("n", field0.shape[0]))
+    if field0.shape[0] != n:
+        field0 = np.resize(field0, n)
+    operator = AdvectionDiffusionOperator(
+        diffusivity=float(params["diffusivity"]),
+        velocity=float(params["velocity"]),
+        n=n,
+        length=float(params.get("length", 1.0)),
+        bc=params.get("bc", "periodic"),
+        scheme=params.get("scheme", "implicit"),
+    )
+    dt = float(params.get("dt", 0.05))
     transition = operator.transition_matrix(dt)
-    concentration = np.asarray(params.get("initial_concentration", np.zeros(n)), dtype=float)
-    if concentration.shape[0] != n:
-        concentration = np.resize(concentration, n)
-    for _ in range(n_steps):
-        concentration = transition @ concentration
-    return {"concentration": concentration, "load": concentration}
+    u = field0.copy()
+    for _ in range(int(params.get("steps", 1))):
+        u = transition @ u
+    return {"field": u}
+
+
+def _forward_wave(inputs_ref: str, params: dict) -> dict[str, np.ndarray]:
+    """The wave forward: step ``wave.WaveEquation2D`` ``params["steps"]`` times (zero source unless
+    ``c2``/``u0``/``w0`` are given in the input artifact)."""
+    from mixle_pde.ops import make_ops
+    from mixle_pde.wave import WaveEquation2D
+
+    data = read_result_artifact(inputs_ref, store_dir=params["_store_dir"])
+    n = int(params["n"]) if "n" in params else int(round(len(next(iter(data.values()))) ** 0.5))
+    nn = n * n
+    c2 = data.get("c2")
+    c2 = np.full(nn, float(params.get("velocity", 1.0)) ** 2) if c2 is None else np.asarray(c2, dtype=float).ravel()
+    u0 = np.asarray(data.get("u0", np.zeros(nn)), dtype=float).ravel()
+    w0 = np.asarray(data.get("w0", np.zeros(nn)), dtype=float).ravel()
+
+    wave = WaveEquation2D(
+        n,
+        dt=float(params.get("dt", 0.1 / max(n - 1, 1))),
+        spacing=params.get("spacing"),
+        absorb_width=int(params.get("absorb_width", 0)),
+        absorb_strength=float(params.get("absorb_strength", 2.0)),
+    )
+    ops = make_ops()
+    state = wave.pack(u0, w0)
+    c2_t = ops.tensor(c2)
+    for _ in range(int(params.get("steps", 1))):
+        state = wave.step(state, c2_t, ops)
+    return {"u": _to_numpy(wave.displacement(state))}
+
+
+def _forward_em(inputs_ref: str, params: dict) -> dict[str, np.ndarray]:
+    """The em forward: 2-D magnetotelluric TE-mode sounding (``em_diffusion.mt_2d_te``) by default;
+    ``params["mode"] == "fdtd"`` steps a 3-D ``maxwell.Maxwell3D`` cavity instead, for the transient
+    regime."""
+    data = read_result_artifact(inputs_ref, store_dir=params["_store_dir"])
+    if params.get("mode") == "fdtd":
+        from mixle_pde.maxwell import Maxwell3D
+        from mixle_pde.ops import make_ops
+
+        n = int(params["n"])
+        nc = n**3
+        zeros = lambda: np.zeros(nc)  # noqa: E731
+        Ex, Ey, Ez = data.get("Ex", zeros()), data.get("Ey", zeros()), data.get("Ez", zeros())
+        Hx, Hy, Hz = data.get("Hx", zeros()), data.get("Hy", zeros()), data.get("Hz", zeros())
+        mx = Maxwell3D(
+            n,
+            dt=float(params.get("dt", 0.1 / max(n - 1, 1))),
+            spacing=params.get("spacing"),
+            eps=float(params.get("eps", 1.0)),
+            mu=float(params.get("mu", 1.0)),
+        )
+        ops = make_ops()
+        state = mx.pack(Ex, Ey, Ez, Hx, Hy, Hz)
+        for _ in range(int(params.get("steps", 1))):
+            state = mx.step(state, ops)
+        names = ("Ex", "Ey", "Ez", "Hx", "Hy", "Hz")
+        return dict(zip(names, (_to_numpy(c) for c in mx.unpack(state))))
+
+    from mixle_pde.em_diffusion import mt_2d_te
+
+    log_sigma = _primary_field(data, keys=("log_sigma",))
+    shape = tuple(int(s) for s in params["shape"])
+    rho_a, phase = mt_2d_te(
+        log_sigma,
+        shape,
+        freq=float(params["freq"]),
+        spacing=params.get("spacing", 1.0),
+        sigma_ref=float(params.get("sigma_ref", 1.0)),
+    )
+    return {"rho_a": _to_numpy(rho_a), "phase": _to_numpy(phase)}
 
 
 def _poroelastic_forward(inputs_ref: str, params: dict) -> dict[str, np.ndarray]:
-    """Quasi-static consolidation subsidence -- the steady limit of Biot/Terzaghi consolidation,
-    ``-div(S grad u) = compressibility * load`` -- driven by the upstream contaminant/load field."""
-    store_dir = params["_store_dir"]
-    upstream = read_result_artifact(inputs_ref, store_dir=store_dir)
-    load = np.asarray(upstream.get("load", upstream.get("concentration")), dtype=float).reshape(-1)
-    n = load.shape[0]
-    compressibility = float(params.get("compressibility", 1.0))
-    storage = params.get("storage", 1.0)
-    dirichlet = params.get("dirichlet", 0.0)
-    spacing = params.get("spacing", 1.0)
-    subsidence = multiphysics.solve_poisson(
-        (n,), compressibility * load, conductivity=storage, dirichlet=dirichlet, spacing=spacing
+    """The poroelastic forward: step ``poroelastic.BiotPoroelastic1D`` ``params["steps"]`` times.
+
+    Reads its initial ``(v, q, sigma, pf)`` state directly from the input artifact when those keys are
+    present (the native convention); otherwise treats a single upstream scalar (e.g. an upstream
+    ``transport`` step's evolved ``"field"``) as the initial pore-fluid pressure ``pf`` -- the natural
+    "loading" analog for a coupled scenario feeding one field into subsidence -- with ``v``/``q``/
+    ``sigma`` at rest."""
+    from mixle_pde.ops import make_ops
+    from mixle_pde.poroelastic import BiotPoroelastic1D
+
+    data = read_result_artifact(inputs_ref, store_dir=params["_store_dir"])
+    if any(k in data for k in ("v", "q", "sigma", "pf")):
+        n = int(params["n"]) if "n" in params else len(next(iter(data.values())))
+        zeros = lambda: np.zeros(n)  # noqa: E731
+        v0, q0, sigma0 = data.get("v", zeros()), data.get("q", zeros()), data.get("sigma", zeros())
+        pf0 = data.get("pf", zeros())
+    else:
+        pf0 = _primary_field(data, keys=("field", "load", "concentration"))
+        n = int(params.get("n", pf0.shape[0]))
+        v0 = q0 = sigma0 = np.zeros(n)
+
+    kwarg_names = (
+        "spacing",
+        "k_solid",
+        "k_fluid",
+        "k_dry",
+        "mu",
+        "phi",
+        "rho_solid",
+        "rho_fluid",
+        "eta",
+        "permeability",
+        "tortuosity",
+        "absorb_width",
+        "absorb_strength",
     )
-    return {"subsidence": subsidence}
+    kwargs = {k: params[k] for k in kwarg_names if k in params}
+    biot = BiotPoroelastic1D(n, dt=float(params.get("dt", 1e-4)), **kwargs)
+    ops = make_ops()
+    state = biot.pack(v0, q0, sigma0, pf0)
+    for _ in range(int(params.get("steps", 1))):
+        state = biot.step(state, ops)
+    v, q, sigma, pf = biot.unpack(state)
+    return {
+        "v": _to_numpy(v),
+        "q": _to_numpy(q),
+        "sigma": _to_numpy(sigma),
+        "pf": _to_numpy(pf),
+        "subsidence": _to_numpy(pf),
+    }
+
+
+def _forward_model(inputs_ref: str, params: dict) -> dict[str, np.ndarray]:
+    """The model forward: sample ``n`` draws from a fitted core generative model via
+    ``mixle.inference.simulate.simulate(model).run(n, seed=...)``.
+
+    Unlike the mesh-based pde forwards, a fitted model is not a numpy-array artifact, so it is passed
+    in-process as ``params["model"]`` (a live Python object) rather than resolved from ``inputs_ref``.
+    """
+    from mixle.inference.simulate import simulate as core_simulate
+
+    model = params.get("model")
+    if model is None:
+        raise ValueError("op 'model' requires params['model'] (a fitted generative model object)")
+    sim = core_simulate(model)
+    records = sim.run(int(params.get("n", 100)), seed=int(params.get("seed", 0)))
+    return {"samples": np.asarray(records, dtype=float)}
 
 
 def _coupled_forward(inputs_ref: str, params: dict) -> dict[str, np.ndarray]:
@@ -291,8 +473,72 @@ def _coupled_forward(inputs_ref: str, params: dict) -> dict[str, np.ndarray]:
 register_forward("flow", _flow_forward)
 register_forward("transport", _transport_forward)
 register_forward("dispersion", _transport_forward)
+register_forward("wave", _forward_wave)
+register_forward("em", _forward_em)
 register_forward("poroelastic", _poroelastic_forward)
+register_forward("model", _forward_model)
 register_forward("coupled", _coupled_forward)
+# "climate_rcm"/"exposure"/"habitat" are open slots L7/K/N register -- not this task's forwards.
+
+
+# --- IC-10 catalog registration -- "so the router (M3) sees it uniformly" -------------------------
+#
+# `mixle.task.catalog` is IC-10's frozen module. If it has not landed in core mixle in a given
+# environment, importing it unconditionally would make this whole module fail to import and block
+# every P1/P2/P4 consumer on an unrelated contract. Rather than touch the frozen contract or block on
+# it, degrade gracefully: use the real `CatalogEntry`/`ToolCatalog` when importable, and fall back to a
+# private shim reproducing IC-10's exact frozen shape when it is not. Once `mixle.task.catalog` lands
+# everywhere, this `try/except` collapses to the plain import -- no call site below needs to change.
+try:  # pragma: no cover - exercised by whichever branch is importable in a given environment
+    from mixle.task.catalog import CatalogEntry, ToolCatalog
+except ImportError:  # pragma: no cover
+    from dataclasses import dataclass as _dataclass
+
+    @_dataclass(frozen=True)
+    class CatalogEntry:  # type: ignore[no-redef]
+        id: str
+        schema: dict[str, Any]
+        owner: str
+        cost: float = 0.0
+        reliability: float = 1.0
+        verifier: str | None = None
+
+    class ToolCatalog:  # type: ignore[no-redef]
+        def __init__(self) -> None:
+            self._entries: dict[str, CatalogEntry] = {}
+
+        def register(self, entry: CatalogEntry) -> None:
+            self._entries[entry.id] = entry
+
+        def get(self, entry_id: str) -> CatalogEntry | None:
+            return self._entries.get(entry_id)
+
+        def all(self) -> list[CatalogEntry]:
+            return list(self._entries.values())
+
+
+SIMULATE_TOOL_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "scenario": {
+            "type": "object",
+            "description": "IC-11 Scenario: {steps: [{op, inputs_ref, params}], couplings, provenance}",
+        }
+    },
+    "required": ["scenario"],
+}
+
+_TOOL_CATALOG = ToolCatalog()
+_TOOL_CATALOG.register(
+    CatalogEntry(
+        id="simulate", schema=SIMULATE_TOOL_SCHEMA, owner="physics", cost=1.0, reliability=1.0, verifier="physical"
+    )
+)
+
+
+def get_tool_catalog() -> ToolCatalog:
+    """The IC-10 tool catalog with the ``simulate`` entry registered, for the router (M3) to enumerate."""
+    return _TOOL_CATALOG
 
 
 # --- P4: simulation UQ + surrogate acceleration --------------------------------------------------

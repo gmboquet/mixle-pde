@@ -99,3 +99,44 @@ def test_nmc_criterion_produces_a_valid_design():
 def test_expected_detection_time_rejects_empty_sites():
     with pytest.raises(ValueError):
         expected_detection_time(np.empty((0, 2)), [{"location": (0.0, 0.0), "rate": 1.0, "onset": 0.0}])
+
+
+def test_min_separation_enforces_spatial_diversity_against_existing_sites():
+    """Fix for a real, observed failure mode (experiments/adaptive-groundwater-monitoring): without
+    a diversity constraint, greedy EIG can cluster every new pick right next to sites that already
+    exist (e.g. because the design is scored around a possibly-wrong current prior mean)."""
+    prior = _plume_prior()
+    # a tight cluster of candidates right next to an existing site, plus one far away.
+    candidates = np.array([[80.0, 0.0], [81.0, 0.5], [79.5, -0.5], [80.5, 0.2], [300.0, 100.0]])
+    existing = np.array([[80.0, 0.0]])  # a well already drilled at the prior mean
+
+    unconstrained = design_monitoring_network(candidates, prior, budget=1, k=1, criterion="eig")
+    assert unconstrained == [0]  # confirms the pathology: it picks right on top of the existing site
+
+    constrained = design_monitoring_network(
+        candidates, prior, budget=1, k=1, criterion="eig", min_separation=5.0, existing_sites=existing,
+    )
+    assert constrained[0] != 0
+    chosen_xy = candidates[constrained[0]]
+    assert np.linalg.norm(chosen_xy - existing[0]) >= 5.0
+
+
+def test_min_separation_relaxes_rather_than_fails_when_pool_would_empty():
+    """If every candidate is too close to existing sites, the constraint must not just crash or
+    return nothing -- it should relax back to the unconstrained choice."""
+    prior = _plume_prior()
+    candidates = np.array([[80.0, 0.0], [80.5, 0.1]])
+    existing = np.array([[80.0, 0.0], [80.5, 0.1]])
+    chosen = design_monitoring_network(
+        candidates, prior, budget=1, k=1, criterion="eig", min_separation=1000.0, existing_sites=existing,
+    )
+    assert len(chosen) == 1  # relaxed, not empty
+
+
+def test_min_separation_default_is_backward_compatible():
+    prior = _plume_prior()
+    candidates = _candidate_grid()
+    k = 6
+    without_param = design_monitoring_network(candidates, prior, budget=k, k=k, criterion="eig")
+    with_default = design_monitoring_network(candidates, prior, budget=k, k=k, criterion="eig", min_separation=0.0)
+    assert without_param == with_default

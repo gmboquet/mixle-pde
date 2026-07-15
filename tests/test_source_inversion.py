@@ -127,5 +127,40 @@ class SourceInversionTestCase(unittest.TestCase):
         self.assertGreaterEqual(coverage, 0.88, msg=f"empirical held-out coverage {coverage:.3f} < 0.88")
 
 
+class ToDoePriorTestCase(unittest.TestCase):
+    """`SourcePosterior.to_doe_prior()` -- the real bridge into G6's monitoring_design convention,
+    replacing the hand-written glue that used to live only in experiments/adaptive-groundwater-monitoring."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.operator = _operator()
+        cls.posterior = _fit(cls.operator, noise_seed=7)
+
+    def test_bridged_prior_has_the_expected_4param_shape_and_matches_the_source_posterior(self):
+        bridged = self.posterior.to_doe_prior()
+        self.assertEqual(bridged.mean.shape, (4,))
+        self.assertEqual(bridged.cov.shape, (4, 4))
+        np.testing.assert_allclose(bridged.mean[:2], self.posterior.mean[:2])
+        self.assertAlmostEqual(float(bridged.mean[2]), float(np.log(self.posterior.mean[2])), places=9)
+        self.assertAlmostEqual(float(bridged.mean[3]), self.posterior.onset[0], places=9)
+        # atol accounts for the intentional 1e-6 * I positive-definiteness jitter to_doe_prior adds.
+        np.testing.assert_allclose(bridged.cov[:2, :2], self.posterior.cov[:2, :2], atol=1.5e-6)
+        self.assertAlmostEqual(float(bridged.cov[3, 3]), float(self.posterior.onset[1]) ** 2, places=5)
+
+    def test_bridged_prior_covariance_is_positive_definite(self):
+        bridged = self.posterior.to_doe_prior()
+        eigvals = np.linalg.eigvalsh(bridged.cov)
+        self.assertTrue(np.all(eigvals > 0), f"bridged covariance is not PD: eigenvalues={eigvals}")
+
+    def test_bridged_prior_works_directly_as_a_design_monitoring_network_input(self):
+        from mixle_pde.monitoring_design import design_monitoring_network
+
+        bridged = self.posterior.to_doe_prior()
+        candidates = np.array([[x, 7.0] for x in range(1, 13, 2)], dtype=float)
+        chosen = design_monitoring_network(candidates, bridged, budget=1, k=1, criterion="eig")
+        self.assertEqual(len(chosen), 1)
+        self.assertTrue(0 <= chosen[0] < candidates.shape[0])
+
+
 if __name__ == "__main__":
     unittest.main()
