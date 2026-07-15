@@ -61,6 +61,44 @@ available, examples should skip clearly or use the documented NumPy/SciPy
 fallback. Do not treat a developer environment with extra solvers as proof that
 the base install behaves the same way.
 
+A base install (``pip install -e .``, zero extras) must import ``mixle_pde`` and
+run the ``mixle_pde.problem_adapter`` compatibility-boundary tests with no
+optional backend present; ``tests/packaging_test.py`` pins this contract
+statically (no module in the package imports a heavy backend at module scope)
+and, when a network is available, by resolving each extra with ``pip install
+--dry-run``.
+
+mixle-pde defines capability-family installation extras on top of the
+numpy/scipy/pyproj base:
+
+======================================== ==========================================================
+Extra                                    Unlocks
+======================================== ==========================================================
+``fem``                                  AMG (``pyamg``) and CHOLMOD (``scikit-sparse``) accelerators
+                                          for large assembled FEM/simplex systems
+``mesh``                                 AMG preconditioning (``pyamg``) for mesh-scale assembled
+                                          linear systems
+``mpi``                                  Forward-declared distributed mesh/solve transport
+                                          (``mpi4py``); no backend is wired to it yet
+``fvm``                                  Differentiable finite-volume forwards (``torch``) plus AMG
+                                          scale-up (``pyamg``)
+``coupling``                             Differentiable coupled/multiphysics forwards (``torch``)
+``inverse``                              Differentiable adjoints, randomized-SVD low-rank UQ, and
+                                          sparse-scale posterior solves (``torch``, ``scikit-learn``,
+                                          ``pyamg``, ``scikit-sparse``)
+``surrogate``                            Neural surrogate distillation and calibration (``torch``,
+                                          ``scikit-learn``)
+``all``                                  The union of the seven capability extras above
+``raster`` / ``netcdf`` / ``grib`` /     Single-format geoscience data ingest
+``segy`` / ``las`` / ``potfield``
+``data``                                 Convenience bundle of every data-format backend above
+======================================== ==========================================================
+
+Commercial or optional adapters (for example the sibling ``mixle_mlops``
+task-cascade integration ``mixle_pde.surrogate`` can optionally bind to) are
+never declared as a dependency of any extra and are never required to install
+or test mixle-pde.
+
 Frozen Surface Expectations
 ---------------------------
 

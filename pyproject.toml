@@ -21,14 +21,55 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Dev tooling -- never required to import mixle_pde or to run the problem_adapter-boundary tests.
 test = ["pytest>=8", "pytest-xdist", "torch"]
 lint = ["ruff==0.15.17"]
 docs = ["sphinx>=7", "furo"]
+
+# Field-data ingest formats (workstream B): each is a single lazy-imported backend behind one
+# `mixle_pde.io.*` (or `mixle_pde.env_data` / `mixle_pde.reductions`) module. `data` is the
+# convenience bundle referenced by mixle_pde.io.assays/gis error messages.
 raster = ["rasterio"]
 netcdf = ["xarray", "netCDF4"]
 grib = ["cfgrib", "xarray"]
+segy = ["segyio"]
+las = ["lasio"]
+potfield = ["harmonica", "xarray"]
 data = ["segyio", "lasio", "rasterio", "harmonica", "verde",
-        "geopandas", "fiona", "pyproj", "pandas", "openpyxl"]
+        "geopandas", "fiona", "pandas", "openpyxl"]
+
+# MP-A5 batteries-included PDE profile -- capability-family extras. Every dependency here is
+# already a lazy, guarded import inside the corresponding module (never imported at module scope),
+# so a base install (zero extras) still imports mixle_pde and exercises every module whose forward
+# path does not need the accelerator. Mapping follows mixle_pde.capabilities.capability_catalog()'s
+# `required_dependencies` per capability plus the concrete lazy-import call sites:
+#   - torch backs differentiable/adjoint forwards (mixle_pde.heat, .observations, .wave, .pde, ...)
+#     and the surrogate/cascade path (mixle_pde.surrogate).
+#   - pyamg/scikit-sparse (sksparse) are optional large-scale sparse-solve accelerators for FEM/mesh
+#     assembled systems (mixle_pde.linear_solve, .uq_lowrank); mixle-pde falls back to SciPy's
+#     incomplete-LU / dense Cholesky when they are absent, so they change performance, not
+#     correctness or the public surface.
+#   - scikit-learn backs the randomized-SVD low-rank UQ compression path (mixle_pde.uq_lowrank).
+#   - mpi4py is forward-declared for the distributed mesh/solve transport described in the
+#     architecture plan; no mixle_pde module imports it yet, so this extra currently installs a
+#     dependency with no wired call site rather than unlocking new behavior.
+# `mixle_mlops` (the commercial task-cascade adapter mixle_pde.surrogate can optionally bind to) is
+# deliberately never listed here or in `all`: it is an internal sibling package, not a public PyPI
+# distribution, and per the architecture's commercial-adapter rule it must never be required to
+# install or test mixle-pde.
+fem = ["pyamg", "scikit-sparse"]
+mesh = ["pyamg"]
+mpi = ["mpi4py"]
+fvm = ["torch", "pyamg"]
+coupling = ["torch"]
+inverse = ["torch", "scikit-learn", "pyamg", "scikit-sparse"]
+surrogate = ["torch", "scikit-learn"]
+
+# The union of the seven capability-family extras directly above -- the batteries-included PDE
+# modeling profile the architecture plan names as its release/container deliverable (MP-L4), not a
+# bundle of the separately-versioned geoscience data-format extras above (`raster`/`netcdf`/`grib`/
+# `segy`/`las`/`potfield`/`data`), which a deployment opts into independently by data format.
+all = ["pyamg", "scikit-sparse", "mpi4py", "torch", "scikit-learn"]
 
 [project.urls]
 Homepage = "https://github.com/gmboquet/mixle-pde"
