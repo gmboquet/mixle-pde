@@ -2,6 +2,10 @@
 
 PDE and ODE-constrained Bayesian inverse problems for [mixle](https://github.com/gmboquet/mixle).
 
+For `0.8.0`, this repository is also the integrated compatibility profile for Mixle Physics, Simulation, and
+Discrete artifacts. Existing solvers remain available; new canonical adapters expose explicit capability,
+conversion, residual, parity, and migration receipts rather than turning this package into a second semantic owner.
+
 mixle-pde is a `mixle.ppl` plugin. Importing it wires a stack of differentiable forward solvers and
 PDE-constrained state-space models into mixle's probabilistic-programming surface through mixle's
 extension hooks. It never patches mixle: the plugin depends on mixle, not the reverse.
@@ -256,6 +260,9 @@ from mixle_pde import readiness_report, assert_required_modeling
 print(readiness_report())
 assert_required_modeling()
 ```
+
+Canonical callers should additionally inspect `native_backend_manifest()` and may use
+`solve_p1_poisson_canonical()` for the first legacy-compatible, receipt-bearing FEM migration path.
 
 The required modeling gate currently checks:
 

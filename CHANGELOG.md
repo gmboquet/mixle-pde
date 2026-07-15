@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.0 (development)
+
+- Added exhaustive legacy-module disposition and final-owner inventory.
+- Added a versioned native canonical backend manifest constrained to executable evidence.
+- Added portable `mixle.sim.finite-linear-system/v1` validation, native execution, and residual receipts.
+- Added a receipt-bearing P1 Poisson compatibility wrapper with legacy numerical parity.
+- Preserved existing solver APIs while documenting cross-project semantic ownership and migration gates.
+
 ## 0.6.3 PDE modeling branch - 2026-07-08
 
 `mixle-pde` currently declares package version `0.1.0`; this entry tracks the

@@ -48,6 +48,16 @@ from mixle_pde.boundaries import (
     radar_surface_reflection,
     seabed_reflection,
 )
+from mixle_pde.canonical_adapter import (
+    SIM_LINEAR_SCHEMA,
+    CanonicalLinearSolution,
+    CanonicalSolveReceipt,
+    LegacyCanonicalPoissonResult,
+    NativeBackendCapability,
+    native_backend_manifest,
+    solve_p1_poisson_canonical,
+    solve_sim_linear_system,
+)
 from mixle_pde.capabilities import (
     DEFAULT_REQUIRED_CAPABILITIES,
     ModelingCapability,
@@ -235,6 +245,7 @@ from mixle_pde.observations import (
     mt_2d_te_forward_operator,
     mt_3d_forward_operator,
 )
+from mixle_pde.ownership import ModuleDisposition, migration_inventory, migration_inventory_digest
 from mixle_pde.parabolic_equation import ParabolicEquation2D
 from mixle_pde.pde_solve import sparse_used_since as _sparse_used_since
 from mixle_pde.plate import KirchhoffPlate
@@ -331,6 +342,12 @@ def PDE(operator: Any, *, name: str | None = None) -> RandomVariable:
 
 __all__ = [
     "PDE",
+    "CanonicalLinearSolution",
+    "CanonicalSolveReceipt",
+    "LegacyCanonicalPoissonResult",
+    "ModuleDisposition",
+    "NativeBackendCapability",
+    "SIM_LINEAR_SCHEMA",
     "ModelingCapability",
     "VerificationScenario",
     "ScenarioResult",
@@ -339,6 +356,9 @@ __all__ = [
     "get_capability",
     "missing_required_dependencies",
     "readiness_report",
+    "native_backend_manifest",
+    "migration_inventory",
+    "migration_inventory_digest",
     "verification_scenarios",
     "run_verification_scenario",
     "run_required_modeling_checks",
@@ -497,6 +517,8 @@ __all__ = [
     "inspect_math_problem",
     "require_compatible",
     "solve_poisson",
+    "solve_p1_poisson_canonical",
+    "solve_sim_linear_system",
     "gravity_point_sensitivity",
     "magnetic_dipole_sensitivity",
     "depth_weighting",
