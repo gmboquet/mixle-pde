@@ -198,6 +198,39 @@
     },
     {
       "boundary_conditions": [
+        "dirichlet"
+      ],
+      "category": "fem_pde_core",
+      "complex_support": false,
+      "differentiable": false,
+      "dimension": [
+        "2D",
+        "3D"
+      ],
+      "grid_type": "unstructured simplex (triangular/tetrahedral) mesh",
+      "is_solver": true,
+      "limitations": [
+        "single-process only: no MPI, multiprocessing, or distributed execution path",
+        "exact-rational input is converted to IEEE-754 float64 before solving; the residual check is against the converted floating-point system, not an exact certificate",
+        "the P1 Poisson wrapper checked here against mixle_pde.fem is scalar-source, scalar-conductivity, Dirichlet-only"
+      ],
+      "method": "Portable, receipt-bearing execution of exact-rational Sim linear-system records via a dense solve, plus a legacy-parity-checked P1 Poisson wrapper over mixle_pde.fem.",
+      "module": "mixle_pde.canonical_adapter",
+      "parallel_status": "single_process",
+      "public_symbols": [
+        "CanonicalLinearSolution",
+        "CanonicalSolveReceipt",
+        "LegacyCanonicalPoissonResult",
+        "NativeBackendCapability",
+        "native_backend_manifest",
+        "solve_p1_poisson_canonical",
+        "solve_sim_linear_system"
+      ],
+      "time_regime": "steady",
+      "verification_level": "reference_value_checked"
+    },
+    {
+      "boundary_conditions": [
         "not_applicable"
       ],
       "category": "infrastructure",
@@ -227,39 +260,6 @@
         "run_verification_scenario",
         "run_required_modeling_checks",
         "assert_required_modeling"
-      ],
-      "time_regime": "not_applicable",
-      "verification_level": "unit_tested_only"
-    },
-    {
-      "boundary_conditions": [
-        "not_applicable"
-      ],
-      "category": "infrastructure",
-      "complex_support": false,
-      "differentiable": false,
-      "dimension": [
-        "not_applicable"
-      ],
-      "grid_type": "not_applicable",
-      "is_solver": false,
-      "limitations": [
-        "compatibility adapter only; general mathematical planning and independent certificates belong to Mixle Discrete",
-        "floating-point residual and legacy parity receipts are not verified physical evidence",
-        "single-process only: no MPI, multiprocessing, or distributed execution path"
-      ],
-      "method": "Portable Simulation finite-system adapter and receipt-bearing legacy P1 compatibility path.",
-      "module": "mixle_pde.canonical_adapter",
-      "parallel_status": "single_process",
-      "public_symbols": [
-        "CanonicalLinearSolution",
-        "CanonicalSolveReceipt",
-        "LegacyCanonicalPoissonResult",
-        "NativeBackendCapability",
-        "SIM_LINEAR_SCHEMA",
-        "native_backend_manifest",
-        "solve_p1_poisson_canonical",
-        "solve_sim_linear_system"
       ],
       "time_regime": "not_applicable",
       "verification_level": "unit_tested_only"
@@ -1670,10 +1670,11 @@
       "grid_type": "not_applicable",
       "is_solver": false,
       "limitations": [
-        "governance and migration metadata only; it does not implement or validate a PDE solve",
-        "single-process only: no MPI, multiprocessing, or distributed execution path"
+        "single-process only: no MPI, multiprocessing, or distributed execution path",
+        "covered by unit tests only; no analytic, manufactured-solution, or external reference check is recorded against it",
+        "disposition buckets are a static per-module-name lookup table, not derived from actual per-module dependency analysis"
       ],
-      "method": "Exhaustive migration-disposition inventory for the integrated PDE compatibility profile.",
+      "method": "Automatic per-module migration disposition (preserve/adapt/migrate/reference/retire) and final-owner classification, derived by scanning the package directory rather than a hand-maintained list.",
       "module": "mixle_pde.ownership",
       "parallel_status": "single_process",
       "public_symbols": [
@@ -1738,6 +1739,40 @@
       ],
       "time_regime": "transient",
       "verification_level": "analytic_reference_checked"
+    },
+    {
+      "boundary_conditions": [
+        "dirichlet",
+        "periodic"
+      ],
+      "category": "fem_pde_core",
+      "complex_support": false,
+      "differentiable": true,
+      "dimension": [
+        "2D",
+        "3D"
+      ],
+      "grid_type": "unstructured simplex (FEM) or structured grid (FD/FDTD), depending on the registered kernel",
+      "is_solver": true,
+      "limitations": [
+        "single-process only: no MPI, multiprocessing, or distributed execution path",
+        "covered by unit tests only; per-kernel checks are boundedness/finiteness or a preserved discrete invariant (e.g. div H, total mass), not an independent analytic or manufactured-solution check",
+        "invokes each legacy kernel exactly as it already exists; registration only declares and gates what mixle_pde.problem_adapter.require_compatible will accept, it never widens a kernel's actual numerical behavior"
+      ],
+      "method": "Concrete mixle_pde.problem_adapter backend registrations wiring five existing legacy kernels (FEM P1 Poisson, FD leapfrog wave, FD streamfunction-vorticity flow, Yee-grid FDTD Maxwell, method-of-lines advection-diffusion) behind one compatibility-checked invocation contract.",
+      "module": "mixle_pde.pde_backend_registry",
+      "parallel_status": "single_process",
+      "public_symbols": [
+        "PDEPort",
+        "PDEKernelArtifact",
+        "PDEKernelRegistration",
+        "PDEStudyResult",
+        "get_kernel_registration",
+        "list_kernel_registrations",
+        "run_math_problem"
+      ],
+      "time_regime": "steady_and_transient",
+      "verification_level": "unit_tested_only"
     },
     {
       "boundary_conditions": [
@@ -2035,38 +2070,6 @@
       ],
       "time_regime": "not_applicable",
       "verification_level": "analytic_reference_checked"
-    },
-    {
-      "boundary_conditions": [
-        "not_applicable"
-      ],
-      "category": "infrastructure",
-      "complex_support": false,
-      "differentiable": true,
-      "dimension": [
-        "not_applicable"
-      ],
-      "grid_type": "not_applicable",
-      "is_solver": false,
-      "limitations": [
-        "dispatch and compatibility layer only; capability remains bounded by each registered legacy kernel profile",
-        "numerical residual, finiteness, and conservation checks are not verified physical evidence",
-        "single-process only: no MPI, multiprocessing, or distributed execution path"
-      ],
-      "method": "Capability-negotiated dispatch from portable mathematical studies to five curated legacy PDE kernels.",
-      "module": "mixle_pde.pde_backend_registry",
-      "parallel_status": "single_process",
-      "public_symbols": [
-        "PDEPort",
-        "PDEKernelArtifact",
-        "PDEKernelRegistration",
-        "PDEStudyResult",
-        "get_kernel_registration",
-        "list_kernel_registrations",
-        "run_math_problem"
-      ],
-      "time_regime": "not_applicable",
-      "verification_level": "unit_tested_only"
     },
     {
       "boundary_conditions": [
