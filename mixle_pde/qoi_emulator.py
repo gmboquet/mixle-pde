@@ -149,9 +149,7 @@ def _as_query(x, *, dim: int) -> np.ndarray:
     return x
 
 
-def _in_domain_from_standardized_distance(
-    xq_std: np.ndarray, x_train_std: np.ndarray, *, margin: float
-) -> np.ndarray:
+def _in_domain_from_standardized_distance(xq_std: np.ndarray, x_train_std: np.ndarray, *, margin: float) -> np.ndarray:
     """A query point (already in standardized-x coordinates) counts as in-domain when every coordinate
     falls within the training data's own per-dimension range, expanded by ``margin`` standardized
     units on each side. Purely geometric -- "is this near any training coordinate" -- and shared

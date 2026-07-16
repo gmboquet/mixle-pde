@@ -178,8 +178,7 @@ TIER_SEMANTICS: tuple[TierSemantics, ...] = (
         typical_confounds=(
             "agreement does not imply correctness if both codes share a modeling assumption, a "
             "discretization family, or a common-ancestor bug",
-            "disagreement alone does not localize which code is wrong without a third, more-trusted "
-            "reference",
+            "disagreement alone does not localize which code is wrong without a third, more-trusted reference",
         ),
         evidence_strength="relative-agreement-only",
     ),
@@ -194,8 +193,7 @@ TIER_SEMANTICS: tuple[TierSemantics, ...] = (
         typical_confounds=(
             "instrument uncertainty, calibration drift, and idealized lab boundary conditions "
             "versus field deployment conditions",
-            "small-scale or short-duration lab regimes may not extrapolate to full-scale or "
-            "long-duration behavior",
+            "small-scale or short-duration lab regimes may not extrapolate to full-scale or long-duration behavior",
         ),
         evidence_strength="physical, bounded-uncertainty",
     ),
@@ -270,10 +268,7 @@ STATIC_EVIDENCE_CATALOG: tuple[ValidationEvidenceRecord, ...] = (
     ValidationEvidenceRecord(
         capability="mixle_pde.dynamics.AdvectionDiffusionOperator (transport-fd-advdiff)",
         tier=ValidationTier.MANUFACTURED,
-        source=(
-            "tests/mms_test.py::"
-            "test_transport_fd_advdiff_mms_convergence_receipt_passes_at_expected_first_order"
-        ),
+        source=("tests/mms_test.py::test_transport_fd_advdiff_mms_convergence_receipt_passes_at_expected_first_order"),
         summary=(
             "MP-K3: drives the registered transport-fd-advdiff kernel (via mixle_pde.verification."
             "mms.transport_fd_advdiff_convergence_receipt) with a manufactured "
@@ -292,8 +287,7 @@ STATIC_EVIDENCE_CATALOG: tuple[ValidationEvidenceRecord, ...] = (
         capability="mixle_pde.multiphysics_reference (composite-heat P1 FEM reference)",
         tier=ValidationTier.MANUFACTURED,
         source=(
-            "tests/multiphysics_reference_test.py::"
-            "test_p1_fem_and_manufactured_refinement_produce_independent_evidence"
+            "tests/multiphysics_reference_test.py::test_p1_fem_and_manufactured_refinement_produce_independent_evidence"
         ),
         summary=(
             "Verifies the composite-heat reference's P1 FEM assembly (via mixle_pde."
@@ -307,10 +301,7 @@ STATIC_EVIDENCE_CATALOG: tuple[ValidationEvidenceRecord, ...] = (
     ValidationEvidenceRecord(
         capability="mixle_pde.verification.result_queries (point/integral/extrema queries)",
         tier=ValidationTier.CODE_TO_CODE,
-        source=(
-            "tests/result_queries_test.py::"
-            "test_native_and_fem_backends_agree_on_a_known_analytic_ramp_solution"
-        ),
+        source=("tests/result_queries_test.py::test_native_and_fem_backends_agree_on_a_known_analytic_ramp_solution"),
         summary=(
             "MP-K2: runs the same P1 mesh and Poisson problem through two independently implemented "
             "backends -- the native rational-linear adapter (mixle_pde.canonical_adapter) and the "
@@ -326,10 +317,7 @@ STATIC_EVIDENCE_CATALOG: tuple[ValidationEvidenceRecord, ...] = (
     ValidationEvidenceRecord(
         capability="mixle_pde.verification.result_queries (point/integral/extrema queries)",
         tier=ValidationTier.ANALYTIC,
-        source=(
-            "tests/result_queries_test.py::"
-            "test_native_and_fem_backends_agree_on_a_known_analytic_ramp_solution"
-        ),
+        source=("tests/result_queries_test.py::test_native_and_fem_backends_agree_on_a_known_analytic_ramp_solution"),
         summary=(
             "The same MP-K2 test also compares both backends against the closed-form analytic ramp "
             "solution u(x, y) = x for a custom Dirichlet condition on the real Poisson problem being "

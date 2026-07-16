@@ -119,8 +119,7 @@ KNOWLEDGE_CATALOG: tuple[KnowledgeCatalogEntry, ...] = (
             "vp = sqrt((lambda + 2 mu)/rho) and a shear speed vs = sqrt(mu/rho)."
         ),
         method=(
-            "explicit 3-D staggered-grid (velocity-stress) leapfrog, second-order centered "
-            "differences (Virieux 1986)"
+            "explicit 3-D staggered-grid (velocity-stress) leapfrog, second-order centered differences (Virieux 1986)"
         ),
         applicability=(
             "isotropic elastic medium only under this backend id -- VTI/TTI anisotropy is a "
@@ -174,8 +173,7 @@ KNOWLEDGE_CATALOG: tuple[KnowledgeCatalogEntry, ...] = (
         applicability=(
             "2-D only (the registered invocation raises ValueError for grid_shape with length != 2)",
             "structured regular grid only",
-            "scalar, caller-supplied per-node squared-slowness field m only; no anisotropic/tensor "
-            "modulus",
+            "scalar, caller-supplied per-node squared-slowness field m only; no anisotropic/tensor modulus",
             "PML is an approximate absorbing boundary (finite-width discrete layer): reflection is "
             "small, not exactly zero, at finite pml_width/pml_strength",
         ),
@@ -184,10 +182,7 @@ KNOWLEDGE_CATALOG: tuple[KnowledgeCatalogEntry, ...] = (
                 test_file="tests/helmholtz_pml_test.py",
                 test_name="test_greens_function_interior",
                 check_kind="analytic_reference",
-                summary=(
-                    "interior field vs. the analytic Hankel Green's function, median relative "
-                    "error < 8%"
-                ),
+                summary=("interior field vs. the analytic Hankel Green's function, median relative error < 8%"),
             ),
             BenchmarkEvidence(
                 test_file="tests/helmholtz_pml_test.py",
@@ -221,8 +216,7 @@ KNOWLEDGE_CATALOG: tuple[KnowledgeCatalogEntry, ...] = (
             "solve for the Darcy head/velocity field"
         ),
         applicability=(
-            "1-D or 2-D grids only for this registration (the registered invocation raises "
-            "ValueError outside that)",
+            "1-D or 2-D grids only for this registration (the registered invocation raises ValueError outside that)",
             "structured regular grid only",
             "mass conservation is approximate, not exact, whenever the Darcy velocity field is not "
             "divergence-free (a net volumetric recharge source/sink) -- unlike "
@@ -281,8 +275,7 @@ KNOWLEDGE_CATALOG: tuple[KnowledgeCatalogEntry, ...] = (
                 test_name="test_fem_p1_accepted_study_solves_and_returns_small_residual",
                 check_kind="manufactured_solution",
                 summary=(
-                    "registered-backend study: discretized-PDE interior-node residual "
-                    "||stiffness @ u - load|| < 1e-8"
+                    "registered-backend study: discretized-PDE interior-node residual ||stiffness @ u - load|| < 1e-8"
                 ),
             ),
         ),
@@ -339,13 +332,9 @@ KNOWLEDGE_CATALOG: tuple[KnowledgeCatalogEntry, ...] = (
             "d(omega)/dt + (u . grad) omega = nu laplacian(omega), laplacian(psi) = -omega, "
             "with u = d(psi)/dy, v = -d(psi)/dx (automatically divergence-free by construction)."
         ),
-        method=(
-            "explicit or implicit-diffusion vorticity time-stepping plus a streamfunction Poisson "
-            "solve each step"
-        ),
+        method=("explicit or implicit-diffusion vorticity time-stepping plus a streamfunction Poisson solve each step"),
         applicability=(
-            "no-slip wall boundary conditions only under this registration "
-            "(dirichlet_no_slip_walls)",
+            "no-slip wall boundary conditions only under this registration (dirichlet_no_slip_walls)",
             "structured regular Cartesian grid only",
             "2-D only under this backend id -- mixle_pde.flow3d.NavierStokes3D is a separate, "
             "unregistered 3-D Chorin-projection solver",
@@ -459,8 +448,7 @@ KNOWLEDGE_CATALOG: tuple[KnowledgeCatalogEntry, ...] = (
         source="mixle_pde.spectral_flow.incompressible_ns_spectral",
         physics_domain="incompressible fluid dynamics (spectral)",
         governing_equation=(
-            "periodic-box incompressible Navier-Stokes du/dt + (u . grad) u = -grad p + "
-            "nu laplacian(u), div u = 0."
+            "periodic-box incompressible Navier-Stokes du/dt + (u . grad) u = -grad p + nu laplacian(u), div u = 0."
         ),
         method=(
             "Fourier pseudo-spectral spatial discretization (exact incompressibility via "

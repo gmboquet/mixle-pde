@@ -113,8 +113,7 @@ def test_benchmark_evidence_files_and_tests_exist_on_disk(entry: KnowledgeCatalo
         text = path.read_text()
         pattern = re.compile(rf"^\s*def {re.escape(evidence.test_name)}\b", re.MULTILINE)
         assert pattern.search(text), (
-            f"{entry.backend_id}: {evidence.test_file!r} does not define a test named "
-            f"{evidence.test_name!r}"
+            f"{entry.backend_id}: {evidence.test_file!r} does not define a test named {evidence.test_name!r}"
         )
 
 

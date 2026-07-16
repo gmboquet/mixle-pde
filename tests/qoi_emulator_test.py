@@ -57,17 +57,35 @@ def test_emulator_prediction_rejects_malformed_fields():
 
 def test_calibration_report_rejects_out_of_range_fields():
     report = CalibrationReport(
-        n=5, mae=0.1, rmse=0.2, coverage_1sigma=0.7, coverage_2sigma=0.95, mean_standardized_residual=0.0, ood_fraction=0.1
+        n=5,
+        mae=0.1,
+        rmse=0.2,
+        coverage_1sigma=0.7,
+        coverage_2sigma=0.95,
+        mean_standardized_residual=0.0,
+        ood_fraction=0.1,
     )
     assert report.n == 5
 
     with pytest.raises(ValueError):
         CalibrationReport(
-            n=0, mae=0.1, rmse=0.2, coverage_1sigma=0.7, coverage_2sigma=0.95, mean_standardized_residual=0.0, ood_fraction=0.1
+            n=0,
+            mae=0.1,
+            rmse=0.2,
+            coverage_1sigma=0.7,
+            coverage_2sigma=0.95,
+            mean_standardized_residual=0.0,
+            ood_fraction=0.1,
         )
     with pytest.raises(ValueError):
         CalibrationReport(
-            n=5, mae=0.1, rmse=0.2, coverage_1sigma=1.5, coverage_2sigma=0.95, mean_standardized_residual=0.0, ood_fraction=0.1
+            n=5,
+            mae=0.1,
+            rmse=0.2,
+            coverage_1sigma=1.5,
+            coverage_2sigma=0.95,
+            mean_standardized_residual=0.0,
+            ood_fraction=0.1,
         )
 
 

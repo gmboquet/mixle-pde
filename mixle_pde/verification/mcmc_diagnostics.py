@@ -290,7 +290,7 @@ def evaluate_chain_convergence(
     )
 
 
-def chains_from_posterior_samples(posteriors: Sequence["PosteriorFieldSamples3D"]) -> np.ndarray:
+def chains_from_posterior_samples(posteriors: Sequence[PosteriorFieldSamples3D]) -> np.ndarray:
     """Stack independent sampler runs into the ``(n_chains, n_draws, n_parameters)`` array this module expects.
 
     Each element of ``posteriors`` is one independent chain's stored output -- e.g. one
