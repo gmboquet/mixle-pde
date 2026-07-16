@@ -56,6 +56,36 @@
       "boundary_conditions": [
         "not_applicable"
       ],
+      "category": "infrastructure",
+      "complex_support": false,
+      "differentiable": false,
+      "dimension": [
+        "not_applicable"
+      ],
+      "grid_type": "not_applicable",
+      "is_solver": false,
+      "limitations": [
+        "single-process, single-directory-tree local filesystem store only: no concurrent-writer locking and not a distributed or replicated store",
+        "single-process only: no MPI, multiprocessing, or distributed execution path",
+        "covered by unit tests only; no analytic, manufactured-solution, or external reference check is recorded against it"
+      ],
+      "method": "Content-addressed local artifact store: sha256-of-raw-bytes put/get plus caller-supplied parent/child lineage queries (MP-K1).",
+      "module": "mixle_pde.artifact_store",
+      "parallel_status": "single_process",
+      "public_symbols": [
+        "ArtifactIntegrityError",
+        "ArtifactNotFoundError",
+        "ArtifactRecord",
+        "ArtifactStore",
+        "digest_of"
+      ],
+      "time_regime": "not_applicable",
+      "verification_level": "unit_tested_only"
+    },
+    {
+      "boundary_conditions": [
+        "not_applicable"
+      ],
       "category": "environmental_applied",
       "complex_support": false,
       "differentiable": true,
@@ -296,6 +326,80 @@
     },
     {
       "boundary_conditions": [
+        "dirichlet"
+      ],
+      "category": "fem_pde_core",
+      "complex_support": false,
+      "differentiable": false,
+      "dimension": [
+        "dimension_agnostic"
+      ],
+      "grid_type": "structured regular finite-difference grid",
+      "is_solver": true,
+      "limitations": [
+        "natural (fixed-parameter) continuation cannot cross a fold by construction; only pseudo-arclength continuation can",
+        "no line search/trust-region globalization, no Jacobian-free Newton-Krylov, no bounds or variational-inequality constraints, and no branch-switching at bifurcation points (as opposed to folds)",
+        "no torch-backed autograd path detected; gradients (if needed) require external finite differences",
+        "single-process only: no MPI, multiprocessing, or distributed execution path"
+      ],
+      "method": "Newton solves with parameter continuation: natural-parameter stepping and pseudo-arclength (Keller) continuation for F(u; lambda) = 0, demonstrated on the classic 1-D Bratu fold-crossing test case.",
+      "module": "mixle_pde.continuation",
+      "parallel_status": "single_process",
+      "public_symbols": [
+        "ParametricProblem",
+        "NewtonReceipt",
+        "ContinuationStep",
+        "ContinuationReceipt",
+        "newton_solve",
+        "natural_continuation",
+        "arclength_continuation",
+        "bratu_problem",
+        "bratu_reference_fold"
+      ],
+      "time_regime": "steady",
+      "verification_level": "analytic_reference_checked"
+    },
+    {
+      "boundary_conditions": [
+        "not_applicable"
+      ],
+      "category": "fem_pde_core",
+      "complex_support": false,
+      "differentiable": false,
+      "dimension": [
+        "not_applicable"
+      ],
+      "grid_type": "not_applicable",
+      "is_solver": false,
+      "limitations": [
+        "a planning/diagnostic layer only: never assembles a system, integrates a PDE, or runs an iteration loop itself",
+        "evaluate_interface_balance assumes its two inputs already sample the identical, positionally-corresponding set of interface points; it performs no mesh-to-mesh interpolation or projection",
+        "single-process only: no MPI, multiprocessing, or distributed execution path",
+        "covered by unit tests only; no analytic, manufactured-solution, or external reference check is recorded against it"
+      ],
+      "method": "Coupling-template catalog (one-way/monolithic/partitioned-Dirichlet-Neumann/partitioned-quasi-Newton) plus a physics-agnostic interface continuity/conservation balance diagnostic (MP-G8).",
+      "module": "mixle_pde.coupling_templates",
+      "parallel_status": "single_process",
+      "public_symbols": [
+        "ConvergencePolicy",
+        "CouplingPlanCheck",
+        "CouplingTemplate",
+        "CouplingTemplateError",
+        "InterfaceBalanceReceipt",
+        "InterfaceVerdict",
+        "ParticipantInterfaceState",
+        "PortRequirement",
+        "PortRole",
+        "check_scenario_against_template",
+        "coupling_template_catalog",
+        "evaluate_interface_balance",
+        "get_coupling_template"
+      ],
+      "time_regime": "not_applicable",
+      "verification_level": "unit_tested_only"
+    },
+    {
+      "boundary_conditions": [
         "not_applicable"
       ],
       "category": "bayesian_field_inference",
@@ -323,6 +427,41 @@
       ],
       "time_regime": "not_applicable",
       "verification_level": "analytic_reference_checked"
+    },
+    {
+      "boundary_conditions": [
+        "not_applicable"
+      ],
+      "category": "surrogate_modeling",
+      "complex_support": false,
+      "differentiable": false,
+      "dimension": [
+        "not_applicable"
+      ],
+      "grid_type": "not_applicable",
+      "is_solver": false,
+      "limitations": [
+        "a first increment: no multifidelity/co-kriging layout and no distributed execution",
+        "adaptive_design refits nothing after its one bootstrap surrogate fit -- refinement rounds score candidates against that same fixed bootstrap, never a re-fit surrogate",
+        "single-process only: no MPI, multiprocessing, or distributed execution path",
+        "covered by unit tests only; no analytic, manufactured-solution, or external reference check is recorded against it"
+      ],
+      "method": "Design-of-experiments sampling for mixle_pde.surrogate.distill_forward: plain-random, Latin-Hypercube/Sobol QMC, and an error-driven adaptive design, each with a reproducibility-hash manifest.",
+      "module": "mixle_pde.design_of_experiments",
+      "parallel_status": "single_process",
+      "public_symbols": [
+        "TrainingDesignManifest",
+        "AdaptiveDesignResult",
+        "random_sampler",
+        "latin_hypercube_sampler",
+        "sobol_sampler",
+        "random_design",
+        "latin_hypercube_design",
+        "sobol_design",
+        "adaptive_design"
+      ],
+      "time_regime": "not_applicable",
+      "verification_level": "unit_tested_only"
     },
     {
       "boundary_conditions": [
@@ -1179,6 +1318,35 @@
     },
     {
       "boundary_conditions": [
+        "not_applicable"
+      ],
+      "category": "bayesian_field_inference",
+      "complex_support": false,
+      "differentiable": false,
+      "dimension": [
+        "not_applicable"
+      ],
+      "grid_type": "not_applicable",
+      "is_solver": false,
+      "limitations": [
+        "defaults to wrapping exactly one inversion routine (gauss_newton_invert); a swapped invert callable must share its exact keyword contract",
+        "the surrogate gate (Surrogate.defer/predict) is never rebuilt or re-validated here -- this module trusts whatever calibration distill_forward already gave it",
+        "single-process only: no MPI, multiprocessing, or distributed execution path",
+        "covered by unit tests only; no analytic, manufactured-solution, or external reference check is recorded against it"
+      ],
+      "method": "Surrogate-accelerated wrapper around mixle_pde.field_gauss_newton.gauss_newton_invert: cheap Surrogate.predict steps gated by Surrogate.defer, with a mandatory full-order verification pass before any result is returned (MP-N7).",
+      "module": "mixle_pde.hybrid_inversion",
+      "parallel_status": "single_process",
+      "public_symbols": [
+        "HybridInversionReport",
+        "HybridIterationRecord",
+        "hybrid_gauss_newton_invert"
+      ],
+      "time_regime": "not_applicable",
+      "verification_level": "unit_tested_only"
+    },
+    {
+      "boundary_conditions": [
         "dirichlet"
       ],
       "category": "field_pde_solvers",
@@ -1256,6 +1424,40 @@
       ],
       "time_regime": "not_applicable",
       "verification_level": "analytic_reference_checked"
+    },
+    {
+      "boundary_conditions": [
+        "not_applicable"
+      ],
+      "category": "workflow_orchestration",
+      "complex_support": false,
+      "differentiable": false,
+      "dimension": [
+        "not_applicable"
+      ],
+      "grid_type": "not_applicable",
+      "is_solver": false,
+      "limitations": [
+        "bookkeeping only: never starts a thread/process/MPI rank and never measures or enforces CPU/memory/GPU/wall-clock usage -- ResourceBudget is a caller declaration a real executor would have to read and enforce",
+        "not thread-safe and has no self-scheduling: check_stale is a plain dict-backed method a single owning scheduler loop must call on its own cadence",
+        "single-process only: no MPI, multiprocessing, or distributed execution path",
+        "covered by unit tests only; no analytic, manufactured-solution, or external reference check is recorded against it"
+      ],
+      "method": "In-process job registry: typed submit/heartbeat/cancel/complete/fail state machine, a declared (not enforced) ResourceBudget, and a polled stale-heartbeat detector with bounded retry (MP-L4 slice).",
+      "module": "mixle_pde.job_governance",
+      "parallel_status": "single_process",
+      "public_symbols": [
+        "FailureReason",
+        "InvalidJobTransitionError",
+        "JobGovernanceError",
+        "JobNotFoundError",
+        "JobRecord",
+        "JobRegistry",
+        "JobStatus",
+        "ResourceBudget"
+      ],
+      "time_regime": "not_applicable",
+      "verification_level": "unit_tested_only"
     },
     {
       "boundary_conditions": [
@@ -1364,6 +1566,38 @@
       ],
       "time_regime": "transient",
       "verification_level": "analytic_reference_checked"
+    },
+    {
+      "boundary_conditions": [
+        "not_applicable"
+      ],
+      "category": "bayesian_field_inference",
+      "complex_support": false,
+      "differentiable": false,
+      "dimension": [
+        "not_applicable"
+      ],
+      "grid_type": "not_applicable",
+      "is_solver": false,
+      "limitations": [
+        "checkpointing only for metropolis_field_invert -- no MPI/multiprocessing/distributed execution and no counter-based (splittable) random streams",
+        "config_digest guards against resuming with a mismatched grid/observations/schedule, but is a bookkeeping fingerprint, not a cryptographic commitment",
+        "single-process only: no MPI, multiprocessing, or distributed execution path",
+        "covered by unit tests only; no analytic, manufactured-solution, or external reference check is recorded against it"
+      ],
+      "method": "Checkpoint/restart for mixle_pde.field_mcmc.metropolis_field_invert: serializes the chain state and RNG bit-generator state to disk so a resumed run continues bit-for-bit as if uninterrupted (MP-I9 slice).",
+      "module": "mixle_pde.mcmc_checkpoint",
+      "parallel_status": "single_process",
+      "public_symbols": [
+        "CHECKPOINT_SCHEMA",
+        "MCMCCheckpoint",
+        "run_checkpointed",
+        "resume_checkpointed",
+        "save_checkpoint",
+        "load_checkpoint"
+      ],
+      "time_regime": "not_applicable",
+      "verification_level": "unit_tested_only"
     },
     {
       "boundary_conditions": [
@@ -1613,6 +1847,41 @@
     },
     {
       "boundary_conditions": [
+        "dirichlet_fixed_value_nodes"
+      ],
+      "category": "fem_pde_core",
+      "complex_support": false,
+      "differentiable": false,
+      "dimension": [
+        "0D"
+      ],
+      "grid_type": "lumped-parameter network graph (nodes/edges; no spatial grid)",
+      "is_solver": true,
+      "limitations": [
+        "dynamics live on nodes only (generalized capacitance/storage); there is no inertive/inductive branch state on edges",
+        "no graph-connectivity pre-check: an ungrounded free node surfaces as a ValueError from the singular linear solve rather than being diagnosed structurally beforehand",
+        "flow_fn is expected (not verified) to be antisymmetric and, for fixed-point convergence, monotone in the node-value difference",
+        "simulate_transient's accuracy/step control are exactly those of mixle_pde.dynamics.integrate_dae (fixed h_max substeps, not adaptive)",
+        "no torch-backed autograd path detected; gradients (if needed) require external finite differences",
+        "single-process only: no MPI, multiprocessing, or distributed execution path"
+      ],
+      "method": "Lumped-parameter 0D/1D network coupling: typed nodes/edges assembled into a Kirchhoff-style nodal balance, solved directly (linear) or by Picard linearization (nonlinear), plus transient DAE integration via mixle_pde.dynamics.integrate_dae (MP-G7).",
+      "module": "mixle_pde.network_coupling",
+      "parallel_status": "single_process",
+      "public_symbols": [
+        "NetworkNode",
+        "NetworkEdge",
+        "NetworkSpec",
+        "NetworkSolution",
+        "NetworkTrajectory",
+        "solve_steady_state",
+        "simulate_transient"
+      ],
+      "time_regime": "steady_and_transient",
+      "verification_level": "analytic_reference_checked"
+    },
+    {
+      "boundary_conditions": [
         "dirichlet"
       ],
       "category": "fem_pde_core",
@@ -1698,6 +1967,38 @@
         "mt_2d_te_forward_operator",
         "mt_3d_forward_operator",
         "csem_3d_forward_operator"
+      ],
+      "time_regime": "not_applicable",
+      "verification_level": "analytic_reference_checked"
+    },
+    {
+      "boundary_conditions": [
+        "not_applicable"
+      ],
+      "category": "surrogate_modeling",
+      "complex_support": false,
+      "differentiable": false,
+      "dimension": [
+        "not_applicable"
+      ],
+      "grid_type": "not_applicable",
+      "is_solver": false,
+      "limitations": [
+        "linear maps only -- explicitly not an FNO/DeepONet/graph-neural operator surrogate and not a Galerkin-projected reduced-order model",
+        "single-shot field-to-field prediction only; no autoregressive multi-step rollout",
+        "a fixed ridge-regularized least-squares fit only; no adaptive rank selection or cross-validated ridge search",
+        "a point estimate plus a calibrated error bound, not a genuine Bayesian posterior over the output field",
+        "single-process only: no MPI, multiprocessing, or distributed execution path"
+      ],
+      "method": "Linear/low-rank field-to-field operator surrogate: independent input/output POD bases (mixle_pde.reduced_basis) linked by a ridge-regularized linear regression map in reduced coordinates, with an in-domain honesty gate and split-conformal held-out calibration (MP-N5 baseline).",
+      "module": "mixle_pde.operator_surrogate",
+      "parallel_status": "single_process",
+      "public_symbols": [
+        "LinearOperatorSurrogate",
+        "OperatorPrediction",
+        "LinearOperatorCalibrationReport",
+        "fit_linear_operator_surrogate",
+        "calibrate_linear_operator_surrogate"
       ],
       "time_regime": "not_applicable",
       "verification_level": "analytic_reference_checked"
@@ -2144,6 +2445,41 @@
       "boundary_conditions": [
         "not_applicable"
       ],
+      "category": "surrogate_modeling",
+      "complex_support": false,
+      "differentiable": false,
+      "dimension": [
+        "not_applicable"
+      ],
+      "grid_type": "not_applicable",
+      "is_solver": false,
+      "limitations": [
+        "single isotropic RBF kernel only -- no automatic relevance determination and no sparse/inducing-point approximation",
+        "homoscedastic noise only; no heteroscedastic prediction, no multifidelity input, no gradient/derivative prediction, and no batch-acquisition/active-learning policy",
+        "tree/ensemble emulator families are not covered",
+        "single-process only: no MPI, multiprocessing, or distributed execution path",
+        "covered by unit tests only; no analytic, manufactured-solution, or external reference check is recorded against it"
+      ],
+      "method": "Probabilistic scalar/QoI emulators behind one predictive contract: a closed-form squared-exponential Gaussian-process posterior and a closed-form Bayesian-ridge polynomial posterior, plus a shared held-out calibration/coverage/OOD routine (MP-N4).",
+      "module": "mixle_pde.qoi_emulator",
+      "parallel_status": "single_process",
+      "public_symbols": [
+        "EmulatorPrediction",
+        "CalibrationReport",
+        "QoIEmulator",
+        "GaussianProcessEmulator",
+        "BayesianPolynomialEmulator",
+        "fit_gaussian_process",
+        "fit_bayesian_polynomial",
+        "calibrate"
+      ],
+      "time_regime": "not_applicable",
+      "verification_level": "unit_tested_only"
+    },
+    {
+      "boundary_conditions": [
+        "not_applicable"
+      ],
       "category": "environmental_applied",
       "complex_support": true,
       "differentiable": false,
@@ -2372,6 +2708,38 @@
       "boundary_conditions": [
         "not_applicable"
       ],
+      "category": "uncertainty_quantification",
+      "complex_support": false,
+      "differentiable": false,
+      "dimension": [
+        "not_applicable"
+      ],
+      "grid_type": "not_applicable",
+      "is_solver": false,
+      "limitations": [
+        "FORM is first-order only (no SORM curvature correction): its tangent-hyperplane probability is exact only for an affine limit state, and the module's own test suite documents an ~8x error on a purely quadratic, radially symmetric limit state",
+        "both estimators assume independent standard-normal (or independent-marginal, via the transform helpers) inputs; correlated inputs need a caller-supplied decorrelating transform (e.g. Nataf)",
+        "never imports or calls a PDE/ODE solver itself -- the caller's limit-state function g may wrap one, but this module is solver-agnostic",
+        "single-process only: no MPI, multiprocessing, or distributed execution path"
+      ],
+      "method": "Structural/probabilistic reliability analysis: First-Order Reliability Method (Hasofer-Lind-Rackwitz-Fiessler design-point search) with an importance-sampling honesty cross-check, plus the isoprobabilistic physical<->standard-normal transform (MP-I11).",
+      "module": "mixle_pde.reliability",
+      "parallel_status": "single_process",
+      "public_symbols": [
+        "FORMResult",
+        "ImportanceSamplingResult",
+        "form",
+        "importance_sampling_probability",
+        "standard_normal_to_physical",
+        "physical_to_standard_normal"
+      ],
+      "time_regime": "not_applicable",
+      "verification_level": "analytic_reference_checked"
+    },
+    {
+      "boundary_conditions": [
+        "not_applicable"
+      ],
       "category": "environmental_applied",
       "complex_support": false,
       "differentiable": true,
@@ -2430,6 +2798,47 @@
       ],
       "time_regime": "not_applicable",
       "verification_level": "analytic_reference_checked"
+    },
+    {
+      "boundary_conditions": [
+        "not_applicable"
+      ],
+      "category": "fem_pde_core",
+      "complex_support": false,
+      "differentiable": false,
+      "dimension": [
+        "not_applicable"
+      ],
+      "grid_type": "not_applicable",
+      "is_solver": false,
+      "limitations": [
+        "a first baseline slice: no residual-block scaling and no live solver-family selection (recommend_solver_hints only returns read-only advisories -- it never selects or mutates a registered backend)",
+        "the Peclet/Reynolds/Damkohler advisory thresholds are illustrative order-of-magnitude flags, not calibrated physical transition points",
+        "never imports or calls a PDE/ODE solver itself; solver-agnostic over a caller-supplied PDEParameterSet",
+        "single-process only: no MPI, multiprocessing, or distributed execution path"
+      ],
+      "method": "Characteristic scales, a lossless nondimensionalize/redimensionalize round trip for a PDEParameterSet, and named dimensionless groups (Peclet/Reynolds/Damkohler) turned into informational solver-family advisories (MP-F6 baseline).",
+      "module": "mixle_pde.scaling",
+      "parallel_status": "single_process",
+      "public_symbols": [
+        "CharacteristicScales",
+        "PDEParameter",
+        "PDEParameterSet",
+        "DimensionlessParameter",
+        "DimensionlessParameterSet",
+        "DimensionlessGroup",
+        "SolverAdvisory",
+        "SolverHintReport",
+        "nondimensionalize",
+        "redimensionalize",
+        "peclet_number",
+        "reynolds_number",
+        "damkohler_number",
+        "dimensionless_groups",
+        "recommend_solver_hints"
+      ],
+      "time_regime": "not_applicable",
+      "verification_level": "reference_value_checked"
     },
     {
       "boundary_conditions": [
@@ -2678,6 +3087,42 @@
       ],
       "time_regime": "not_applicable",
       "verification_level": "analytic_reference_checked"
+    },
+    {
+      "boundary_conditions": [
+        "not_applicable"
+      ],
+      "category": "infrastructure",
+      "complex_support": false,
+      "differentiable": false,
+      "dimension": [
+        "not_applicable"
+      ],
+      "grid_type": "not_applicable",
+      "is_solver": false,
+      "limitations": [
+        "pure data capture: nothing here writes to a log, file, metrics endpoint, or any other side-effecting sink -- a caller decides what to do with the record",
+        "not yet wired to any production call site: no registered kernel invoker calls record_solve_telemetry, and deprecation_notice decorates no call path in this repo yet",
+        "single-process only: no MPI, multiprocessing, or distributed execution path",
+        "covered by unit tests only; no analytic, manufactured-solution, or external reference check is recorded against it"
+      ],
+      "method": "Minimal solve-observability primitives: an opt-in SolveTelemetry record (duration/iterations/convergence/input digest) a kernel invocation may attach to its own result, and a deprecation_notice decorator that registers a typed notice and warns on every call (MP-L5 remainder).",
+      "module": "mixle_pde.telemetry",
+      "parallel_status": "single_process",
+      "public_symbols": [
+        "ConvergenceStatus",
+        "SolveTelemetry",
+        "digest_solve_inputs",
+        "SolveTelemetryCapture",
+        "record_solve_telemetry",
+        "DeprecationNotice",
+        "deprecation_notice",
+        "list_deprecations",
+        "get_deprecation",
+        "clear_deprecations"
+      ],
+      "time_regime": "not_applicable",
+      "verification_level": "unit_tested_only"
     },
     {
       "boundary_conditions": [
