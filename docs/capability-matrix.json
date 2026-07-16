@@ -1029,6 +1029,40 @@
     },
     {
       "boundary_conditions": [
+        "not_applicable"
+      ],
+      "category": "uncertainty_quantification",
+      "complex_support": false,
+      "differentiable": false,
+      "dimension": [
+        "not_applicable"
+      ],
+      "grid_type": "not_applicable",
+      "is_solver": false,
+      "limitations": [
+        "independent uniform parameters and scalar quantities of interest only",
+        "no second-order indices, bootstrap intervals, or optimized Morris trajectories",
+        "single-process only: no MPI, multiprocessing, or distributed execution path"
+      ],
+      "method": "Solver-agnostic Saltelli/Sobol variance decomposition and Morris elementary-effects screening.",
+      "module": "mixle_pde.global_sensitivity",
+      "parallel_status": "single_process",
+      "public_symbols": [
+        "SaltelliDesign",
+        "SobolIndices",
+        "saltelli_design",
+        "saltelli_sample",
+        "sobol_indices",
+        "MorrisDesign",
+        "MorrisResult",
+        "morris_design",
+        "morris_indices"
+      ],
+      "time_regime": "not_applicable",
+      "verification_level": "analytic_reference_checked"
+    },
+    {
+      "boundary_conditions": [
         "dirichlet",
         "neumann"
       ],
