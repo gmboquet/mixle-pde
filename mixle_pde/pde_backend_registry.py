@@ -7,8 +7,14 @@ registers mixle-pde's existing FD/FDTD/FEM solvers as :class:`~mixle_pde.problem
 instances, each paired with typed input/output ports, an output artifact record, and a string-keyed
 invocation function that drives the real (unmodified) legacy kernel.
 
-Five kernels are registered, covering the MP-E5 parity envelope:
+Eight kernels are registered, covering the MP-E5 parity envelope:
 
+* ``elastic-fd-leapfrog``       -- :class:`mixle_pde.elastic.ElasticWave3D`, a 3D isotropic velocity-stress
+  staggered-leapfrog elastic-wave stepper.
+* ``helmholtz-pml-fd``          -- :func:`mixle_pde.helmholtz_pml.solve_helmholtz_pml`, a frequency-domain
+  complex Helmholtz solve with a perfectly-matched-layer absorbing boundary.
+* ``groundwater-fd-transport``  -- :class:`mixle_pde.groundwater.GroundwaterTransportOperator`, reactive
+  solute transport in a spatially-varying Darcy-flow velocity field.
 * ``fem-p1-simplex``            -- :mod:`mixle_pde.fem`'s P1 simplex Poisson/diffusion assembler.
 * ``wave-fd-leapfrog``          -- :class:`mixle_pde.wave.WaveEquation2D`, an explicit FD leapfrog wave stepper.
 * ``flow-fd-streamfunction``    -- :class:`mixle_pde.flow.NavierStokes2D`, an FD streamfunction-vorticity flow solver.
@@ -135,6 +141,271 @@ def _solve_params(problem: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(params, Mapping):
         raise ValueError("solve_plan.parameters must be a mapping of backend keyword parameters.")
     return dict(params)
+
+
+# ---------------------------------------------------------------------------
+# elastic-fd-leapfrog -- mixle_pde.elastic.ElasticWave3D (3D velocity-stress staggered leapfrog)
+# ---------------------------------------------------------------------------
+_ELASTIC_PROFILE = PDEBackendProfile(
+    id="elastic-fd-leapfrog",
+    operator_kinds=frozenset({"time_stepping"}),
+    discretizations=frozenset({"FD-staggered-leapfrog"}),
+    objective_senses=frozenset({"satisfy"}),
+    mesh_cell_types=frozenset({"structured_grid"}),
+    evidence_kinds=frozenset({"convergence"}),
+)
+
+
+@_register_invoker("elastic-fd-leapfrog")
+def _invoke_elastic_fd(problem: Mapping[str, Any]) -> dict[str, Any]:
+    """Step the 3D isotropic velocity-stress elastic wave equation an explicit staggered leapfrog for ``n_steps``.
+
+    A point body-force source excites the medium at the first step; the optional absorbing sponge
+    (``absorb_width``/``absorb_strength`` -- the only absorbing-boundary option
+    :class:`~mixle_pde.elastic.ElasticWave3D` implements, there is no PML here) and free surface are passed
+    straight through when requested, never added to.
+
+    Evidence: ``convergence`` reports whether the nine-component state stayed finite and the achieved Courant
+    number ``vp_max * dt / spacing`` against the 3-D leapfrog stability limit ``1/sqrt(3)`` -- a numerical-
+    stability check mirroring ``wave-fd-leapfrog``'s own convergence evidence, not a physical validation.
+    """
+    import torch
+
+    from mixle_pde.elastic import ElasticWave3D
+    from mixle_pde.ops import make_ops
+
+    params = _solve_params(problem)
+    n = int(params.get("grid_size", 10))
+    dt = float(params.get("dt", 0.01))
+    steps = int(params.get("n_steps", 15))
+    vp = params.get("vp", 1.7)
+    vs = params.get("vs", 1.0)
+    rho = params.get("rho", 1.0)
+    amplitude = float(params.get("amplitude", 1.0))
+    source_index = tuple(params.get("source_index", (n // 2, n // 2, n // 2)))
+
+    elastic = ElasticWave3D(
+        n,
+        dt=dt,
+        spacing=params.get("spacing"),
+        vp=vp,
+        vs=vs,
+        rho=rho,
+        absorb_width=int(params.get("absorb_width", 0)),
+        absorb_strength=float(params.get("absorb_strength", 2.0)),
+        free_surface=bool(params.get("free_surface", False)),
+    )
+    ops = make_ops()
+    state = elastic.zeros(ops)
+    source = elastic.point_force_source(source_index, (0.0, 0.0, amplitude))
+
+    for step in range(steps):
+        state = elastic.step(state, ops, source=source if step == 0 else None)
+
+    finite = bool(torch.isfinite(state).all().item())
+    courant = float(elastic.vp_max * dt / elastic.h)
+    courant_limit = 1.0 / np.sqrt(3.0)
+
+    return {
+        "solution": state.detach().numpy(),
+        "evidence": {
+            "convergence": {
+                "finite": finite,
+                "courant_number": courant,
+                "courant_limit": courant_limit,
+                "stable": bool(finite and courant <= courant_limit + 1.0e-9),
+            }
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# helmholtz-pml-fd -- mixle_pde.helmholtz_pml.solve_helmholtz_pml (frequency-domain complex Helmholtz + PML)
+# ---------------------------------------------------------------------------
+_HELMHOLTZ_PROFILE = PDEBackendProfile(
+    id="helmholtz-pml-fd",
+    operator_kinds=frozenset({"linear_operator"}),
+    discretizations=frozenset({"FD-helmholtz-pml"}),
+    objective_senses=frozenset({"satisfy"}),
+    mesh_cell_types=frozenset({"structured_grid"}),
+    evidence_kinds=frozenset({"residual", "convergence"}),
+)
+
+
+@_register_invoker("helmholtz-pml-fd")
+def _invoke_helmholtz_pml(problem: Mapping[str, Any]) -> dict[str, Any]:
+    """Solve the 2-D frequency-domain complex Helmholtz equation with a PML absorbing boundary.
+
+    Evidence: ``residual`` independently reassembles the operator and right-hand side (the same public
+    :func:`~mixle_pde.helmholtz_pml.helmholtz_pml_operator`/:func:`~mixle_pde.helmholtz_pml.pml_profile` calls
+    :func:`~mixle_pde.helmholtz_pml.solve_helmholtz_pml` makes internally, not a shortcut through it) and
+    reports the interior-node norm of ``L u - b`` -- a solver-convergence check mirroring ``fem-p1-simplex``'s
+    own residual, not a claim that the modeled medium is physically correct; ``convergence`` reports whether
+    the complex field stayed finite.
+    """
+    import torch
+
+    from mixle_pde.helmholtz_pml import helmholtz_pml_operator, pml_profile, solve_helmholtz_pml
+
+    params = _solve_params(problem)
+    shape = tuple(int(s) for s in params.get("grid_shape", (16, 16)))
+    if len(shape) != 2:
+        raise ValueError(f"helmholtz-pml-fd is 2-D only; got grid_shape {shape}.")
+    nx, nz = shape
+    spacing = params.get("spacing", 1.0)
+    omega = float(params.get("omega", 6.0))
+    pml_width = params.get("pml_width", 4)
+    pml_strength = params.get("pml_strength", 8.0)
+    q_factor = params.get("Q")
+    slowness2 = float(params.get("slowness2", 1.0))
+    source_index = int(params.get("source_index", (nx // 2) * nz + nz // 2))
+
+    m = torch.full((nx * nz,), slowness2, dtype=torch.float64)
+    u = solve_helmholtz_pml(
+        m,
+        shape,
+        source_index,
+        omega=omega,
+        spacing=spacing,
+        pml_width=pml_width,
+        pml_strength=pml_strength,
+        Q=q_factor,
+        torch=torch,
+    )
+
+    rows, cols, vals, n = helmholtz_pml_operator(
+        m,
+        shape,
+        omega=omega,
+        spacing=spacing,
+        pml_width=pml_width,
+        pml_strength=pml_strength,
+        Q=q_factor,
+        torch=torch,
+    )
+    b = torch.zeros(n, dtype=torch.complex128)
+    b[source_index] = 1.0
+    d = pml_profile(shape, spacing, pml_width, pml_strength, torch=torch)
+    j = torch.tensor(1j, dtype=torch.complex128)
+    sx = 1.0 + j * d[0].to(torch.complex128) / omega
+    sz = 1.0 + j * d[1].to(torch.complex128) / omega
+    b = b * (sx * sz)
+    lu = torch.zeros(n, dtype=torch.complex128).index_add(0, rows, vals * u[cols])
+
+    idx = np.arange(n).reshape(nx, nz)
+    on_boundary = np.zeros((nx, nz), dtype=bool)
+    on_boundary[0, :] = on_boundary[-1, :] = True
+    on_boundary[:, 0] = on_boundary[:, -1] = True
+    interior = torch.as_tensor(idx[~on_boundary].ravel(), dtype=torch.long)
+
+    finite = bool(torch.isfinite(u.real).all().item() and torch.isfinite(u.imag).all().item())
+    if finite and interior.numel():
+        residual = float(torch.linalg.norm((lu - b)[interior]).item())
+    else:
+        residual = float("nan") if finite else float("inf")
+
+    return {
+        "solution": u.detach().numpy(),
+        "evidence": {
+            "residual": residual,
+            "convergence": {"finite": finite, "interior_nodes": int(interior.numel()), "n_nodes": int(n)},
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# groundwater-fd-transport -- mixle_pde.groundwater.GroundwaterTransportOperator (Darcy-velocity transport)
+# ---------------------------------------------------------------------------
+_GROUNDWATER_PROFILE = PDEBackendProfile(
+    id="groundwater-fd-transport",
+    operator_kinds=frozenset({"linear_operator"}),
+    discretizations=frozenset({"FD-implicit", "FD-explicit", "FD-exact"}),
+    objective_senses=frozenset({"satisfy"}),
+    mesh_cell_types=frozenset({"structured_grid"}),
+    evidence_kinds=frozenset({"convergence", "conservation"}),
+)
+
+
+@_register_invoker("groundwater-fd-transport")
+def _invoke_groundwater_fd(problem: Mapping[str, Any]) -> dict[str, Any]:
+    """Advance reactive solute transport in a spatially-varying Darcy-flow velocity field for ``n_steps``.
+
+    The velocity is the steady Darcy specific-discharge field ``q = -K grad h``
+    (:func:`~mixle_pde.groundwater.darcy_velocity`), a per-cell field rather than ``transport-fd-advdiff``'s
+    single uniform scalar velocity. Scoped to 1-D/2-D grids only for this registration.
+
+    Evidence: ``convergence`` reports finiteness/boundedness of the transported concentration field;
+    ``conservation`` reports total solute mass before/after. Unlike ``transport-fd-advdiff``'s constant-
+    velocity case, this is not an exactly-preserved discrete invariant: the advective term is the
+    non-conservative ``v . grad(u)`` form, and a non-divergence-free ``v`` (a net volumetric Darcy source)
+    can additionally create/destroy mass. The default recharge is a zero-net injection/extraction doublet
+    (one source cell, one equal-and-opposite sink cell) specifically so the default accepted case stays
+    close to conservative; a caller-supplied net-nonzero ``recharge`` will drift further. Reported as a
+    discrete-invariant check either way, not a claim that any observed contaminant plume matches this
+    linear model.
+    """
+    from mixle_pde.groundwater import GroundwaterTransportOperator, darcy_velocity
+
+    params = _solve_params(problem)
+    shape = tuple(int(s) for s in params.get("grid_shape", (14, 14)))
+    if len(shape) not in (1, 2):
+        raise ValueError(f"groundwater-fd-transport supports 1-D or 2-D grids only; got shape {shape}.")
+    spacing = params.get("spacing", 1.0)
+    boundary = params.get("boundary", "neumann")
+    conductivity = float(params.get("hydraulic_conductivity", 1.0))
+    recharge = params.get("recharge")
+    if recharge is None:
+        # zero-net injection/extraction doublet: drives real spatially-varying flow without a net
+        # volumetric source, so the discrete mass stays close to (not exactly) conserved by default.
+        recharge = np.zeros(shape)
+        recharge[tuple(max(1, s // 4) for s in shape)] = 1.0
+        recharge[tuple(min(s - 2, 3 * s // 4) for s in shape)] = -1.0
+    dispersivity = params.get("dispersivity", 0.05)
+    molecular_diffusion = float(params.get("molecular_diffusion", 0.001))
+    decay = float(params.get("decay", 0.0))
+    retardation = float(params.get("retardation", 1.0))
+    dt = float(params.get("dt", 0.01))
+    n_steps = int(params.get("n_steps", 20))
+    scheme = params.get("scheme", "implicit")
+
+    velocity_field = darcy_velocity(conductivity, recharge, shape, spacing=spacing, bc=boundary)
+    operator = GroundwaterTransportOperator(
+        velocity_field,
+        dispersivity,
+        shape,
+        retardation=retardation,
+        decay=decay,
+        spacing=spacing,
+        bc=boundary,
+        scheme=scheme,
+        molecular_diffusion=molecular_diffusion,
+    )
+
+    lo, hi = operator.domain_bounds
+    center = 0.5 * (lo + hi)
+    span = np.maximum(hi - lo, 1.0e-9)
+    dist2 = np.sum(((operator.coords - center) / span) ** 2, axis=1)
+    default_initial = np.exp(-dist2 / 0.02)
+    initial = np.asarray(params.get("initial", default_initial), dtype=float)
+    if initial.shape != (operator.n,):
+        raise ValueError(f"initial condition must have shape ({operator.n},); got {initial.shape}")
+
+    transition = operator.transition_matrix(dt)
+    state = initial.copy()
+    for _ in range(n_steps):
+        state = transition @ state
+
+    finite = bool(np.isfinite(state).all())
+    mass_before = float(np.sum(initial))
+    mass_after = float(np.sum(state)) if finite else float("nan")
+
+    return {
+        "solution": state,
+        "evidence": {
+            "convergence": {"finite": finite, "max_abs": float(np.max(np.abs(state))) if finite else float("nan")},
+            "conservation": {"mass_before": mass_before, "mass_after": mass_after},
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -448,6 +719,60 @@ def _invoke_transport_fd(problem: Mapping[str, Any]) -> dict[str, Any]:
 # Registration table
 # ---------------------------------------------------------------------------
 _REGISTRATIONS: dict[str, PDEKernelRegistration] = {
+    "elastic-fd-leapfrog": PDEKernelRegistration(
+        profile=_ELASTIC_PROFILE,
+        ports=(
+            PDEPort(id="vp", role="input", kind="coefficient_field", units="m/s"),
+            PDEPort(id="vs", role="input", kind="coefficient_field", units="m/s"),
+            PDEPort(id="rho", role="input", kind="coefficient_field", units="kg/m^3"),
+            PDEPort(id="source", role="input", kind="point_source", units="1"),
+            PDEPort(id="fields", role="output", kind="vector_field", units="mixed(m/s,Pa)"),
+        ),
+        artifact=PDEKernelArtifact(
+            kind="time_series_field",
+            units="mixed(m/s,Pa)",
+            description=(
+                "Packed (vx,vy,vz,sxx,syy,szz,sxy,sxz,syz) staggered-grid state snapshot after n_steps of "
+                "the velocity-stress leapfrog."
+            ),
+        ),
+        invoke_key="elastic-fd-leapfrog",
+        source="mixle_pde.elastic.ElasticWave3D",
+    ),
+    "helmholtz-pml-fd": PDEKernelRegistration(
+        profile=_HELMHOLTZ_PROFILE,
+        ports=(
+            PDEPort(id="slowness2", role="input", kind="coefficient_field", units="s^2/m^2"),
+            PDEPort(id="source", role="input", kind="point_source", units="1"),
+            PDEPort(id="field", role="output", kind="complex_scalar_field", units="1"),
+        ),
+        artifact=PDEKernelArtifact(
+            kind="steady_field_solution",
+            units="1",
+            description="Complex frequency-domain field solving the PML Helmholtz equation for a point source.",
+        ),
+        invoke_key="helmholtz-pml-fd",
+        source="mixle_pde.helmholtz_pml.solve_helmholtz_pml",
+    ),
+    "groundwater-fd-transport": PDEKernelRegistration(
+        profile=_GROUNDWATER_PROFILE,
+        ports=(
+            PDEPort(id="hydraulic_conductivity", role="input", kind="coefficient_field", units="m/s"),
+            PDEPort(id="darcy_velocity", role="input", kind="vector_field", units="m/s"),
+            PDEPort(id="dispersivity", role="input", kind="coefficient", units="m"),
+            PDEPort(id="concentration", role="output", kind="scalar_field", units="1"),
+        ),
+        artifact=PDEKernelArtifact(
+            kind="time_series_field",
+            units="1",
+            description=(
+                "Transported solute-concentration field snapshot after n_steps, advected by a "
+                "spatially-varying Darcy-flow velocity field."
+            ),
+        ),
+        invoke_key="groundwater-fd-transport",
+        source="mixle_pde.groundwater.GroundwaterTransportOperator",
+    ),
     "fem-p1-simplex": PDEKernelRegistration(
         profile=_FEM_P1_PROFILE,
         ports=(
