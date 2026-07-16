@@ -204,9 +204,7 @@ def _varied_initial_fields(rng: np.random.Generator, n_fields: int) -> np.ndarra
         width = rng.uniform(0.03, 0.08) * _LENGTH
         amplitude = rng.uniform(0.5, 1.5)
         phase = rng.uniform(0.0, 2 * np.pi)
-        field = amplitude * np.exp(-((x - center) ** 2) / (2.0 * width**2)) + 0.2 * np.sin(
-            2.0 * np.pi * x + phase
-        )
+        field = amplitude * np.exp(-((x - center) ** 2) / (2.0 * width**2)) + 0.2 * np.sin(2.0 * np.pi * x + phase)
         fields.append(field)
     return np.stack(fields, axis=1)
 

@@ -209,7 +209,9 @@ class LinearOperatorSurrogate:
         if self.max_train_input_relative_residual < 0.0:
             raise ValueError("max_train_input_relative_residual must be non-negative.")
         if self.ridge <= 0.0:
-            raise ValueError(f"ridge must be strictly positive (well-posedness of the reduced fit); got {self.ridge!r}.")
+            raise ValueError(
+                f"ridge must be strictly positive (well-posedness of the reduced fit); got {self.ridge!r}."
+            )
         if self.ood_margin < 0.0:
             raise ValueError(f"ood_margin must be non-negative; got {self.ood_margin!r}.")
         if self.input_residual_margin < 0.0:
@@ -226,7 +228,9 @@ class LinearOperatorSurrogate:
         if field.ndim not in (1, 2):
             raise ValueError(f"u must be 1-D (n_dof_in,) or 2-D (n_dof_in, n_queries); got shape {field.shape}.")
         if field.shape[0] != self.basis_in.n_dof:
-            raise ValueError(f"u's leading dimension must be basis_in.n_dof={self.basis_in.n_dof}; got shape {field.shape}.")
+            raise ValueError(
+                f"u's leading dimension must be basis_in.n_dof={self.basis_in.n_dof}; got shape {field.shape}."
+            )
         single = field.ndim == 1
         field2 = field[:, None] if single else field
 
@@ -284,7 +288,9 @@ def fit_linear_operator_surrogate(
     inputs = np.asarray(inputs, dtype=float)
     outputs = np.asarray(outputs, dtype=float)
     if inputs.ndim != 2 or outputs.ndim != 2:
-        raise ValueError(f"inputs and outputs must both be 2-D (n_dof, n_train); got shapes {inputs.shape}, {outputs.shape}.")
+        raise ValueError(
+            f"inputs and outputs must both be 2-D (n_dof, n_train); got shapes {inputs.shape}, {outputs.shape}."
+        )
     if inputs.shape[1] != outputs.shape[1]:
         raise ValueError(
             "inputs and outputs must have the same number of paired snapshot columns; got "
@@ -381,9 +387,7 @@ def calibrate_linear_operator_surrogate(
 
     prediction = surrogate.predict(inputs_holdout)
     relative_errors = _relative_norms(outputs_holdout - prediction.field, outputs_holdout)
-    baseline_relative_errors = _relative_norms(
-        outputs_holdout - surrogate.train_output_mean[:, None], outputs_holdout
-    )
+    baseline_relative_errors = _relative_norms(outputs_holdout - surrogate.train_output_mean[:, None], outputs_holdout)
 
     n = int(inputs_holdout.shape[1])
     level = min(1.0, np.ceil((n + 1) * (1.0 - alpha)) / n)
