@@ -212,7 +212,9 @@ class ReferenceStudyStore:
             if requested[requested_name] > budget[budget_name]
         }
         if exceeded:
-            raise ResourceFailure("E_RESOURCE_BUDGET", "study request exceeds its declared budget", diagnostics=exceeded)
+            raise ResourceFailure(
+                "E_RESOURCE_BUDGET", "study request exceeds its declared budget", diagnostics=exceeded
+            )
 
     def run(self, study_id: str) -> dict[str, Any]:
         record = self._read(study_id)

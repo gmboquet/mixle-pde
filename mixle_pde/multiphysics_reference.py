@@ -390,9 +390,7 @@ def solve_reference_forward(
             left_flux = left_conductance * (study.temperature_left_K - interface_temperature)
             right_flux = right_conductance * (interface_temperature - study.temperature_right_K)
             residual = left_flux - right_flux
-            history.append(
-                CouplingIteration(iteration, interface_temperature, left_flux, right_flux, abs(residual))
-            )
+            history.append(CouplingIteration(iteration, interface_temperature, left_flux, right_flux, abs(residual)))
             if abs(residual) <= tolerance:
                 break
             interface_temperature += relaxation * residual / (left_conductance + right_conductance)
@@ -550,7 +548,9 @@ def build_validated_surrogate(study: ReferenceStudy, *, training_points: int = 6
     maximum_error = 0.0
     for value in held_out:
         truth = solve_reference_forward(study, float(value)).observation_predictions_K
-        estimate = tuple(float(np.interp(value, grid, predictions[:, column])) for column in range(predictions.shape[1]))
+        estimate = tuple(
+            float(np.interp(value, grid, predictions[:, column])) for column in range(predictions.shape[1])
+        )
         maximum_error = max(maximum_error, max(abs(a - b) for a, b in zip(truth, estimate, strict=True)))
     validation_payload = {
         "training_grid": grid,
@@ -597,7 +597,9 @@ def evaluate_with_surrogate(
     else:
         grid = np.asarray(surrogate.conductivity_grid)
         values = np.asarray(surrogate.prediction_grid)
-        predictions = tuple(float(np.interp(conductivity_right, grid, values[:, column])) for column in range(values.shape[1]))
+        predictions = tuple(
+            float(np.interp(conductivity_right, grid, values[:, column])) for column in range(values.shape[1])
+        )
         used = True
         reason = "validated-within-domain"
     receipt = canonical_digest(
@@ -624,9 +626,7 @@ def posterior_point_digest(
     value: float,
     weight: float,
 ) -> str:
-    return canonical_digest(
-        {"identity_bundle": identities.identity, "index": index, "value": value, "weight": weight}
-    )
+    return canonical_digest({"identity_bundle": identities.identity, "index": index, "value": value, "weight": weight})
 
 
 def run_bayesian_inversion(

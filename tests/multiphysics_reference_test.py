@@ -163,14 +163,17 @@ def test_durable_lifecycle_is_idempotent_cancellable_resumable_and_typed(tmp_pat
         idempotency_key="same-request",
         grid_points=101,
     )
-    assert store.create(
-        problem,
-        problem_hash,
-        _data(),
-        code_revision="test-revision",
-        idempotency_key="same-request",
-        grid_points=101,
-    ) == study_id
+    assert (
+        store.create(
+            problem,
+            problem_hash,
+            _data(),
+            code_revision="test-revision",
+            idempotency_key="same-request",
+            grid_points=101,
+        )
+        == study_id
+    )
     assert store.cancel(study_id)["status"] == "cancelled"
     assert store.resume(study_id)["status"] == "created"
     assert store.run(study_id)["status"] == "complete"
