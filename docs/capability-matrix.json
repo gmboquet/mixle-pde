@@ -198,6 +198,39 @@
     },
     {
       "boundary_conditions": [
+        "dirichlet"
+      ],
+      "category": "fem_pde_core",
+      "complex_support": false,
+      "differentiable": false,
+      "dimension": [
+        "2D",
+        "3D"
+      ],
+      "grid_type": "unstructured simplex (triangular/tetrahedral) mesh",
+      "is_solver": true,
+      "limitations": [
+        "single-process only: no MPI, multiprocessing, or distributed execution path",
+        "exact-rational input is converted to IEEE-754 float64 before solving; the residual check is against the converted floating-point system, not an exact certificate",
+        "the P1 Poisson wrapper checked here against mixle_pde.fem is scalar-source, scalar-conductivity, Dirichlet-only"
+      ],
+      "method": "Portable, receipt-bearing execution of exact-rational Sim linear-system records via a dense solve, plus a legacy-parity-checked P1 Poisson wrapper over mixle_pde.fem.",
+      "module": "mixle_pde.canonical_adapter",
+      "parallel_status": "single_process",
+      "public_symbols": [
+        "CanonicalLinearSolution",
+        "CanonicalSolveReceipt",
+        "LegacyCanonicalPoissonResult",
+        "NativeBackendCapability",
+        "native_backend_manifest",
+        "solve_p1_poisson_canonical",
+        "solve_sim_linear_system"
+      ],
+      "time_regime": "steady",
+      "verification_level": "reference_value_checked"
+    },
+    {
+      "boundary_conditions": [
         "not_applicable"
       ],
       "category": "infrastructure",
@@ -227,39 +260,6 @@
         "run_verification_scenario",
         "run_required_modeling_checks",
         "assert_required_modeling"
-      ],
-      "time_regime": "not_applicable",
-      "verification_level": "unit_tested_only"
-    },
-    {
-      "boundary_conditions": [
-        "not_applicable"
-      ],
-      "category": "infrastructure",
-      "complex_support": false,
-      "differentiable": false,
-      "dimension": [
-        "not_applicable"
-      ],
-      "grid_type": "not_applicable",
-      "is_solver": false,
-      "limitations": [
-        "compatibility adapter only; general mathematical planning and independent certificates belong to Mixle Discrete",
-        "floating-point residual and legacy parity receipts are not verified physical evidence",
-        "single-process only: no MPI, multiprocessing, or distributed execution path"
-      ],
-      "method": "Portable Simulation finite-system adapter and receipt-bearing legacy P1 compatibility path.",
-      "module": "mixle_pde.canonical_adapter",
-      "parallel_status": "single_process",
-      "public_symbols": [
-        "CanonicalLinearSolution",
-        "CanonicalSolveReceipt",
-        "LegacyCanonicalPoissonResult",
-        "NativeBackendCapability",
-        "SIM_LINEAR_SCHEMA",
-        "native_backend_manifest",
-        "solve_p1_poisson_canonical",
-        "solve_sim_linear_system"
       ],
       "time_regime": "not_applicable",
       "verification_level": "unit_tested_only"
@@ -1578,6 +1578,41 @@
     },
     {
       "boundary_conditions": [
+        "Dirichlet",
+        "conservative material interface"
+      ],
+      "category": "field_pde_solvers",
+      "complex_support": false,
+      "differentiable": false,
+      "dimension": [
+        "1D"
+      ],
+      "grid_type": "tagged linear P1 finite-element mesh",
+      "is_solver": true,
+      "limitations": [
+        "supports only the declared one-dimensional steady two-region composite-heat reference envelope",
+        "single-process only: no MPI, multiprocessing, or distributed execution path",
+        "bounded deterministic grid quadrature is not a general Bayesian sampler"
+      ],
+      "method": "Bounded two-region composite-heat reference with analytic/P1 FEM forward solve, conservative coupling, surrogate policy, and Bayesian grid inversion.",
+      "module": "mixle_pde.multiphysics_reference",
+      "parallel_status": "single_process",
+      "public_symbols": [
+        "REFERENCE_PROFILE",
+        "ReferenceStudy",
+        "prepare_reference_study",
+        "solve_reference_forward",
+        "solve_reference_fem",
+        "manufactured_solution_refinement",
+        "build_validated_surrogate",
+        "evaluate_with_surrogate",
+        "run_bayesian_inversion"
+      ],
+      "time_regime": "steady",
+      "verification_level": "manufactured_solution_checked"
+    },
+    {
+      "boundary_conditions": [
         "dirichlet"
       ],
       "category": "fem_pde_core",
@@ -1704,10 +1739,11 @@
       "grid_type": "not_applicable",
       "is_solver": false,
       "limitations": [
-        "governance and migration metadata only; it does not implement or validate a PDE solve",
-        "single-process only: no MPI, multiprocessing, or distributed execution path"
+        "single-process only: no MPI, multiprocessing, or distributed execution path",
+        "covered by unit tests only; no analytic, manufactured-solution, or external reference check is recorded against it",
+        "disposition buckets are a static per-module-name lookup table, not derived from actual per-module dependency analysis"
       ],
-      "method": "Exhaustive migration-disposition inventory for the integrated PDE compatibility profile.",
+      "method": "Automatic per-module migration disposition (preserve/adapt/migrate/reference/retire) and final-owner classification, derived by scanning the package directory rather than a hand-maintained list.",
       "module": "mixle_pde.ownership",
       "parallel_status": "single_process",
       "public_symbols": [
@@ -1772,6 +1808,40 @@
       ],
       "time_regime": "transient",
       "verification_level": "analytic_reference_checked"
+    },
+    {
+      "boundary_conditions": [
+        "dirichlet",
+        "periodic"
+      ],
+      "category": "fem_pde_core",
+      "complex_support": false,
+      "differentiable": true,
+      "dimension": [
+        "2D",
+        "3D"
+      ],
+      "grid_type": "unstructured simplex (FEM) or structured grid (FD/FDTD), depending on the registered kernel",
+      "is_solver": true,
+      "limitations": [
+        "single-process only: no MPI, multiprocessing, or distributed execution path",
+        "covered by unit tests only; per-kernel checks are boundedness/finiteness or a preserved discrete invariant (e.g. div H, total mass), not an independent analytic or manufactured-solution check",
+        "invokes each legacy kernel exactly as it already exists; registration only declares and gates what mixle_pde.problem_adapter.require_compatible will accept, it never widens a kernel's actual numerical behavior"
+      ],
+      "method": "Concrete mixle_pde.problem_adapter backend registrations wiring five existing legacy kernels (FEM P1 Poisson, FD leapfrog wave, FD streamfunction-vorticity flow, Yee-grid FDTD Maxwell, method-of-lines advection-diffusion) behind one compatibility-checked invocation contract.",
+      "module": "mixle_pde.pde_backend_registry",
+      "parallel_status": "single_process",
+      "public_symbols": [
+        "PDEPort",
+        "PDEKernelArtifact",
+        "PDEKernelRegistration",
+        "PDEStudyResult",
+        "get_kernel_registration",
+        "list_kernel_registrations",
+        "run_math_problem"
+      ],
+      "time_regime": "steady_and_transient",
+      "verification_level": "unit_tested_only"
     },
     {
       "boundary_conditions": [
@@ -2074,38 +2144,6 @@
       "boundary_conditions": [
         "not_applicable"
       ],
-      "category": "infrastructure",
-      "complex_support": false,
-      "differentiable": true,
-      "dimension": [
-        "not_applicable"
-      ],
-      "grid_type": "not_applicable",
-      "is_solver": false,
-      "limitations": [
-        "dispatch and compatibility layer only; capability remains bounded by each registered legacy kernel profile",
-        "numerical residual, finiteness, and conservation checks are not verified physical evidence",
-        "single-process only: no MPI, multiprocessing, or distributed execution path"
-      ],
-      "method": "Capability-negotiated dispatch from portable mathematical studies to five curated legacy PDE kernels.",
-      "module": "mixle_pde.pde_backend_registry",
-      "parallel_status": "single_process",
-      "public_symbols": [
-        "PDEPort",
-        "PDEKernelArtifact",
-        "PDEKernelRegistration",
-        "PDEStudyResult",
-        "get_kernel_registration",
-        "list_kernel_registrations",
-        "run_math_problem"
-      ],
-      "time_regime": "not_applicable",
-      "verification_level": "unit_tested_only"
-    },
-    {
-      "boundary_conditions": [
-        "not_applicable"
-      ],
       "category": "environmental_applied",
       "complex_support": true,
       "differentiable": false,
@@ -2195,6 +2233,32 @@
       "boundary_conditions": [
         "not_applicable"
       ],
+      "category": "workflow_orchestration",
+      "complex_support": false,
+      "differentiable": false,
+      "dimension": [
+        "not_applicable"
+      ],
+      "grid_type": "not_applicable",
+      "is_solver": false,
+      "limitations": [
+        "local JSON persistence only; production scheduling, distributed execution, and fleet control belong to PRJ-MLOPS",
+        "single-process only: no MPI, multiprocessing, or distributed execution path"
+      ],
+      "method": "Local durable lifecycle for bounded reference studies with typed resource and execution failures.",
+      "module": "mixle_pde.reference_lifecycle",
+      "parallel_status": "single_process",
+      "public_symbols": [
+        "ResourceBudget",
+        "ReferenceStudyStore"
+      ],
+      "time_regime": "not_applicable",
+      "verification_level": "unit_tested_only"
+    },
+    {
+      "boundary_conditions": [
+        "not_applicable"
+      ],
       "category": "environmental_applied",
       "complex_support": false,
       "differentiable": false,
@@ -2243,6 +2307,37 @@
       ],
       "time_regime": "not_applicable",
       "verification_level": "unit_tested_only"
+    },
+    {
+      "boundary_conditions": [
+        "not_applicable"
+      ],
+      "category": "surrogate_modeling",
+      "complex_support": false,
+      "differentiable": false,
+      "dimension": [
+        "not_applicable"
+      ],
+      "grid_type": "not_applicable",
+      "is_solver": false,
+      "limitations": [
+        "snapshot-only POD; no Galerkin-projected operator, hyper-reduction, or transient reduced state-space integration",
+        "held-out reconstruction error is an approximation check, not verified physical evidence",
+        "single-process only: no MPI, multiprocessing, or distributed execution path"
+      ],
+      "method": "Proper orthogonal decomposition basis fitting, projection, reconstruction, and held-out error certification.",
+      "module": "mixle_pde.reduced_basis",
+      "parallel_status": "single_process",
+      "public_symbols": [
+        "PODBasis",
+        "ReducedBasisError",
+        "build_pod_basis",
+        "project",
+        "reconstruct",
+        "reduced_basis_error"
+      ],
+      "time_regime": "not_applicable",
+      "verification_level": "analytic_reference_checked"
     },
     {
       "boundary_conditions": [

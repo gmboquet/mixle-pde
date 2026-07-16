@@ -61,6 +61,8 @@ _INQUIRY_MODULES = {
     "voi",
 }
 _PROFILE_MODULES = {"_operator", "capabilities", "canonical_adapter", "ops", "ownership", "problem_adapter", "tools"}
+_REFERENCE_PROFILE_MODULES = {"multiphysics_reference"}
+_MLOPS_MODULES = {"reference_lifecycle"}
 
 
 def _classify(name: str) -> ModuleDisposition:
@@ -78,6 +80,20 @@ def _classify(name: str) -> ModuleDisposition:
             "preserve",
             "PRJ-PDE",
             "This module is part of the integrated compatibility, capability, or backend profile.",
+        )
+    if name in _REFERENCE_PROFILE_MODULES:
+        return ModuleDisposition(
+            module,
+            "reference",
+            "PRJ-PDE",
+            "This narrowly declared executable reference backend remains a curated PDE specialist profile.",
+        )
+    if name in _MLOPS_MODULES:
+        return ModuleDisposition(
+            module,
+            "migrate",
+            "PRJ-MLOPS",
+            "The local lifecycle proves bounded control semantics; production job orchestration belongs to MLOps.",
         )
     if name in _SIM_MODULES:
         return ModuleDisposition(
