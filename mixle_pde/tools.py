@@ -43,6 +43,7 @@ dataset-artifact convention.
 
 from __future__ import annotations
 
+import importlib
 import json
 import operator as _operator
 import os
@@ -153,9 +154,16 @@ def _unsupported_modality(tool: str, modality: str) -> ValueError:
 
 def _artifacts_module() -> Any:
     """Lazily import ``mixle_pde.io.artifacts`` (IC-2, E2); raise a clear, actionable error if it is not
-    yet installed/merged rather than failing this whole module's import."""
+    yet installed/merged rather than failing this whole module's import.
+
+    Uses :func:`importlib.import_module` rather than ``from mixle_pde.io import artifacts``: once the
+    real submodule has been imported anywhere in the process, ``mixle_pde.io`` caches it as an
+    attribute, and a plain ``from`` import resolves that cached attribute directly -- bypassing a
+    test's ``monkeypatch.setitem(sys.modules, "mixle_pde.io.artifacts", fake)`` entirely.
+    ``import_module`` always consults ``sys.modules`` first, so it honors the patch.
+    """
     try:
-        from mixle_pde.io import artifacts
+        artifacts = importlib.import_module("mixle_pde.io.artifacts")
     except ImportError as exc:
         raise ImportError(
             "run_inversion/query_posterior/forward_model need mixle_pde.io.artifacts (IC-2, workstream E2) for "
