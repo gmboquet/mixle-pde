@@ -3,19 +3,24 @@
 Structured grids cannot conform to real geology -- faults, pinch-outs, irregular basin outlines, local
 refinement near a well. Finite elements on an unstructured triangular mesh can. This is the canonical
 piece: linear (P1) elements assembling the stiffness matrix from per-triangle contributions, solving
-``-div(kappa grad u) = f`` with Dirichlet boundaries on an arbitrary triangulation (e.g. a Delaunay mesh
+``-div(kappa grad u) = f`` with Dirichlet boundaries (strong elimination) and/or Robin boundaries (weak
+boundary-integral enforcement, see :class:`RobinBC`) on an arbitrary triangulation (e.g. a Delaunay mesh
 of scattered points). Part of the earth-science/multiphysics work (Phase 5).
 """
 
 from __future__ import annotations
 
 import math
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 
 import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 
 __all__ = [
+    "RobinBC",
+    "assemble_robin_boundary_terms",
     "assemble_simplex_fem_matrices",
     "assemble_simplex_load_vector",
     "assemble_simplex_mass_matrix",
@@ -159,21 +164,176 @@ def assemble_simplex_load_vector(mesh, source, *, min_measure: float = 1.0e-14) 
     raise ValueError("source must be scalar, callable, shape (n_nodes,), or shape (n_simplices,).")
 
 
+@dataclass(frozen=True)
+class RobinBC:
+    """A Robin (third-kind, mixed) boundary condition ``alpha * u + beta * du/dn = g``.
+
+    Weakly enforced via a boundary-integral term added to the assembled linear system -- unlike a
+    Dirichlet condition, no degree of freedom is eliminated. Integrating ``-div(kappa grad u) = f``'s
+    weak form by parts leaves a boundary term ``integral kappa * (du/dn) * v ds`` (``du/dn`` the
+    outward-normal derivative); substituting ``du/dn = (g - alpha * u) / beta`` from this condition
+    folds a ``(kappa * alpha / beta)``-weighted boundary mass term into the stiffness matrix and a
+    ``(kappa / beta)``-weighted boundary load term into the right-hand side -- see
+    :func:`assemble_robin_boundary_terms`.
+
+    ``alpha`` and ``beta`` are scalars shared across every facet this condition applies to; ``beta``
+    must be nonzero (``beta = 0`` degenerates to a Dirichlet condition, already handled by strong
+    elimination via :func:`solve_simplex_poisson`'s ``dirichlet`` argument). ``g`` may be a scalar or
+    a callable ``g(point) -> float`` evaluated at the mesh coordinate of every node on the selected
+    facets, so a boundary value that varies along the boundary is exact at the nodes. ``facets``
+    restricts the condition to a subset of boundary facets -- each row is ``dim`` node indices, the
+    same shape :meth:`mixle_pde.mesh.SimplexMesh.boundary_facets` returns; ``None`` (the default)
+    applies the condition to every boundary facet of the mesh.
+    """
+
+    alpha: float = 0.0
+    beta: float = 1.0
+    g: float | Callable[[np.ndarray], float] = 0.0
+    facets: np.ndarray | None = None
+
+
+def _facet_measure(coords: np.ndarray) -> float:
+    """``(dim - 1)``-dimensional measure of a boundary facet -- 1 for a point, else length, area, ....
+
+    Uses the Gram-determinant volume formula ``sqrt(det(E @ E.T)) / k!`` for the ``k = dim - 1`` edge
+    vectors ``E`` running from the facet's first node to its remaining nodes. Unlike a plain
+    determinant, this stays valid for a ``k``-simplex embedded in a higher-dimensional ambient space
+    (e.g. a triangle boundary edge embedded in 3-D). ``k = 0`` (a 1-D mesh's point boundary) has no
+    edge vectors at all, so its measure is the conventional 1 -- the "integral" over a single boundary
+    point is just its point evaluation.
+    """
+    pts = np.asarray(coords, dtype=float)
+    edges = pts[1:] - pts[0]
+    if edges.shape[0] == 0:
+        return 1.0
+    gram = edges @ edges.T
+    return math.sqrt(max(float(np.linalg.det(gram)), 0.0)) / math.factorial(edges.shape[0])
+
+
+def assemble_robin_boundary_terms(
+    mesh,
+    robin: RobinBC | Sequence[RobinBC],
+    *,
+    diffusion=1.0,
+    min_measure: float = 1.0e-14,
+) -> tuple[sp.csr_matrix, np.ndarray]:
+    """Assemble the boundary-integral matrix and load-vector contributions of Robin condition(s).
+
+    Returns ``(matrix, rhs)`` shaped like :func:`assemble_simplex_stiffness_matrix` and
+    :func:`assemble_simplex_load_vector`, meant to be added onto them before any Dirichlet
+    elimination runs -- a Dirichlet-pinned row simply overwrites whatever a Robin condition
+    contributed to it there, matching standard mixed-boundary practice (an essential condition always
+    takes precedence over a natural one on the same degree of freedom).
+
+    Only a scalar ``diffusion`` is supported: a per-element or tensor-valued ``diffusion`` has no
+    single well-defined value on a boundary facet without deciding which element's coefficient to
+    use, and this reference kernel does not guess.
+
+    Each selected facet's local contribution uses the same consistent P1 mass-matrix template as
+    :func:`assemble_simplex_mass_matrix` (exact for constant ``alpha``/``beta`` and a P1-interpolated
+    ``g``), scaled by the facet's own ``(dim - 1)``-dimensional measure from :func:`_facet_measure`.
+    """
+    if np.ndim(diffusion) != 0:
+        raise ValueError(
+            "assemble_robin_boundary_terms only supports a scalar diffusion coefficient "
+            "(a per-element or tensor diffusion has no single value on a boundary facet)."
+        )
+    kappa = float(diffusion)
+
+    specs = (robin,) if isinstance(robin, RobinBC) else tuple(robin)
+    nodes = np.asarray(mesh.nodes, dtype=float)
+    n_nodes = int(nodes.shape[0])
+    dim = int(nodes.shape[1])
+    n_local = dim  # A boundary facet of a dim-D simplex mesh has `dim` nodes (a (dim - 1)-simplex).
+
+    consistent_template = np.ones((n_local, n_local), dtype=float)
+    np.fill_diagonal(consistent_template, 2.0)
+
+    rows: list[int] = []
+    cols: list[int] = []
+    vals: list[float] = []
+    rhs = np.zeros(n_nodes, dtype=float)
+
+    for spec in specs:
+        alpha = float(spec.alpha)
+        beta = float(spec.beta)
+        if beta == 0.0:
+            raise ValueError("RobinBC.beta must be nonzero; beta=0 degenerates to a Dirichlet condition.")
+        matrix_coeff = kappa * alpha / beta
+        rhs_scale = kappa / beta
+
+        if spec.facets is not None:
+            facets = np.asarray(spec.facets, dtype=int)
+        elif hasattr(mesh, "boundary_facets"):
+            facets = mesh.boundary_facets()
+        else:
+            raise ValueError("RobinBC.facets is required unless mesh has boundary_facets().")
+        if facets.size and facets.shape[1] != n_local:
+            raise ValueError(f"robin facets must have shape (*, {n_local}) for a {dim}-D mesh.")
+
+        for facet in facets:
+            coords = nodes[facet]
+            measure = _facet_measure(coords)
+            if measure <= float(min_measure):
+                continue
+            if callable(spec.g):
+                g_nodal = np.asarray([float(spec.g(nodes[int(node)])) for node in facet], dtype=float)
+            else:
+                g_nodal = np.full(n_local, float(spec.g), dtype=float)
+            local_mass = measure * consistent_template / (n_local * (n_local + 1))
+            local_rhs = rhs_scale * (local_mass @ g_nodal)
+            for i, row in enumerate(facet):
+                rhs[int(row)] += float(local_rhs[i])
+                for j, col in enumerate(facet):
+                    rows.append(int(row))
+                    cols.append(int(col))
+                    vals.append(matrix_coeff * float(local_mass[i, j]))
+
+    matrix = sp.csr_matrix((vals, (rows, cols)), shape=(n_nodes, n_nodes))
+    return matrix, rhs
+
+
 def solve_simplex_poisson(
     mesh,
     source,
     *,
     diffusion=1.0,
     dirichlet: dict[int, float] | None = None,
+    robin: RobinBC | Sequence[RobinBC] | None = None,
     min_measure: float = 1.0e-14,
 ) -> np.ndarray:
-    """Solve ``-div(diffusion grad u) = source`` with P1 elements on a simplex mesh."""
+    """Solve ``-div(diffusion grad u) = source`` with P1 elements on a simplex mesh.
+
+    ``dirichlet`` pins nodes to a fixed value by strong elimination (identity row, fixed RHS entry),
+    exactly as before. ``robin`` adds one or more :class:`RobinBC` boundary-integral terms
+    (``alpha*u + beta*du/dn = g``) to the assembled system before Dirichlet elimination runs, so a
+    node can be governed by both: wherever ``dirichlet`` also pins that node, elimination overwrites
+    whatever the Robin term contributed to its row, exactly matching standard mixed-boundary practice
+    (essential beats natural on a shared degree of freedom). Passing ``robin`` without an explicit
+    ``dirichlet`` leaves every node free except where a Robin condition applies -- the "pin every
+    boundary node to 0" default described below only fires when ``robin`` is also ``None``, so
+    existing Dirichlet-only call sites are unaffected.
+    """
     stiffness = assemble_simplex_stiffness_matrix(mesh, diffusion=diffusion, min_measure=min_measure).tolil()
     rhs = assemble_simplex_load_vector(mesh, source, min_measure=min_measure)
+
+    robin_specs: tuple[RobinBC, ...] = ()
+    if robin is not None:
+        robin_specs = (robin,) if isinstance(robin, RobinBC) else tuple(robin)
+    if robin_specs:
+        robin_matrix, robin_rhs = assemble_robin_boundary_terms(
+            mesh, robin_specs, diffusion=diffusion, min_measure=min_measure
+        )
+        stiffness = (stiffness.tocsr() + robin_matrix).tolil()
+        rhs = rhs + robin_rhs
+
     if dirichlet is None:
-        if not hasattr(mesh, "boundary_nodes"):
+        if robin_specs:
+            bc: dict[int, float] = {}
+        elif not hasattr(mesh, "boundary_nodes"):
             raise ValueError("dirichlet is required unless mesh has boundary_nodes().")
-        bc = {int(node): 0.0 for node in mesh.boundary_nodes()}
+        else:
+            bc = {int(node): 0.0 for node in mesh.boundary_nodes()}
     else:
         bc = {int(node): float(value) for node, value in dirichlet.items()}
     for node, value in bc.items():

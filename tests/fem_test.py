@@ -1,11 +1,14 @@
 """Unstructured P1 finite-element Poisson solver (Phase 5)."""
 
+import math
 import unittest
 
 import numpy as np
 from scipy.spatial import Delaunay
 
 from mixle_pde.fem import (
+    RobinBC,
+    assemble_robin_boundary_terms,
     assemble_simplex_fem_matrices,
     assemble_simplex_load_vector,
     assemble_simplex_mass_matrix,
@@ -17,6 +20,7 @@ from mixle_pde.fem import (
     step_simplex_diffusion,
 )
 from mixle_pde.mesh import box_simplex_mesh
+from mixle_pde.verification.mms import estimate_convergence_order
 
 
 def _mesh_square(n):
@@ -128,6 +132,65 @@ class FEMPoissonTest(unittest.TestCase):
 
         self.assertEqual(states.shape, (3, mesh.n_nodes))
         self.assertLess(float(np.linalg.norm(states[-1])), float(np.linalg.norm(states[0])))
+
+    def test_robin_beta_zero_is_rejected(self):
+        mesh = box_simplex_mesh((3, 3))
+        with self.assertRaises(ValueError):
+            assemble_robin_boundary_terms(mesh, RobinBC(alpha=1.0, beta=0.0, g=0.0))
+
+    def test_robin_zero_alpha_and_g_is_a_true_natural_noop(self):
+        # alpha=0 and g=0 is a pure zero-flux (Neumann) edge: the boundary integral degenerates to
+        # "do nothing" to the assembled system, even though facets are still visited (the stiffness
+        # matrix's sparsity pattern gains explicit zero entries, but every value is exactly zero).
+        mesh = box_simplex_mesh((4, 4))
+        matrix, rhs = assemble_robin_boundary_terms(mesh, RobinBC(alpha=0.0, beta=1.0, g=0.0))
+        np.testing.assert_allclose(matrix.toarray(), np.zeros((mesh.n_nodes, mesh.n_nodes)))
+        np.testing.assert_allclose(rhs, np.zeros(mesh.n_nodes))
+
+    def test_robin_manufactured_solution_converges(self):
+        # u = sin(pi x) * (y + 1) on the unit square. -Laplacian(u) = pi^2 sin(pi x) (y+1).
+        # Dirichlet (exact trace) on x=0, x=1, y=0. Robin on y=1 (outward normal +y):
+        #   alpha*u + beta*du/dn = g, with alpha=2, beta=1 =>
+        #   g = 2*(2 sin(pi x)) + 1*(sin(pi x)) = 5 sin(pi x)  (nonconstant along the Robin edge).
+        alpha, beta = 2.0, 1.0
+
+        def u_exact(xy):
+            x, y = xy[0], xy[1]
+            return math.sin(math.pi * x) * (y + 1.0)
+
+        def source(xy):
+            x, y = xy[0], xy[1]
+            return (math.pi**2) * math.sin(math.pi * x) * (y + 1.0)
+
+        def robin_g(xy):
+            return 5.0 * math.sin(math.pi * xy[0])
+
+        resolutions = (11, 21, 41)
+        hs = []
+        errs = []
+        for n in resolutions:
+            mesh = box_simplex_mesh((n, n))
+            boundary = mesh.boundary_nodes()
+            bx, by = mesh.nodes[boundary, 0], mesh.nodes[boundary, 1]
+            is_dirichlet = np.isclose(bx, 0.0) | np.isclose(bx, 1.0) | np.isclose(by, 0.0)
+            dirichlet = {int(node): float(u_exact(mesh.nodes[node])) for node in boundary[is_dirichlet]}
+
+            facets = mesh.boundary_facets()
+            on_top = np.all(np.isclose(mesh.nodes[facets][..., 1], 1.0), axis=1)
+            robin = RobinBC(alpha=alpha, beta=beta, g=robin_g, facets=facets[on_top])
+
+            src_nodal = np.array([source(p) for p in mesh.nodes])
+            u = solve_simplex_poisson(mesh, src_nodal, dirichlet=dirichlet, robin=robin)
+            exact = np.array([u_exact(p) for p in mesh.nodes])
+
+            hs.append(1.0 / (n - 1))
+            errs.append(float(np.max(np.abs(u - exact))))
+
+        self.assertLess(errs[-1], 2.0e-3)
+        self.assertGreater(errs[0] / errs[1], 3.0)  # ~O(h^2): error drops ~4x per halving
+        self.assertGreater(errs[1] / errs[2], 3.0)
+        measured_order = estimate_convergence_order(hs, errs)
+        self.assertAlmostEqual(measured_order, 2.0, delta=0.3)
 
 
 if __name__ == "__main__":
