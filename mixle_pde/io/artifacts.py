@@ -147,8 +147,8 @@ def sha256_of_arrays(arrays: dict[str, Any]) -> str:
 
 def _covariance_arrays(p: PosteriorField3D) -> tuple[str, dict[str, np.ndarray]]:
     """Return ``(mode, {array_name: array})`` for whichever covariance storage ``p`` uses."""
-    if p.cov is not None:
-        return _COV_DENSE, {"cov": np.asarray(p.cov, dtype=float)}
+    if p.dense_cov is not None:
+        return _COV_DENSE, {"cov": np.asarray(p.dense_cov, dtype=float)}
     if p.precision_factor is not None:
         mat = sp.csc_matrix(p.precision_factor.precision)
         return _COV_PRECISION, {

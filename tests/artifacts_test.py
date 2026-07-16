@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pytest
 import scipy.sparse as sp
@@ -15,6 +17,12 @@ def _grid() -> Field3D:
     return Field3D(coordinates=coordinates, spacing=(1.0, 1.0, 1.0), units="kg/m3", property_name="density")
 
 
+def _cov_mode_on_disk(path: str) -> str:
+    with open(f"{path}.json") as f:
+        header = json.load(f)
+    return header["grid"]["cov_mode"]
+
+
 def test_dense_covariance_round_trips_losslessly(tmp_path) -> None:
     grid = _grid()
     mean = np.array([1.0, 2.0, 3.0, 4.0])
@@ -23,8 +31,14 @@ def test_dense_covariance_round_trips_losslessly(tmp_path) -> None:
 
     path = str(tmp_path / "dense")
     save_posterior(posterior, path)
+    assert _cov_mode_on_disk(path) == "dense"
     loaded = load_posterior(path)
 
+    # Storage mode itself must round-trip, not just the derived .cov values -- a loader that
+    # silently degrades every mode to a dense reconstruction would still pass a values-only check.
+    assert loaded.dense_cov is not None
+    assert loaded.precision_factor is None
+    assert loaded.low_rank is None
     np.testing.assert_allclose(loaded.mean, posterior.mean)
     np.testing.assert_allclose(loaded.cov, posterior.cov)
 
@@ -37,8 +51,12 @@ def test_sparse_precision_covariance_round_trips_losslessly(tmp_path) -> None:
 
     path = str(tmp_path / "precision")
     save_posterior(posterior, path)
+    assert _cov_mode_on_disk(path) == "precision"
     loaded = load_posterior(path)
 
+    assert loaded.dense_cov is None
+    assert loaded.precision_factor is not None
+    assert loaded.low_rank is None
     np.testing.assert_allclose(loaded.mean, posterior.mean)
     np.testing.assert_allclose(loaded.cov, posterior.cov, atol=1e-10)
 
@@ -53,8 +71,12 @@ def test_low_rank_covariance_round_trips_losslessly(tmp_path) -> None:
 
     path = str(tmp_path / "low_rank")
     save_posterior(posterior, path)
+    assert _cov_mode_on_disk(path) == "low_rank"
     loaded = load_posterior(path)
 
+    assert loaded.dense_cov is None
+    assert loaded.precision_factor is None
+    assert loaded.low_rank is not None
     np.testing.assert_allclose(loaded.mean, posterior.mean)
     np.testing.assert_allclose(loaded.cov, posterior.cov)
 
@@ -67,8 +89,12 @@ def test_diagonal_covariance_round_trips_losslessly(tmp_path) -> None:
 
     path = str(tmp_path / "diag")
     save_posterior(posterior, path)
+    assert _cov_mode_on_disk(path) == "diag"
     loaded = load_posterior(path)
 
+    assert loaded.dense_cov is None
+    assert loaded.precision_factor is None
+    assert loaded.low_rank is None
     np.testing.assert_allclose(loaded.mean, posterior.mean)
     np.testing.assert_allclose(loaded.cov, posterior.cov)
 
