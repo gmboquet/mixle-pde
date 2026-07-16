@@ -168,7 +168,7 @@ def _covariance_arrays(p: PosteriorField3D) -> tuple[str, dict[str, np.ndarray]]
 def _reconstruct_covariance(cov_mode: str, arrays: dict[str, np.ndarray]) -> dict[str, Any]:
     """Rebuild the ``PosteriorField3D`` covariance-mode kwargs from the loaded npz arrays."""
     if cov_mode == _COV_DENSE:
-        return {"cov": arrays["cov"]}
+        return {"dense_cov": arrays["cov"]}
     if cov_mode == _COV_PRECISION:
         shape = tuple(int(x) for x in arrays["precision_shape"])
         mat = sp.csc_matrix(
