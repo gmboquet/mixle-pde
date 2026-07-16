@@ -228,6 +228,42 @@
     },
     {
       "boundary_conditions": [
+        "dirichlet_injection_saturation",
+        "outflow_zero_gradient"
+      ],
+      "category": "fluid_flow",
+      "complex_support": false,
+      "differentiable": false,
+      "dimension": [
+        "1D"
+      ],
+      "grid_type": "structured 1D finite-volume grid",
+      "is_solver": true,
+      "limitations": [
+        "gravity and capillary pressure are neglected (the classical Buckley & Leverett 1942 assumptions); a different governing equation would be needed to include them",
+        "the closed-form analytic profile only covers the standard waterflood regime where injection_saturation is at or above the Welge shock saturation; a lower injection saturation needs a different wave structure and is rejected rather than mis-evaluated",
+        "first-order upwind scheme only: no higher-order (MUSCL/WENO) reconstruction, so the displacement front is smeared over several cells at the documented ~first-order rate",
+        "1-D homogeneous porous column only: no heterogeneity, 2-D/3-D geometry, or compressibility",
+        "no torch-backed autograd path detected; gradients (if needed) require external finite differences",
+        "single-process only: no MPI, multiprocessing, or distributed execution path"
+      ],
+      "method": "1-D immiscible two-phase (water-oil) displacement through a porous column: the Corey fractional-flow closure, the Welge shock-front construction, the exact self-similar analytic profile, and a first-order upwind finite-difference march (MP-H6).",
+      "module": "mixle_pde.buckley_leverett",
+      "parallel_status": "single_process",
+      "public_symbols": [
+        "CoreyFractionalFlow",
+        "WelgeShock",
+        "welge_shock_front",
+        "BuckleyLeverettAnalytic",
+        "buckley_leverett_analytic",
+        "BuckleyLeverettResult",
+        "solve_buckley_leverett_upwind"
+      ],
+      "time_regime": "transient",
+      "verification_level": "analytic_reference_checked"
+    },
+    {
+      "boundary_conditions": [
         "dirichlet"
       ],
       "category": "fem_pde_core",
@@ -524,6 +560,40 @@
       ],
       "time_regime": "steady_and_transient",
       "verification_level": "analytic_reference_checked"
+    },
+    {
+      "boundary_conditions": [
+        "not_applicable"
+      ],
+      "category": "surrogate_modeling",
+      "complex_support": false,
+      "differentiable": false,
+      "dimension": [
+        "not_applicable"
+      ],
+      "grid_type": "not_applicable",
+      "is_solver": false,
+      "limitations": [
+        "a single rolling-mean-vs-bound statistic with a consecutive-exceedance persistence rule only: no CUSUM/Page-Hinkley/ADWIN change-point machinery and no multivariate drift localization",
+        "detects and reports only; no automatic retraining/rollback action (MP-N8 remains separate, unclaimed work)",
+        "never fits, calibrates, or re-validates the wrapped surrogate/emulator itself -- calibration_bound is trusted verbatim from whatever calibration step the family's own module already ran",
+        "the three *CalibrationView adapters cover exactly this package's three existing surrogate/emulator families (Surrogate, the qoi_emulator GP/Bayesian-polynomial pair, LinearOperatorSurrogate); a new predictor family needs its own Predictor-satisfying adapter",
+        "single-process only: no MPI, multiprocessing, or distributed execution path",
+        "covered by unit tests only; no analytic, manufactured-solution, or external reference check is recorded against it"
+      ],
+      "method": "Generic streaming drift monitor for a fitted surrogate/emulator's live prediction error: a rolling-mean-vs-calibration-bound statistic with a consecutive-exceedance persistence rule, plus adapters that reuse mixle_pde.surrogate/qoi_emulator/operator_surrogate's own calibration bounds verbatim (MP-N6 remainder).",
+      "module": "mixle_pde.drift_monitor",
+      "parallel_status": "single_process",
+      "public_symbols": [
+        "Predictor",
+        "DriftAlert",
+        "DriftMonitor",
+        "SurrogateCalibrationView",
+        "QoIEmulatorCalibrationView",
+        "OperatorSurrogateCalibrationView"
+      ],
+      "time_regime": "not_applicable",
+      "verification_level": "unit_tested_only"
     },
     {
       "boundary_conditions": [
