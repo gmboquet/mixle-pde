@@ -78,6 +78,7 @@ def gauss_newton_invert(
     tol: float = 1e-5,
     jitter: float = 1.0e-10,
     factor_cache: dict | None = None,
+    u_init: np.ndarray | None = None,
 ) -> tuple[PosteriorField3D, GaussNewtonReport]:
     """Gauss-Newton MAP + Laplace posterior for a bounded-field linear-observation inversion.
 
@@ -88,12 +89,24 @@ def gauss_newton_invert(
     solve so a caller iterating this function (e.g. an outer EM loop refitting the prior) can reuse the
     Cholesky factor whenever it calls back in with the same Hessian object. Returns the posterior and a
     convergence report.
+
+    ``u_init``, when given, seeds the Newton iterate ``u`` instead of starting from the prior mean
+    ``m0`` -- a warm start. The regularization anchor stays exactly ``m0``/``Q`` (the prior term in the
+    objective is untouched), so a warm-started solve still converges to a MAP of the same stated
+    problem; only the number of damped steps needed to get there changes. This is what lets
+    :func:`mixle_pde.hybrid_inversion.hybrid_gauss_newton_invert` chain repeated calls into one
+    trajectory instead of restarting from ``m0`` every time. Ignored by the linear fast path (a single
+    exact solve has no starting point to warm).
     """
     if not observations:
         raise ValueError("need at least one observation to invert.")
     n = grid.n
     Q = prior.precision(grid)
     m0 = prior.mean_vector(grid)
+    if u_init is not None:
+        u_init = np.asarray(u_init, dtype=float)
+        if u_init.shape != m0.shape:
+            raise ValueError(f"u_init must have shape {m0.shape}, got {u_init.shape}.")
 
     ops = {}
     for obs in observations:
@@ -127,7 +140,7 @@ def gauss_newton_invert(
             val += 0.5 * float(resid @ rinvs[id(obs)] @ resid)
         return val
 
-    u = m0.copy()
+    u = m0.copy() if u_init is None else u_init.copy()
     step_norms: list[float] = []
     converged = False
     lam = Q
