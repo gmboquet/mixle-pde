@@ -207,6 +207,7 @@ from mixle_pde.groundwater import (
 from mixle_pde.guided_wave import SAFEPlate, safe_dispersion
 from mixle_pde.heat import TransientHeat
 from mixle_pde.helmholtz_pml import helmholtz_pml_operator, solve_helmholtz_pml
+from mixle_pde.hybrid_inversion import HybridInversionReport, HybridIterationRecord, hybrid_gauss_newton_invert
 from mixle_pde.induced_polarization import apparent_conductivity, cole_cole_conductivity, sip_forward
 from mixle_pde.inverse import Differential
 from mixle_pde.latent import Field3D, Field4D, PosteriorField3D, PosteriorFieldSamples3D, SparsePosteriorPrecision
@@ -446,6 +447,9 @@ __all__ = [
     "posterior_predictive_check",
     "GaussNewtonReport",
     "gauss_newton_invert",
+    "HybridIterationRecord",
+    "HybridInversionReport",
+    "hybrid_gauss_newton_invert",
     "MCMCReport",
     "field_log_posterior_kernel",
     "metropolis_field_invert",
