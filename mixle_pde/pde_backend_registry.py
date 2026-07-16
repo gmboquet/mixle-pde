@@ -7,7 +7,7 @@ registers mixle-pde's existing FD/FDTD/FEM solvers as :class:`~mixle_pde.problem
 instances, each paired with typed input/output ports, an output artifact record, and a string-keyed
 invocation function that drives the real (unmodified) legacy kernel.
 
-Eight kernels are registered, covering the MP-E5 parity envelope:
+Nine kernels are registered, covering the MP-E5 parity envelope:
 
 * ``elastic-fd-leapfrog``       -- :class:`mixle_pde.elastic.ElasticWave3D`, a 3D isotropic velocity-stress
   staggered-leapfrog elastic-wave stepper.
@@ -21,6 +21,8 @@ Eight kernels are registered, covering the MP-E5 parity envelope:
 * ``em-fdtd-yee``               -- :class:`mixle_pde.maxwell.Maxwell3D`, a Yee-grid FDTD Maxwell solver.
 * ``transport-fd-advdiff``      -- :class:`mixle_pde.dynamics.AdvectionDiffusionOperator`, a method-of-lines
   advection-diffusion (transport) operator.
+* ``flow-spectral-ns``          -- :func:`mixle_pde.spectral_flow.incompressible_ns_spectral`, a pseudo-spectral
+  (Fourier/RK4) incompressible Navier-Stokes solver on a periodic box.
 
 Registration only *declares* what each backend supports; it never widens what a backend actually does.
 :func:`run_math_problem` always calls :func:`mixle_pde.problem_adapter.require_compatible` first, so a
@@ -716,6 +718,71 @@ def _invoke_transport_fd(problem: Mapping[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# flow-spectral-ns -- mixle_pde.spectral_flow.incompressible_ns_spectral (Fourier pseudo-spectral RK4)
+# ---------------------------------------------------------------------------
+_SPECTRAL_FLOW_PROFILE = PDEBackendProfile(
+    id="flow-spectral-ns",
+    operator_kinds=frozenset({"time_stepping"}),
+    discretizations=frozenset({"spectral-fourier-rk4"}),
+    objective_senses=frozenset({"satisfy"}),
+    mesh_cell_types=frozenset({"periodic_grid"}),
+    evidence_kinds=frozenset({"residual", "convergence"}),
+)
+
+
+@_register_invoker("flow-spectral-ns")
+def _invoke_flow_spectral(problem: Mapping[str, Any]) -> dict[str, Any]:
+    """Evolve periodic incompressible Navier-Stokes with the Fourier pseudo-spectral RK4 stepper.
+
+    The initial condition is the exact 2-D Taylor-Green vortex ``u = -cos(x) sin(y)`` (``dim=2``) or the
+    exact 3-D ABC/Beltrami flow (``dim=3``), each of which decays as a known closed form under this
+    equation for all time. Evidence: ``residual`` is the max pointwise deviation of the evolved field from
+    that exact analytic decay after ``n_steps`` -- an agreement-with-a-closed-form-reference check, not
+    merely a finiteness check; ``convergence`` reports whether the evolved field stayed finite.
+    """
+    from mixle_pde.spectral_flow import incompressible_ns_spectral
+
+    params = _solve_params(problem)
+    n = int(params.get("grid_size", 32))
+    dim = int(params.get("dim", 2))
+    if dim not in (2, 3):
+        raise ValueError("flow-spectral-ns supports dim=2 or dim=3.")
+    viscosity = float(params.get("viscosity", 0.05))
+    dt = float(params.get("dt", 0.001))
+    n_steps = int(params.get("n_steps", 50))
+    length = float(params.get("length", 2.0 * np.pi))
+    dealias = bool(params.get("dealias", False))
+
+    x = np.linspace(0.0, length, n, endpoint=False)
+    if dim == 2:
+        xx, yy = np.meshgrid(x, x, indexing="ij")
+        velocity0 = (-np.cos(xx) * np.sin(yy), np.sin(xx) * np.cos(yy))
+        decay_rate = 2.0 * viscosity
+    else:
+        xx, yy, zz = np.meshgrid(x, x, x, indexing="ij")
+        velocity0 = (np.sin(zz) + np.cos(yy), np.sin(xx) + np.cos(zz), np.sin(yy) + np.cos(xx))
+        decay_rate = viscosity
+
+    evolved = incompressible_ns_spectral(velocity0, viscosity, dt, n_steps, length=length, dealias=dealias)
+    finite = bool(all(np.all(np.isfinite(component)) for component in evolved))
+
+    if finite:
+        decay = float(np.exp(-decay_rate * dt * n_steps))
+        analytic = tuple(component * decay for component in velocity0)
+        residual = float(max(np.max(np.abs(evolved[i] - analytic[i])) for i in range(dim)))
+    else:
+        residual = float("inf")
+
+    return {
+        "solution": np.stack(evolved, axis=0),
+        "evidence": {
+            "residual": residual,
+            "convergence": {"finite": finite, "n_steps": n_steps},
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
 # Registration table
 # ---------------------------------------------------------------------------
 _REGISTRATIONS: dict[str, PDEKernelRegistration] = {
@@ -846,6 +913,24 @@ _REGISTRATIONS: dict[str, PDEKernelRegistration] = {
         ),
         invoke_key="transport-fd-advdiff",
         source="mixle_pde.dynamics.AdvectionDiffusionOperator",
+    ),
+    "flow-spectral-ns": PDEKernelRegistration(
+        profile=_SPECTRAL_FLOW_PROFILE,
+        ports=(
+            PDEPort(id="viscosity", role="input", kind="coefficient", units="m^2/s"),
+            PDEPort(id="velocity", role="output", kind="vector_field", units="m/s"),
+        ),
+        artifact=PDEKernelArtifact(
+            kind="time_series_field",
+            units="m/s",
+            description=(
+                "Pseudo-spectral RK4 velocity field snapshot after n_steps of periodic incompressible "
+                "Navier-Stokes evolution, seeded from the exact Taylor-Green (2-D) or ABC-Beltrami (3-D) "
+                "vortex."
+            ),
+        ),
+        invoke_key="flow-spectral-ns",
+        source="mixle_pde.spectral_flow.incompressible_ns_spectral",
     ),
 }
 
