@@ -1544,6 +1544,41 @@
     },
     {
       "boundary_conditions": [
+        "Dirichlet",
+        "conservative material interface"
+      ],
+      "category": "field_pde_solvers",
+      "complex_support": false,
+      "differentiable": false,
+      "dimension": [
+        "1D"
+      ],
+      "grid_type": "tagged linear P1 finite-element mesh",
+      "is_solver": true,
+      "limitations": [
+        "supports only the declared one-dimensional steady two-region composite-heat reference envelope",
+        "single-process only: no MPI, multiprocessing, or distributed execution path",
+        "bounded deterministic grid quadrature is not a general Bayesian sampler"
+      ],
+      "method": "Bounded two-region composite-heat reference with analytic/P1 FEM forward solve, conservative coupling, surrogate policy, and Bayesian grid inversion.",
+      "module": "mixle_pde.multiphysics_reference",
+      "parallel_status": "single_process",
+      "public_symbols": [
+        "REFERENCE_PROFILE",
+        "ReferenceStudy",
+        "prepare_reference_study",
+        "solve_reference_forward",
+        "solve_reference_fem",
+        "manufactured_solution_refinement",
+        "build_validated_surrogate",
+        "evaluate_with_surrogate",
+        "run_bayesian_inversion"
+      ],
+      "time_regime": "steady",
+      "verification_level": "manufactured_solution_checked"
+    },
+    {
+      "boundary_conditions": [
         "dirichlet"
       ],
       "category": "fem_pde_core",
@@ -2156,6 +2191,32 @@
         "MechanisticFieldReasoner",
         "field_describer",
         "describe_posterior"
+      ],
+      "time_regime": "not_applicable",
+      "verification_level": "unit_tested_only"
+    },
+    {
+      "boundary_conditions": [
+        "not_applicable"
+      ],
+      "category": "workflow_orchestration",
+      "complex_support": false,
+      "differentiable": false,
+      "dimension": [
+        "not_applicable"
+      ],
+      "grid_type": "not_applicable",
+      "is_solver": false,
+      "limitations": [
+        "local JSON persistence only; production scheduling, distributed execution, and fleet control belong to PRJ-MLOPS",
+        "single-process only: no MPI, multiprocessing, or distributed execution path"
+      ],
+      "method": "Local durable lifecycle for bounded reference studies with typed resource and execution failures.",
+      "module": "mixle_pde.reference_lifecycle",
+      "parallel_status": "single_process",
+      "public_symbols": [
+        "ResourceBudget",
+        "ReferenceStudyStore"
       ],
       "time_regime": "not_applicable",
       "verification_level": "unit_tested_only"

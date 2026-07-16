@@ -228,6 +228,38 @@ from mixle_pde.mesh import (
 from mixle_pde.migration import born_modeling, lsrtm_step, rtm_image
 from mixle_pde.misfit import envelope_misfit, hilbert_envelope, misfit, wasserstein1d_misfit, xcorr_traveltime_misfit
 from mixle_pde.multiphysics import CoupledPDESystem, solve_poisson
+from mixle_pde.multiphysics_reference import (
+    REFERENCE_PROFILE,
+    CancellationFailure,
+    CompileFailure,
+    CouplingIteration,
+    CouplingMode,
+    DomainFailure,
+    EvidenceFailure,
+    ExecutionIdentities,
+    FEMResult,
+    ForwardResult,
+    InferenceFailure,
+    ObservationValue,
+    PosteriorPointResult,
+    PosteriorSummary,
+    ReferenceData,
+    ReferenceExecutionError,
+    ReferenceStudy,
+    RefinementEvidence,
+    ResourceFailure,
+    SolverFailure,
+    SurrogateDecision,
+    ValidatedSurrogate,
+    build_validated_surrogate,
+    evaluate_with_surrogate,
+    manufactured_solution_refinement,
+    prepare_reference_study,
+    run_bayesian_inversion,
+    solve_reference_fem,
+    solve_reference_forward,
+    with_coupling_mode,
+)
 from mixle_pde.nonlinear import nonlinear_solve, reaction_diffusion_residual
 from mixle_pde.normal_modes import NormalModes1D
 from mixle_pde.observations import (
@@ -300,6 +332,7 @@ from mixle_pde.ray_scattering import knife_edge_diffraction, multipath_power, po
 
 # cross-modal subsurface reasoning: geophysical forward models -> mixle.reason evidence (belief + UQ)
 from mixle_pde.reasoning import JointPotentialField, MechanisticFieldReasoner, SpatialFieldStore
+from mixle_pde.reference_lifecycle import ReferenceStudyStore, ResourceBudget
 from mixle_pde.refractivity import duct_layers, modified_refractivity, standard_refractivity_profile
 from mixle_pde.rock_physics import fluid_substitute, gassmann_kdry, gassmann_ksat
 from mixle_pde.sample_update import (
@@ -516,6 +549,38 @@ __all__ = [
     "UnsupportedPDEProblem",
     "inspect_math_problem",
     "require_compatible",
+    "CancellationFailure",
+    "CompileFailure",
+    "CouplingIteration",
+    "CouplingMode",
+    "DomainFailure",
+    "EvidenceFailure",
+    "ExecutionIdentities",
+    "FEMResult",
+    "ForwardResult",
+    "InferenceFailure",
+    "ObservationValue",
+    "PosteriorPointResult",
+    "PosteriorSummary",
+    "REFERENCE_PROFILE",
+    "ReferenceData",
+    "ReferenceExecutionError",
+    "ReferenceStudy",
+    "ReferenceStudyStore",
+    "RefinementEvidence",
+    "ResourceBudget",
+    "ResourceFailure",
+    "SolverFailure",
+    "SurrogateDecision",
+    "ValidatedSurrogate",
+    "build_validated_surrogate",
+    "evaluate_with_surrogate",
+    "manufactured_solution_refinement",
+    "prepare_reference_study",
+    "run_bayesian_inversion",
+    "solve_reference_fem",
+    "solve_reference_forward",
+    "with_coupling_mode",
     "solve_poisson",
     "solve_p1_poisson_canonical",
     "solve_sim_linear_system",
