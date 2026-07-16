@@ -247,6 +247,45 @@ CAPABILITY_INVENTORY: tuple[SolverProfile, ...] = (
         limitations=("single-process only: no MPI, multiprocessing, or distributed execution path",),
     ),
     SolverProfile(
+        module="mixle_pde.buckley_leverett",
+        category="fluid_flow",
+        is_solver=True,
+        method=(
+            "1-D immiscible two-phase (water-oil) displacement through a porous column: the Corey "
+            "fractional-flow closure, the Welge shock-front construction, the exact self-similar "
+            "analytic profile, and a first-order upwind finite-difference march (MP-H6)."
+        ),
+        dimension=("1D",),
+        grid_type="structured 1D finite-volume grid",
+        boundary_conditions=("dirichlet_injection_saturation", "outflow_zero_gradient"),
+        differentiable=False,
+        complex_support=False,
+        time_regime="transient",
+        parallel_status="single_process",
+        verification_level="analytic_reference_checked",
+        public_symbols=(
+            "CoreyFractionalFlow",
+            "WelgeShock",
+            "welge_shock_front",
+            "BuckleyLeverettAnalytic",
+            "buckley_leverett_analytic",
+            "BuckleyLeverettResult",
+            "solve_buckley_leverett_upwind",
+        ),
+        limitations=(
+            "gravity and capillary pressure are neglected (the classical Buckley & Leverett 1942 "
+            "assumptions); a different governing equation would be needed to include them",
+            "the closed-form analytic profile only covers the standard waterflood regime where "
+            "injection_saturation is at or above the Welge shock saturation; a lower injection "
+            "saturation needs a different wave structure and is rejected rather than mis-evaluated",
+            "first-order upwind scheme only: no higher-order (MUSCL/WENO) reconstruction, so the "
+            "displacement front is smeared over several cells at the documented ~first-order rate",
+            "1-D homogeneous porous column only: no heterogeneity, 2-D/3-D geometry, or compressibility",
+            "no torch-backed autograd path detected; gradients (if needed) require external finite differences",
+            "single-process only: no MPI, multiprocessing, or distributed execution path",
+        ),
+    ),
+    SolverProfile(
         module="mixle_pde.canonical_adapter",
         category="fem_pde_core",
         is_solver=True,
@@ -519,6 +558,47 @@ CAPABILITY_INVENTORY: tuple[SolverProfile, ...] = (
         limitations=(
             "no torch-backed autograd path detected; gradients (if needed) require external finite differences",
             "single-process only: no MPI, multiprocessing, or distributed execution path",
+        ),
+    ),
+    SolverProfile(
+        module="mixle_pde.drift_monitor",
+        category="surrogate_modeling",
+        is_solver=False,
+        method=(
+            "Generic streaming drift monitor for a fitted surrogate/emulator's live prediction error: "
+            "a rolling-mean-vs-calibration-bound statistic with a consecutive-exceedance persistence "
+            "rule, plus adapters that reuse mixle_pde.surrogate/qoi_emulator/operator_surrogate's own "
+            "calibration bounds verbatim (MP-N6 remainder)."
+        ),
+        dimension=("not_applicable",),
+        grid_type="not_applicable",
+        boundary_conditions=("not_applicable",),
+        differentiable=False,
+        complex_support=False,
+        time_regime="not_applicable",
+        parallel_status="single_process",
+        verification_level="unit_tested_only",
+        public_symbols=(
+            "Predictor",
+            "DriftAlert",
+            "DriftMonitor",
+            "SurrogateCalibrationView",
+            "QoIEmulatorCalibrationView",
+            "OperatorSurrogateCalibrationView",
+        ),
+        limitations=(
+            "a single rolling-mean-vs-bound statistic with a consecutive-exceedance persistence rule "
+            "only: no CUSUM/Page-Hinkley/ADWIN change-point machinery and no multivariate drift localization",
+            "detects and reports only; no automatic retraining/rollback action (MP-N8 remains separate, "
+            "unclaimed work)",
+            "never fits, calibrates, or re-validates the wrapped surrogate/emulator itself -- "
+            "calibration_bound is trusted verbatim from whatever calibration step the family's own "
+            "module already ran",
+            "the three *CalibrationView adapters cover exactly this package's three existing "
+            "surrogate/emulator families (Surrogate, the qoi_emulator GP/Bayesian-polynomial pair, "
+            "LinearOperatorSurrogate); a new predictor family needs its own Predictor-satisfying adapter",
+            "single-process only: no MPI, multiprocessing, or distributed execution path",
+            "covered by unit tests only; no analytic, manufactured-solution, or external reference check is recorded against it",
         ),
     ),
     SolverProfile(
