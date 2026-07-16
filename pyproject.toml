@@ -26,6 +26,16 @@ test = ["pytest>=8", "pytest-xdist", "torch"]
 lint = ["ruff==0.15.17"]
 docs = ["sphinx>=7", "furo"]
 
+# Cross-repo reference-pipeline verification (tests/multiphysics_pipeline_integration_test.py):
+# exercises the composite-heat scenario through mixle-physics (spec) -> mixle-sim (compilation)
+# -> mixle-pde (execution, this repo) -> mixle-numerics (independent evidence verification).
+# Depends on mixle-sim's own `integration` extra rather than re-declaring mixle-physics/
+# mixle-numerics directly, so that extra is the one place the physics/numerics version pins live.
+# Never required to import mixle_pde or to run any other test in this suite; a base install (zero
+# extras) still passes the full suite minus this one file, which self-skips via
+# `pytest.importorskip` when these siblings are absent.
+integration = ["mixle-sim[integration]>=0.8.0.dev0"]
+
 # Field-data ingest formats (workstream B): each is a single lazy-imported backend behind one
 # `mixle_pde.io.*` (or `mixle_pde.env_data` / `mixle_pde.reductions`) module. `data` is the
 # convenience bundle referenced by mixle_pde.io.assays/gis error messages.
