@@ -2278,6 +2278,37 @@
       "boundary_conditions": [
         "not_applicable"
       ],
+      "category": "surrogate_modeling",
+      "complex_support": false,
+      "differentiable": false,
+      "dimension": [
+        "not_applicable"
+      ],
+      "grid_type": "not_applicable",
+      "is_solver": false,
+      "limitations": [
+        "snapshot-only POD; no Galerkin-projected operator, hyper-reduction, or transient reduced state-space integration",
+        "held-out reconstruction error is an approximation check, not verified physical evidence",
+        "single-process only: no MPI, multiprocessing, or distributed execution path"
+      ],
+      "method": "Proper orthogonal decomposition basis fitting, projection, reconstruction, and held-out error certification.",
+      "module": "mixle_pde.reduced_basis",
+      "parallel_status": "single_process",
+      "public_symbols": [
+        "PODBasis",
+        "ReducedBasisError",
+        "build_pod_basis",
+        "project",
+        "reconstruct",
+        "reduced_basis_error"
+      ],
+      "time_regime": "not_applicable",
+      "verification_level": "analytic_reference_checked"
+    },
+    {
+      "boundary_conditions": [
+        "not_applicable"
+      ],
       "category": "environmental_applied",
       "complex_support": false,
       "differentiable": true,
