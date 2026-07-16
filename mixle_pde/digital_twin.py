@@ -180,5 +180,5 @@ def build_twin(
     mean = prior.mean_vector(grid)
     precision = prior.precision(grid)
     cov = np.linalg.inv(precision + 1.0e-9 * np.eye(grid.n))
-    state = PosteriorField3D(grid=grid, mean=mean, map=mean.copy(), dense_cov=cov)
+    state = PosteriorField3D(grid=grid, mean=mean, map=mean.copy(), cov=cov)
     return DigitalTwin(grid=grid, registry=registry, prior=prior, state=state, process_var=process_var)
