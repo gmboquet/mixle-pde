@@ -112,9 +112,23 @@ def test_solver_axes_are_never_empty_or_none():
         assert profile.method, profile.module
 
 
+#: mixle_pde.mcmc_parallel (MP-I9) genuinely dispatches independent chains across OS worker
+#: processes via joblib -- see tests/mcmc_parallel_test.py's pid-diversity assertion for the direct
+#: proof. Every other module remains single_process; this set exists so that one honest exception
+#: does not get lost in an otherwise-blanket assertion, and so a future module cannot silently claim
+#: "multi_process" without this test naming it explicitly.
+_MULTI_PROCESS_MODULES = {"mixle_pde.mcmc_parallel"}
+
+
 def test_parallel_status_is_reported_for_every_module():
-    """Repo-wide finding: no MPI/multiprocessing anywhere in mixle_pde today; must say so, not omit it."""
-    assert all(p.parallel_status == "single_process" for p in CAPABILITY_INVENTORY)
+    """Repo-wide finding: no MPI/bare multiprocessing anywhere in mixle_pde except the one named,
+    tested exception; every module must say so, not omit it."""
+    for profile in CAPABILITY_INVENTORY:
+        assert profile.parallel_status in ("single_process", "multi_process"), profile.module
+        expected = "multi_process" if profile.module in _MULTI_PROCESS_MODULES else "single_process"
+        assert profile.parallel_status == expected, profile.module
+    registered_multi_process = {p.module for p in CAPABILITY_INVENTORY if p.parallel_status == "multi_process"}
+    assert registered_multi_process == _MULTI_PROCESS_MODULES
 
 
 def test_get_profile_round_trips_and_rejects_unknown_module():

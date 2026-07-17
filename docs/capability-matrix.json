@@ -1671,6 +1671,37 @@
     },
     {
       "boundary_conditions": [
+        "not_applicable"
+      ],
+      "category": "bayesian_field_inference",
+      "complex_support": false,
+      "differentiable": false,
+      "dimension": [
+        "not_applicable"
+      ],
+      "grid_type": "not_applicable",
+      "is_solver": false,
+      "limitations": [
+        "joblib is an optional dependency (extra: parallel); a zero-extras install raises a clear ImportError naming the extra rather than falling back silently",
+        "chosen over stdlib multiprocessing/concurrent.futures because this repo's real ForwardOperator registrations (mixle_pde.observations) are built from closures that plain pickle cannot send to a spawned worker process; joblib's loky backend uses cloudpickle -- see the module docstring for the direct empirical check",
+        "does not implement mpi4py or any distributed-memory (multi-node) execution -- docs/adr/0001-mp-a4-backend-selection.md explicitly defers standalone mpi4py for this exact workload class",
+        "does not compute convergence diagnostics itself (no import from mixle_pde.verification, matching the one-way dependency direction every other top-level module already keeps); a caller composes with mixle_pde.verification.mcmc_diagnostics separately",
+        "parallelizes chains, not a single chain's own internal solve -- no chain ever sees another chain's state, so this does not add distributed-memory parallelism within one PDE solve",
+        "a freshly spawned worker pool pays a one-time cost (this repo's own transitive import graph, unrelated to this module) before any speedup is visible; only amortized across a long-lived pool, not a single one-shot call"
+      ],
+      "method": "Opt-in multi-process dispatch of N independent mixle_pde.field_mcmc chains (any of metropolis_field_invert/pcn_field_invert/mala_field_invert/hmc_field_invert) via joblib's loky backend, one seed (numpy SeedSequence.spawn child) per chain; pools per-chain draws into one PosteriorFieldSamples3D and exposes each chain's own posterior in the shape mixle_pde.verification.mcmc_diagnostics.chains_from_posterior_samples expects (MP-I9 parallel-execution slice).",
+      "module": "mixle_pde.mcmc_parallel",
+      "parallel_status": "multi_process",
+      "public_symbols": [
+        "ChainResult",
+        "MultiChainResult",
+        "run_parallel_chains"
+      ],
+      "time_regime": "not_applicable",
+      "verification_level": "unit_tested_only"
+    },
+    {
+      "boundary_conditions": [
         "absorbing/PML"
       ],
       "category": "fem_pde_core",
