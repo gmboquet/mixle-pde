@@ -912,6 +912,8 @@ CAPABILITY_INVENTORY: tuple[SolverProfile, ...] = (
             "pcn_field_invert",
             "mala_field_invert",
             "hmc_field_invert",
+            "NUTSReport",
+            "nuts_field_invert",
         ),
         limitations=("single-process only: no MPI, multiprocessing, or distributed execution path",),
     ),
