@@ -16,6 +16,13 @@ running the solver and looking at exit codes:
 Every accepted continuation step is additionally re-verified to be a genuine root (residual below
 ``tol``), not merely a point the stepper happened to land on -- the same "receipt, not a fabricated
 converged" bar the module's docstrings commit to.
+
+MP-F2's Jacobian-free Newton-Krylov corrector (``corrector="jfnk"``) is held to the same fold-crossing
+bar as the default dense corrector (``test_arclength_continuation_jfnk_crosses_the_fold_and_matches_reference``),
+plus a direct step-by-step cross-check against the dense corrector on the identical scenario
+(``test_arclength_continuation_jfnk_matches_dense_corrector_pointwise``) -- the two are alternative
+linear-solve strategies for the same augmented nonlinear system and must land on the same branch, not
+merely agree on the headline fold number.
 """
 
 from __future__ import annotations
@@ -130,6 +137,117 @@ def test_arclength_continuation_crosses_the_fold_and_matches_reference():
     fold_amplitude = float(np.max(np.abs(accepted[fold_index].u)))
     end_amplitude = float(np.max(np.abs(accepted[-1].u)))
     assert end_amplitude > fold_amplitude * 1.5
+
+
+def test_arclength_continuation_jfnk_crosses_the_fold_and_matches_reference():
+    # Same scenario, tolerances, and assertions as
+    # test_arclength_continuation_crosses_the_fold_and_matches_reference above, with corrector="jfnk"
+    # in place of the default "dense": the matrix-free Jacobian-free Newton-Krylov corrector must clear
+    # the identical acceptance bar the dense bordered-Jacobian corrector already clears (MP-F2).
+    problem = bratu_problem(_N)
+    u0 = np.zeros(_N)
+    _theta_c, lambda_c = bratu_reference_fold()
+
+    receipt = arclength_continuation(problem, u0, lam0=0.0, ds=0.05, n_steps=400, corrector="jfnk")
+
+    assert receipt.crossed_fold is True
+    accepted = [step for step in receipt.steps if step.accepted]
+    assert len(accepted) == len(receipt.steps), "jfnk arclength continuation should not have rejected steps here"
+    for step in accepted:
+        assert step.newton.residual_history[-1] < 1e-9
+
+    lambda_values = [step.parameter for step in accepted]
+    lambda_max = max(lambda_values)
+
+    assert lambda_max == pytest.approx(lambda_c, abs=1e-2)
+    assert lambda_values[-1] < lambda_max
+    fold_index = lambda_values.index(lambda_max)
+    fold_amplitude = float(np.max(np.abs(accepted[fold_index].u)))
+    end_amplitude = float(np.max(np.abs(accepted[-1].u)))
+    assert end_amplitude > fold_amplitude * 1.5
+
+
+def test_arclength_continuation_jfnk_matches_dense_corrector_pointwise():
+    # The direct MP-F2 cross-check the task requires: the matrix-free JFNK corrector must trace the
+    # same branch as the full-Jacobian dense corrector it is an alternative to -- not merely agree on
+    # the final fold location, but land on the same (u, lambda) at every single accepted step, since
+    # both are Newton-correcting the identical augmented system from the identical predictor point.
+    problem = bratu_problem(_N)
+    u0 = np.zeros(_N)
+
+    dense = arclength_continuation(problem, u0, lam0=0.0, ds=0.05, n_steps=400, corrector="dense")
+    jfnk = arclength_continuation(problem, u0, lam0=0.0, ds=0.05, n_steps=400, corrector="jfnk")
+
+    assert dense.crossed_fold is True
+    assert jfnk.crossed_fold is True
+    assert dense.stopped_reason == jfnk.stopped_reason
+
+    dense_accepted = [step for step in dense.steps if step.accepted]
+    jfnk_accepted = [step for step in jfnk.steps if step.accepted]
+    assert len(dense_accepted) == len(jfnk_accepted)
+
+    max_u_diff = max(float(np.max(np.abs(sd.u - sj.u))) for sd, sj in zip(dense_accepted, jfnk_accepted))
+    max_lambda_diff = max(abs(sd.parameter - sj.parameter) for sd, sj in zip(dense_accepted, jfnk_accepted))
+    # Both correctors converge the same augmented residual to the same 1e-9 tolerance from the same
+    # predictor point every step, so they should agree far tighter than that -- 1e-6 leaves comfortable
+    # headroom above the ~1e-12 agreement actually observed while still being a real, meaningful bound.
+    assert max_u_diff < 1e-6
+    assert max_lambda_diff < 1e-6
+
+    dense_lambda_max = max(step.parameter for step in dense_accepted)
+    jfnk_lambda_max = max(step.parameter for step in jfnk_accepted)
+    assert jfnk_lambda_max == pytest.approx(dense_lambda_max, abs=1e-6)
+
+
+def test_arclength_continuation_rejects_unknown_corrector():
+    problem = bratu_problem(_N)
+    u0 = np.zeros(_N)
+    with pytest.raises(ValueError):
+        arclength_continuation(problem, u0, lam0=0.0, ds=0.05, n_steps=1, corrector="bogus")
+
+
+def test_arclength_continuation_jfnk_reports_max_iterations_exceeded():
+    problem = bratu_problem(_N)
+    u0 = np.zeros(_N)  # u=0 is an exact root at lambda=0, so the initial point converges even with
+    # max_iterations=0; the first predicted step off that root is not itself a root, so the jfnk
+    # corrector's Newton loop -- capped at zero iterations -- must give up honestly rather than
+    # fabricate convergence.
+
+    receipt = arclength_continuation(problem, u0, lam0=0.0, ds=0.05, n_steps=1, max_iterations=0, corrector="jfnk")
+
+    assert receipt.stopped_reason == "newton_failed"
+    rejected = [step for step in receipt.steps if not step.accepted]
+    assert rejected
+    assert rejected[0].newton.converged is False
+    assert rejected[0].newton.failure_reason == "max_iterations_exceeded"
+
+
+def test_arclength_continuation_jfnk_reports_non_finite_residual():
+    # log(u) is non-finite over the entire u <= 0 half-line, not only at a single point, so a
+    # deliberately oversized first step reliably lands the jfnk corrector's very first residual
+    # evaluation in that region without needing to hit an exact singularity.
+    def residual(u, lam):
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return np.array([np.log(u[0]) - lam])
+
+    def jac_u(u, lam):
+        return np.array([[1.0 / u[0]]])
+
+    problem = ParametricProblem(
+        residual=residual,
+        jac_u=jac_u,
+        jac_lambda=lambda u, lam: np.array([-1.0]),
+        n=1,
+        name="log_blowup",
+    )
+    u0 = np.array([1.0])  # log(1) - 0 == 0: an exact root at lambda=0, so the tangent is well-defined.
+
+    receipt = arclength_continuation(problem, u0, lam0=0.0, ds=2.0, n_steps=1, direction=-1.0, corrector="jfnk")
+
+    rejected = [step for step in receipt.steps if not step.accepted]
+    assert rejected
+    assert rejected[0].newton.converged is False
+    assert rejected[0].newton.failure_reason == "non_finite_residual"
 
 
 def test_newton_solve_reports_singular_jacobian_not_fabricated_success():
