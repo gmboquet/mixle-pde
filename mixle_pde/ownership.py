@@ -39,6 +39,7 @@ _CORE_MODULES = {
     "field_inversion",
     "field_mcmc",
     "field_priors",
+    "field_smc",
     "inverse",
     "latent",
     "linear_solve",
