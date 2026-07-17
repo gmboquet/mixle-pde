@@ -193,9 +193,10 @@ def two_ray_pattern(
     A transmitter at height ``ht`` and a receiver at height ``hr`` separated by horizontal range ``d`` over a
     flat ground plane. The receiver sees a direct ray of length ``r_d = sqrt(d^2 + (ht - hr)^2)`` and a
     ground-reflected ray of length ``r_r = sqrt(d^2 + (ht + hr)^2)`` carrying the ground reflection coefficient
-    ``Gamma`` (``-1`` for a perfect conductor at grazing). Summing the two complex ``exp(-j k r)/r`` amplitudes,
+    ``Gamma`` (``-1`` for a perfect conductor at grazing). Summing the two complex ``exp(-j k r)/r`` amplitudes
+    gives
 
-        P(hr) = | e^{-j k r_d}/r_d + Gamma e^{-j k r_r}/r_r |^2.
+        ``P(hr) = abs(exp(-1j*k*r_d)/r_d + Gamma*exp(-1j*k*r_r)/r_r)**2``.
 
     Nulls occur where the two paths are ``pi`` out of phase. For ``d >> ht, hr`` the path difference is
     ``r_r - r_d ~ 2 ht hr / d``, so with ``Gamma = -1`` the pattern ``~ sin^2(2 pi ht hr / (lambda d))`` has

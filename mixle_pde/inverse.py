@@ -78,6 +78,7 @@ class _DifferentialProxy(Proxy):
         scale,
         family,
         misfit_fn=None,
+        model_error=None,
         prefix="diff",
     ):
         self.complex = np.iscomplexobj(np.asarray(y))
@@ -88,6 +89,7 @@ class _DifferentialProxy(Proxy):
         self.over_name = over_name
         self.family = family
         self.misfit_fn = misfit_fn
+        self.model_error = model_error
         self.prefix = prefix
         if misfit_fn is not None:
             if family != "gaussian":
@@ -124,6 +126,7 @@ class _DifferentialProxy(Proxy):
             rate = torch.clamp(pred, min=1e-12)
             return torch.sum(y * torch.log(rate) - rate)
         scale = params[self._scale_name] if self._scale_name is not None else self._scale_fixed
+        scale = self._inflate_scale(scale, torch)
         log_scale = torch.log(scale) if torch.is_tensor(scale) else float(np.log(scale))
         if self.misfit_fn is not None:  # replace the L2 data term with a cycle-skip-robust misfit
             d = self._apply_misfit(pred, y, torch)
@@ -133,6 +136,16 @@ class _DifferentialProxy(Proxy):
             sq = resid.real**2 + resid.imag**2
             return -0.5 * torch.sum(sq) - y.numel() * (2.0 * log_scale + np.log(np.pi))
         return -0.5 * torch.sum(resid * resid) - y.numel() * (log_scale + 0.5 * np.log(2 * np.pi))
+
+    def _inflate_scale(self, scale, torch):
+        """Fold the fixed ``model_error`` (a theory-error std, not a fitted parameter) into ``scale``:
+        the effective Gaussian variance becomes ``scale**2 + model_error**2`` (work-plan A4)."""
+        if self.model_error is None:
+            return scale
+        me_sq = self.model_error * self.model_error
+        if torch.is_tensor(scale):
+            return torch.sqrt(scale * scale + me_sq)
+        return float(np.sqrt(scale * scale + me_sq))
 
     def _apply_misfit(self, pred, y, torch):
         """Sum the misfit functional over traces: the whole 1D trace, or each row of a 2D gather (axis 0)."""
@@ -157,6 +170,7 @@ class _DifferentialProxy(Proxy):
         solution = self.forward(p, ops)
         pred = self.observe(solution, p, ops) if self.observe is not None else solution
         scale = params[self._scale_name] if self._scale_name is not None else self._scale_fixed
+        scale = self._inflate_scale(scale, torch)
         resid = (torch.as_tensor(self.y) - pred) / scale
         if self.complex:  # stack real/imag so the Gauss-Newton Jacobian stays real
             return torch.cat([resid.real, resid.imag])
@@ -177,6 +191,7 @@ def Differential(
     scale: Any = 1.0,
     family: str = "gaussian",
     misfit: Any = None,
+    model_error: float | None = None,
 ) -> tuple:
     """An observation whose forward model is an ODE/PDE solve; recovers a posterior over the drivers.
 
@@ -196,6 +211,12 @@ def Differential(
     functional rather than a residual vector, ``how='gauss_newton'`` is unavailable with it; fit with
     ``how='map'``, ``'laplace'``, or ``'vi'``. For a non-unit sample step pass a callable, e.g.
     ``misfit=lambda p, o: xcorr_traveltime_misfit(p, o, dt=0.004)``.
+
+    ``model_error`` is a fixed theory-error standard deviation (not a fitted parameter): when given, the
+    effective Gaussian scale used to score the fit becomes ``sqrt(scale**2 + model_error**2)`` instead of
+    ``scale`` alone, so a known systematic bias in ``forward``/``rhs`` (a mis-specified operator) widens
+    the posterior rather than leaving it overconfident around a biased estimate. Only valid for
+    ``family='gaussian'``; default ``None`` reproduces today's result exactly.
     """
     if family not in ("gaussian", "poisson"):
         raise ValueError("family must be 'gaussian' or 'poisson'.")
@@ -205,6 +226,11 @@ def Differential(
         raise ValueError("an initial-value rhs needs y0 and t_grid.")
     if misfit is not None and family != "gaussian":
         raise ValueError("misfit is only supported for family='gaussian'.")
+    if model_error is not None:
+        if family != "gaussian":
+            raise ValueError("model_error is only supported for family='gaussian'.")
+        if model_error < 0.0:
+            raise ValueError("model_error must be non-negative.")
     misfit_fn = _resolve_misfit(misfit)
 
     from mixle.ppl.field import GaussianField
@@ -234,5 +260,6 @@ def Differential(
         scale=scale,
         family=family,
         misfit_fn=misfit_fn,
+        model_error=model_error,
     )
     return field, proxy

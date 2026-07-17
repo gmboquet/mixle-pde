@@ -75,7 +75,12 @@ class NavierStokes3D:
         """Assemble ``L = sum_axis D_axis(D_axis(.))`` where ``D_axis`` is the exact ops.grad central stencil.
 
         Returned as ``(rows, cols, vals, n)`` for :func:`ops.sparse_solve`; a small Tikhonov term pins the
-        wide-stencil null space so the sparse LU is well posed. Built once (fixed pattern; not the latent)."""
+        wide-stencil null space so the sparse LU is well posed. Built once (fixed pattern; not the latent).
+
+        The COO pattern for each ``D_axis`` comes from one vectorized broadcast over the grid -- a `meshgrid`
+        of node indices, an interior mask for the two stencil offsets, and flat-index arithmetic -- with no
+        Python loop over the ``n**3`` nodes, so this scales to survey-size 3-D grids (see ``c6_scale_test.py``).
+        """
         import scipy.sparse as sp
         import torch
 
@@ -83,21 +88,24 @@ class NavierStokes3D:
 
         def diff_matrix(axis):
             # ops.grad along ``axis``: out[mid] = (a[+1] - a[-1]) / (2h); the two edge slabs are left at zero.
-            rows, cols, vals = [], [], []
-            for i in range(n):
-                for j in range(n):
-                    for k in range(n):
-                        idx = [i, j, k]
-                        if idx[axis] in (0, n - 1):
-                            continue
-                        r = (i * n + j) * n + k
-                        hi = idx.copy()
-                        hi[axis] += 1
-                        lo = idx.copy()
-                        lo[axis] -= 1
-                        rows += [r, r]
-                        cols += [(hi[0] * n + hi[1]) * n + hi[2], (lo[0] * n + lo[1]) * n + lo[2]]
-                        vals += [1.0 / (2.0 * h), -1.0 / (2.0 * h)]
+            ii, jj, kk = np.meshgrid(np.arange(n), np.arange(n), np.arange(n), indexing="ij")
+            coord = (ii, jj, kk)[axis]
+            interior = (coord != 0) & (coord != n - 1)
+
+            def flat(a, b, c):
+                return (a * n + b) * n + c
+
+            r = flat(ii, jj, kk)[interior]
+            hi = [ii, jj, kk]
+            lo = [ii, jj, kk]
+            hi = [hi[d] + 1 if d == axis else hi[d] for d in range(3)]
+            lo = [lo[d] - 1 if d == axis else lo[d] for d in range(3)]
+            c_hi = flat(*hi)[interior]
+            c_lo = flat(*lo)[interior]
+
+            rows = np.concatenate([r, r])
+            cols = np.concatenate([c_hi, c_lo])
+            vals = np.concatenate([np.full(r.size, 1.0 / (2.0 * h)), np.full(r.size, -1.0 / (2.0 * h))])
             return sp.csr_matrix((vals, (rows, cols)), shape=(N, N))
 
         L = sum(D @ D for D in (diff_matrix(a) for a in range(3)))

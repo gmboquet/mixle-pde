@@ -2,6 +2,10 @@
 
 PDE and ODE-constrained Bayesian inverse problems for [mixle](https://github.com/gmboquet/mixle).
 
+For `0.8.0`, this repository is also the integrated compatibility profile for Mixle Physics, Simulation, and
+Discrete artifacts. Existing solvers remain available; new canonical adapters expose explicit capability,
+conversion, residual, parity, and migration receipts rather than turning this package into a second semantic owner.
+
 mixle-pde is a `mixle.ppl` plugin. Importing it wires a stack of differentiable forward solvers and
 PDE-constrained state-space models into mixle's probabilistic-programming surface through mixle's
 extension hooks. It never patches mixle: the plugin depends on mixle, not the reverse.
@@ -19,7 +23,56 @@ mixle-pde installs into an environment that already has mixle (which brings torc
 ```bash
 pip install -e .            # from a checkout
 pip install -e ".[test]"    # with the test extras
+pip install -e ".[docs]"    # with the docs extras
 ```
+
+A base install (zero extras) imports `mixle_pde` and runs the `mixle_pde.problem_adapter`
+compatibility-boundary tests with no optional backend present -- every heavy dependency below is a
+lazy, guarded import behind the module that needs it, never a hard requirement of the package.
+
+### Optional extras
+
+mixle-pde is the batteries-included PDE deployment profile: capability-family extras layer
+solver accelerators and differentiable backends on top of the numpy/scipy/pyproj base, and
+data-format extras layer geoscience file-format ingest. Mix and match; none is required by the
+others or by the core test suite.
+
+| Extra | Unlocks |
+| --- | --- |
+| `fem` | AMG (`pyamg`) and CHOLMOD (`scikit-sparse`) accelerators for large assembled FEM/simplex systems |
+| `mesh` | AMG preconditioning (`pyamg`) for mesh-scale assembled linear systems |
+| `mpi` | Forward-declared distributed mesh/solve transport (`mpi4py`); no backend is wired to it yet |
+| `fvm` | Differentiable finite-volume forwards (`torch`) plus AMG scale-up (`pyamg`) |
+| `coupling` | Differentiable coupled/multiphysics forwards (`torch`) |
+| `inverse` | Differentiable adjoints, randomized-SVD low-rank UQ, and sparse-scale posterior solves (`torch`, `scikit-learn`, `pyamg`, `scikit-sparse`) |
+| `surrogate` | Neural surrogate distillation and calibration (`torch`, `scikit-learn`) |
+| `all` | The union of the seven capability extras above |
+| `raster` / `netcdf` / `grib` / `segy` / `las` / `potfield` | Single-format geoscience data ingest (`mixle_pde.io.*`, `mixle_pde.env_data`, `mixle_pde.reductions`) |
+| `data` | Convenience bundle of every data-format backend above |
+
+```bash
+pip install -e ".[fem]"
+pip install -e ".[inverse,surrogate]"
+pip install -e ".[all]"
+```
+
+Commercial/optional adapters (e.g. the sibling `mixle_mlops` task-cascade integration
+`mixle_pde.surrogate` can optionally bind to) are never declared as a dependency of any extra and
+are never required to install or test mixle-pde.
+
+## Documentation
+
+The Sphinx manual starts at [`docs/index.rst`](docs/index.rst). It includes installation notes, the
+package map, solver/API navigation, validation guidance, generated API reference pages, and the
+release-facing 3D/4D field modeling guide.
+
+```bash
+make -C docs html SPHINXOPTS="-W --keep-going"
+```
+
+Release notes and the current changelog are in
+[`docs/release-notes.rst`](docs/release-notes.rst) and
+[CHANGELOG.md](CHANGELOG.md).
 
 ## Quickstart
 
@@ -83,6 +136,11 @@ model = PDE(DiffusionOperator(0.1, n)).fit(field_snapshots, dt=0.1)
 
 ## Solver catalog
 
+Release-facing documentation for the new 3D/4D field posterior stack lives in
+[`docs/0.6.x-field-modeling.md`](docs/0.6.x-field-modeling.md). It covers
+latent fields, observations, priors, inversion, assimilation, geoscience
+likelihoods, posterior queries, posterior calibration diagnostics, meshes, and readiness checks.
+
 ### Forward solvers
 
 All are differentiable through the `ops` backend and each ships with a test that checks it against an
@@ -107,6 +165,50 @@ More equations live in their own modules: `gas_dynamics` (1D compressible Euler 
 solver), `schrodinger` (time-dependent Schrodinger, split-step Fourier), `spectral_flow` (pseudo-spectral
 2D/3D Navier-Stokes with an optional Smagorinsky LES closure), `wave_pml` (2D acoustic wave with a
 perfectly-matched-layer boundary), and `fem` (P1 triangular finite elements for Poisson).
+
+The reusable mesh layer is `SimplexMesh`: `box_simplex_mesh` creates deterministic simplex meshes in any
+dimension, `delaunay_mesh` wraps SciPy Delaunay for scattered point clouds, and `space_time_mesh` extrudes a
+3D tetrahedral mesh through time into a 4D simplex mesh. This is the geometry foundation for moving-domain
+and transient finite-element work; adaptive remeshing, ALE/FSI coupling, and curved/high-order elements are
+still future solver work.
+
+The 3D/4D Earth posterior surface is modular. `Field3D` and `PosteriorField3D` represent one gridded
+physical property with units, optional bounds, posterior mean/MAP, covariance, credible intervals, and
+sampling. `Observation`, `ForwardOperator`, and `ForwardOperatorRegistry` provide a common geometry/noise/
+provenance contract for measurements; the built-in registry operators cover gravity, magnetics, and direct
+borehole/sensor samples. `FieldGaussianPrior` supplies graph-Matern smoothness, `linear_gaussian_invert`
+performs exact linear-Gaussian inversion, and `gauss_newton_invert` adds bounded MAP/Laplace inversion for
+properties such as porosity, susceptibility, or concentration. `dc_resistivity_forward_operator` wraps the
+existing DC/ERT forward as a nonlinear log-conductivity observation with local finite-difference
+sensitivities for Gauss-Newton posterior construction.
+`layered_mt_forward_operator`, `aem_layered_forward_operator`, `mt_2d_te_forward_operator`,
+`mt_3d_forward_operator`, and `csem_3d_forward_operator` do the same for 1D layered MT/AEM, 2D
+TE-mode, 3D curl-curl magnetotelluric, and 3D controlled-source EM soundings, mapping
+log-conductivity to real-valued geophysical observations.
+
+`sparse_linear_gaussian_invert` stores a linear-Gaussian posterior in sparse precision-factor form,
+using sparse covariance solves for marginals and linear derived quantities without retaining a dense
+covariance matrix. `PosteriorField4D`, `assimilate_4d`, and `assimilate_4d_ensemble` add a time axis through exact
+Kalman/RTS smoothing for linear observations and ensemble Kalman filtering for nonlinear observations,
+exposing each time slice as an ordinary `PosteriorField3D`. `FieldGaussianPrior` can
+assemble either dense or sparse CSR graph precision matrices. `depth_weights`,
+`depth_weighted_marginal_precision`, `depth_weighted_marginal_precision_sparse`, `CrossPropertyPrior`, and
+`joint_linear_gaussian_invert` provide depth-aware priors and cross-property coupling so observations of
+one property can regularize another.
+`GeochemAssay`, `MultiElementAssay`, `assay_log_likelihood`, `multi_element_assay_log_likelihood`,
+`additive_log_ratio`, `BiostratConstraint`, and `biostrat_log_likelihood` add geochemical
+detection-limit/compositional likelihoods, multi-element covariance/batch effects, and fossil range-zone
+constraints. `GeochronologyAge`, `StratigraphicCorrelation`, and `FaciesIntervalConstraint` add isotopic
+age measurements, relative-age/horizon constraints, and facies/environment interval evidence. These
+likelihoods can be converted into field observations where a project defines the property mapping.
+`posterior_query` extracts point/section/region marginals, linear derived quantities such as total anomalous
+mass, low-rank or diagonal Gaussian summaries, and ensemble samples. `posterior_calibration` measures
+synthetic-truth coverage, held-out observation fit, uncertainty inflation away from data, and
+insufficient-observation flags. Full reaction-path geochemistry,
+paleoecological/basin-process simulators, full truncated multivariate censoring for multi-element assays,
+production-scale adjoint sensitivities, iterative sparse posterior solvers, and full airborne loop/flight-line
+AEM geometry remain future validated kernels. The ensemble 4D path is a stochastic
+Gaussian-summary reference, not a production particle/MCMC smoother.
 
 ### Inverse and inference layer
 
@@ -181,6 +283,47 @@ World Ocean Atlas / Argo, DEM, and ERA5 data behind an optional extra.
 `JointPotentialField`, `SpatialFieldStore`, and `MechanisticFieldReasoner` fuse geophysical modalities
 into a spatial belief with uncertainty, feeding mixle's `reason` surface.
 
+### Modeling readiness
+
+Applications should not infer solver availability from imports or README claims. The package exposes a
+small capability catalog and deterministic readiness checks:
+
+```python
+from mixle_pde import readiness_report, assert_required_modeling
+
+print(readiness_report())
+assert_required_modeling()
+```
+
+Canonical callers should additionally inspect `native_backend_manifest()` and may use
+`solve_p1_poisson_canonical()` for the first legacy-compatible, receipt-bearing FEM migration path.
+
+The required modeling gate currently checks:
+
+- 3D tetrahedral meshes, direct 4D simplex meshes, and 3D-to-4D space-time extrusion.
+- Censored geochemical assay likelihoods, compositional transforms, biostratigraphic range-zone likelihoods,
+  geochronology age likelihoods, stratigraphic correlation constraints, and facies/environment intervals with
+  provenance and units.
+- The common observation/forward-operator contract for gravity, magnetics, and borehole/sensor samples.
+- Exact 3D linear-Gaussian field inversion and bounded-field Gauss-Newton MAP/Laplace inversion.
+- Nonlinear DC/ERT log-conductivity posterior observations through the Gauss-Newton path.
+- 4D random-walk Kalman assimilation plus RTS smoothing, and ensemble nonlinear 4D assimilation, with
+  posterior time-slice extraction.
+- Depth weighting, graph-Matern smoothness, and cross-property Gaussian coupling.
+- Posterior extraction for points, regions/volumes, sections, linear derived quantities, low-rank/diagonal
+  summaries, and ensemble samples.
+- Posterior calibration diagnostics for truth coverage, held-out fit, uncertainty inflation, and insufficient
+  observations.
+- PDE-constrained state-space smoothing and forecasting.
+- Transient diffusion / heat-equation decay against a discrete analytical rate.
+- Potential-field geophysics sign and linearity.
+- Mechanistic field reconstruction from sparse sensors.
+- 2D acoustic wave propagation stability.
+
+These checks are intentionally cheap smoke-and-physics scenarios. They do not replace the full analytic
+test suite; they give applications and CI a quick answer to "is the required modeling surface actually
+present and runnable in this environment?"
+
 ## How it works
 
 Every solver and inverse callback talks to a single `ops` namespace (`mixle_pde/ops.py`): a float64
@@ -195,6 +338,7 @@ directly, a forward solver is differentiable end to end, which is exactly what l
 ```bash
 pytest                              # the full suite (-n auto via pyproject)
 pytest tests/wave3d_test.py -q      # one file
+pytest tests/capabilities_test.py -q
 ```
 
 ## License

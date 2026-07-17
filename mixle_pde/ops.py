@@ -3,7 +3,7 @@
 A forward model for a PDE/ODE inverse problem is the one part that cannot be written as `mixle.ppl`
 distribution algebra -- the physics is a function. To keep that escape hatch consistent with the rest of
 the library, the callback is handed an ``ops`` namespace (curated math + grid assembly + solves) and a
-``p`` namespace (the latent drivers by name), instead of a raw tensor library and a parameter dict:
+``p`` namespace (the latent drivers by name), instead of a raw tensor library and a parameter dict::
 
     rhs = lambda u, t, p, ops: -p.k * u                       # an ODE right-hand side
     forward = lambda p, ops: ops.sparse_solve(*ops.divergence_form(ops.exp(p.field), shape), b)

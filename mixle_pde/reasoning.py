@@ -19,6 +19,7 @@ and the density/susceptibility semantics live here.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -31,9 +32,12 @@ from mixle.reason import (
     block_selector,
     reason,
 )
+from mixle.reason.language_bridge import Claim, PosteriorDescriber
 
 from mixle_pde.dynamics import DynamicsOperator
+from mixle_pde.field_priors import FaciesMixturePrior
 from mixle_pde.geophysics import gravity_point_sensitivity, magnetic_dipole_sensitivity
+from mixle_pde.latent import Field3D
 
 
 class JointPotentialField:
@@ -46,7 +50,12 @@ class JointPotentialField:
         kappa_sd: prior std of the per-cell susceptibility (SI).
         correlation: per-cell prior correlation between ``rho`` and ``kappa`` (in ``[-1, 1]``). A
             positive value (dense rock tends to be more magnetic) couples the modalities so gravity
-            informs ``kappa`` and magnetic informs ``rho``.
+            informs ``kappa`` and magnetic informs ``rho``. Ignored when ``facies`` is given.
+        facies: an optional :class:`~mixle_pde.field_priors.FaciesMixturePrior` (C7) over ``(rho, kappa)``;
+            when given, it REPLACES the single-``correlation`` coupling with the responsibility-weighted
+            facies-mixture precision, so a bimodal rock-physics cloud (e.g. two rock units, each its own
+            density/susceptibility trend) is representable. Call :meth:`refresh_facies_prior` after a
+            `reason` pass to re-fit the facies assignment (EM) to the posterior mean and rebuild the prior.
     """
 
     def __init__(
@@ -57,6 +66,7 @@ class JointPotentialField:
         rho_sd: float = 200.0,
         kappa_sd: float = 0.05,
         correlation: float = 0.0,
+        facies: FaciesMixturePrior | None = None,
     ) -> None:
         self.cells = np.asarray(cells, dtype=float)
         self.n = len(self.cells)
@@ -66,6 +76,7 @@ class JointPotentialField:
         self.rho_sd = float(rho_sd)
         self.kappa_sd = float(kappa_sd)
         self.correlation = float(correlation)
+        self.facies = facies
         self.prior = self._build_prior()
 
     # -- latent layout ------------------------------------------------------------------------
@@ -81,6 +92,8 @@ class JointPotentialField:
 
     def _build_prior(self) -> GaussianBelief:
         n = self.n
+        if self.facies is not None:
+            return self._build_facies_prior()
         cov = np.zeros((2 * n, 2 * n))
         cov[:n, :n] = self.rho_sd**2 * np.eye(n)
         cov[n:, n:] = self.kappa_sd**2 * np.eye(n)
@@ -88,6 +101,29 @@ class JointPotentialField:
         cov[:n, n:] = cross
         cov[n:, :n] = cross
         return GaussianBelief(np.zeros(2 * n), cov)
+
+    def _build_facies_prior(self) -> GaussianBelief:
+        """C7 wiring: build the joint ``[rho; kappa]`` covariance from the facies-mixture precision instead
+        of the single-``correlation`` coupling. With no ``(rho, kappa)`` point estimate yet at construction
+        time, the initial per-cell responsibilities are the mixture's global facies weights broadcast over
+        every cell; :meth:`refresh_facies_prior` re-fits them (EM) once a posterior mean is available."""
+        n = self.n
+        grid = Field3D(coordinates=self.cells, spacing=1.0, units="", property_name="rho_kappa")
+        k = self.facies.means.shape[0]
+        responsibilities = np.broadcast_to(self.facies.weights, (n, k)).copy()
+        precision = self.facies.precision_sparse(grid, responsibilities=responsibilities).toarray()
+        cov = np.linalg.inv(precision + 1.0e-9 * np.eye(2 * n))
+        return GaussianBelief(np.zeros(2 * n), cov)
+
+    def refresh_facies_prior(self, answer: ReasonedAnswer) -> None:
+        """Re-fit the facies responsibilities (EM) to a joint ``answer``'s posterior mean and rebuild
+        ``self.prior`` from the updated mixture -- alternates the Gauss-Newton/EM loop of DR-ALG C7 with the
+        reasoning layer's belief update. Requires the model to have been built with a ``facies`` prior."""
+        if self.facies is None:
+            raise ValueError("refresh_facies_prior requires a facies-mixture prior (construct with facies=...).")
+        mean = np.asarray(answer.mean, dtype=float)
+        self.facies.em_update(mean[self.rho_index], mean[self.kappa_index])
+        self.prior = self._build_prior()
 
     # -- modality evidence --------------------------------------------------------------------
     def gravity(self, obs: Any, data: Any, *, noise_sd: float, name: str = "gravity") -> Evidence:
@@ -260,3 +296,97 @@ class MechanisticFieldReasoner:
     def uncertainty(self, answer: ReasonedAnswer) -> np.ndarray:
         """Posterior std of the field as a ``(steps, n)`` array."""
         return answer.belief.sd().reshape(self.steps, self.n)
+
+
+# -- E5: wiring IC-1 posteriors onto the language bridge --------------------------------------------
+#
+# ``mixle.reason.language_bridge`` (M5c) is a fully-tested NL/posterior bridge that, until this module
+# calls it, is imported by nothing: ``PosteriorDescriber`` describes ONE scalar field of a posterior in
+# calibrated text, or honestly abstains when the field is too diffuse relative to the caller's declared
+# absolute precision (``tol``). This section is the missing factory + helper that lets an IC-1
+# ``Posterior`` (an ``mixle_pde`` field posterior, or any conforming object) be described that way.
+
+
+def field_describer(field: str, *, tol: float, alpha: float = 0.1, **kwargs: Any) -> PosteriorDescriber:
+    """Factory: one :class:`~mixle.reason.language_bridge.PosteriorDescriber` per named posterior field.
+
+    A thin, named constructor (rather than callers reaching for ``PosteriorDescriber`` directly) so a
+    caller describing several fields off the same posterior (``field_describer("porosity", tol=0.01)``,
+    ``field_describer("net_pay", tol=1.0)``, ...) gets one independently-calibrated describer per field
+    -- each field has its own honest precision requirement and its own claim-width ladder.
+    """
+    return PosteriorDescriber(field, tol=tol, alpha=alpha, **kwargs)
+
+
+def _field_reduction(field: str, posterior: Any) -> Callable[[np.ndarray], np.ndarray]:
+    """Resolve ``field`` into an ``(n, d) draws -> (n,)`` scalar reduction over an IC-1 posterior's
+    draw matrix, with no assumption beyond the frozen IC-1 surface (``posterior.samples(n, rng)``):
+
+    * a ``<field>_index`` property on ``posterior`` (the block convention :class:`JointPotentialField`
+      already uses for ``rho_index``/``kappa_index``) selects and sums that named sub-block;
+    * ``field`` in ``{"total", "mass", "sum", ""}`` sums the whole draw (the aggregate/tonnage-style
+      quantity the exploration narrative asks for -- the same reduction IC-1's own conformance test
+      uses as its canonical :meth:`~mixle.reason.posterior_protocol.Posterior.derived_quantity` example,
+      ``lambda m: m.sum(1)``);
+    * a literal integer string selects a single grid cell.
+
+    Raises ``ValueError`` for anything else rather than guessing -- a wrong silent reduction would be
+    far worse than a clear failure to resolve ``field``.
+    """
+    index_attr = f"{field}_index"
+    if hasattr(posterior, index_attr):
+        idx = np.asarray(getattr(posterior, index_attr))
+        return lambda draws: draws[:, idx].sum(axis=1)
+    if field in ("total", "mass", "sum", ""):
+        return lambda draws: draws.sum(axis=1)
+    try:
+        cell = int(field)
+    except ValueError:
+        pass
+    else:
+        return lambda draws: draws[:, cell]
+    raise ValueError(
+        f"cannot resolve field {field!r} on a {type(posterior).__name__}: expected a `{field}_index` "
+        f"property, one of 'total'/'mass'/'sum', or an integer grid-cell index"
+    )
+
+
+def describe_posterior(
+    posterior: Any,
+    field: str,
+    *,
+    tol: float,
+    alpha: float = 0.1,
+    n_probe: int = 300,
+    n_calibration: int = 64,
+    seed: int = 0,
+) -> Claim | None:
+    """An IC-1 ``posterior`` -> a calibrated natural-language :class:`Claim` about ``field``, or
+    ``None`` (abstain) when the posterior is too diffuse relative to ``tol`` to support one.
+
+    Builds :func:`field_describer` ``(field, tol=tol, alpha=alpha)``, calibrates it, and calls
+    ``.describe`` on a fresh probe of ``field`` -- exactly the frozen ``PosteriorDescriber`` contract
+    (:mod:`mixle.reason.language_bridge`), reached here for the first time.
+
+    Calibration needs held-out ``(posterior, truth)`` pairs (:meth:`PosteriorDescriber.calibrate`), but
+    at describe-time there is no external ground truth for ``posterior`` -- only ``posterior`` itself.
+    So each of ``n_calibration`` replicates draws a fresh probe of ``field`` from ``posterior`` (the
+    "posterior" half of the pair) and pairs it with one held-out realized draw (the "truth" half, drawn
+    separately, exactly the "score against what actually happened, not a parametric mean" calibration
+    ``language_bridge``'s own test suite uses) -- an honest, self-supervised estimate of how trustworthy
+    a claim about THIS posterior's ``field`` is at THIS absolute precision, without pretending to have
+    external labels this endpoint was never given.
+    """
+    rng = np.random.default_rng(seed)
+    reduce = _field_reduction(field, posterior)
+    describer = field_describer(field, tol=tol, alpha=alpha)
+
+    calibration_set: list[tuple[np.ndarray, float]] = []
+    for _ in range(n_calibration):
+        probe = reduce(posterior.samples(n_probe, rng))
+        truth = float(reduce(posterior.samples(1, rng))[0])
+        calibration_set.append((probe, truth))
+    describer.calibrate(calibration_set, seed=seed)
+
+    probe = reduce(posterior.samples(n_probe, rng))
+    return describer.describe(probe, seed=seed)
