@@ -232,6 +232,8 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "PosteriorFieldSamples3D.posterior_predictive_draws",
                 "metropolis_field_invert",
                 "MCMCReport",
+                "smc_tempering_field_invert",
+                "SMCReport",
                 "assimilate_4d",
                 "assimilate_4d_linear_dynamics",
                 "assimilate_4d_joint_linear_dynamics",
@@ -275,6 +277,7 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "earth_static_linear_inversion",
                 "earth_bounded_gauss_newton",
                 "earth_mcmc_reference_posterior",
+                "earth_smc_tempering_multimodal_recovery",
                 "earth_sampled_domain_likelihood_update",
                 "earth_dc_resistivity_nonlinear_inversion",
                 "earth_aem_layered_nonlinear_observation",
@@ -301,6 +304,7 @@ def capability_catalog() -> tuple[ModelingCapability, ...]:
                 "ensemble 4D assimilation is a stochastic Gaussian-summary reference, not a particle/MCMC smoother",
                 "particle 4D assimilation is a sampled reference path for small nonlinear problems, not a production smoother",
                 "Random-Walk Metropolis field inversion is a small-reference validation path, not a production-scale sampler",
+                "SMC-tempering's rejuvenation kernel is pCN only; it is a small-reference validation path like the other samplers, not a production-scale/distributed particle sampler",
                 "DC/ERT posterior observations use finite-difference local sensitivities; production-scale adjoints remain future work",
                 "MT, AEM, and CSEM observations use finite-difference local sensitivities; production-scale adjoints remain future work",
                 "full airborne loop/flight-line AEM geometry remains future work",
@@ -500,6 +504,16 @@ def verification_scenarios() -> tuple[VerificationScenario, ...]:
             name="Small-reference sampled posterior",
             description="Random-Walk Metropolis samples a one-cell posterior against a closed-form reference.",
             runner=_run_earth_mcmc_reference_posterior,
+        ),
+        VerificationScenario(
+            id="earth_smc_tempering_multimodal_recovery",
+            capability_id="earth.geochem_biostrat_likelihoods",
+            name="SMC-tempering multimodal recovery",
+            description=(
+                "SMC-tempering recovers both modes of a genuinely bimodal one-cell posterior with the correct "
+                "relative weights, where Random-Walk Metropolis on the identical problem collapses onto one side."
+            ),
+            runner=_run_earth_smc_tempering_multimodal_recovery,
         ),
         VerificationScenario(
             id="earth_sampled_domain_likelihood_update",
@@ -1233,6 +1247,114 @@ def _run_earth_mcmc_reference_posterior() -> ScenarioResult:
         },
         tolerance={"posterior_mean_error": 0.2, "posterior_variance_error": 0.15},
         message="MCMC reference posterior matched" if passed else "MCMC reference posterior check failed",
+    )
+
+
+def _run_earth_smc_tempering_multimodal_recovery() -> ScenarioResult:
+    """SMC-tempering's headline advantage over the single-chain samplers in :mod:`mixle_pde.field_mcmc`:
+    a genuinely bimodal one-cell posterior (``predict(u) = u**2``, the same double-well construction
+    ``mixle_pde/c5_sampler_test.py``'s ``BimodalPosteriorSamplerTest`` uses for pCN vs. Metropolis) whose
+    two modes carry different, exactly quadrature-computable relative weight because the Gaussian prior
+    mean is shifted off zero. Passes only if SMC-tempering's final particle occupancy matches those true
+    weights AND Metropolis on the identical problem collapses onto one side -- proving the specific
+    capability gap this scenario exists to close, not merely that the sampler runs.
+    """
+    from scipy import integrate, optimize
+    from scipy.cluster.vq import kmeans2
+
+    from mixle_pde.field_inversion import FieldGaussianPrior
+    from mixle_pde.field_mcmc import metropolis_field_invert
+    from mixle_pde.field_smc import smc_tempering_field_invert
+    from mixle_pde.latent import Field3D
+    from mixle_pde.observations import ForwardOperator, ForwardOperatorRegistry, Observation
+
+    mode, noise_var, marginal_precision, prior_mean = 4.0, 0.25, 0.25, 0.3
+    grid = Field3D(coordinates=np.zeros((1, 3)), spacing=1.0, units="", property_name="x")
+    prior = FieldGaussianPrior(
+        mean=prior_mean, smoothness_precision=0.0, marginal_precision=marginal_precision, neighbors=1
+    )
+    registry = ForwardOperatorRegistry()
+    registry.register(
+        ForwardOperator(
+            "quadratic",
+            predict=lambda grid, field_values, obs_locations: field_values**2,
+            jacobian_at_values=lambda grid, field_values, obs_locations: np.array([[2.0 * field_values[0]]]),
+            differentiable=True,
+        )
+    )
+    observation = Observation(
+        kind="quadratic", location=np.zeros((1, 3)), value=np.array([mode**2]), noise_cov=np.array([noise_var])
+    )
+
+    def log_target(u: float) -> float:
+        return -0.5 * marginal_precision * (u - prior_mean) ** 2 - 0.5 * (mode**2 - u**2) ** 2 / noise_var
+
+    trough = optimize.minimize_scalar(log_target, bounds=(-mode + 0.05, mode - 0.05), method="bounded").x
+    peak = max(log_target(mode), log_target(-mode))
+    shifted = lambda u: float(np.exp(log_target(u) - peak))  # noqa: E731
+    left, _ = integrate.quad(shifted, -np.inf, trough, limit=200)
+    right, _ = integrate.quad(shifted, trough, np.inf, limit=200)
+    true_w_minus, true_w_plus = left / (left + right), right / (left + right)
+
+    def occupancy(samples: np.ndarray) -> np.ndarray:
+        centers, labels = kmeans2(samples.reshape(-1, 1), k=np.array([[-mode], [mode]]), minit="matrix")
+        counts = np.bincount(labels, minlength=2)
+        order = np.argsort(centers.ravel())
+        return (counts / counts.sum())[order]
+
+    smc_posterior, smc_report = smc_tempering_field_invert(
+        grid,
+        [observation],
+        registry,
+        prior,
+        n_particles=600,
+        adaptive=True,
+        resample_threshold=0.5,
+        rejuvenate_steps=5,
+        rejuvenate_beta=0.3,
+        rng=np.random.default_rng(23),
+    )
+    smc_w_minus, smc_w_plus = occupancy(smc_posterior.samples[:, 0])
+
+    metropolis_posterior, _ = metropolis_field_invert(
+        grid,
+        [observation],
+        registry,
+        prior,
+        n_samples=4000,
+        burn_in=2000,
+        thin=1,
+        step_scale=1.0,
+        rng=np.random.default_rng(0),
+    )
+    metropolis_occupancy = occupancy(metropolis_posterior.samples[:, 0])
+
+    weights_asymmetric = abs(true_w_minus - true_w_plus) > 0.15
+    smc_recovered = (
+        abs(smc_w_minus - true_w_minus) <= 0.12
+        and abs(smc_w_plus - true_w_plus) <= 0.12
+        and min(smc_w_minus, smc_w_plus) > 0.10
+    )
+    metropolis_collapsed = metropolis_occupancy.min() < 0.05
+    passed = weights_asymmetric and smc_recovered and metropolis_collapsed and np.isfinite(smc_report.log_evidence)
+    return _result(
+        "earth_smc_tempering_multimodal_recovery",
+        "earth.geochem_biostrat_likelihoods",
+        passed=passed,
+        metrics={
+            "true_weight_minus_mode": true_w_minus,
+            "true_weight_plus_mode": true_w_plus,
+            "smc_recovered_weight_minus_mode": smc_w_minus,
+            "smc_recovered_weight_plus_mode": smc_w_plus,
+            "metropolis_minority_occupancy": float(metropolis_occupancy.min()),
+            "smc_resample_count": float(smc_report.resample_count),
+        },
+        tolerance={"weight_error": 0.12},
+        message=(
+            "SMC-tempering recovered both modes near the true weights while Metropolis collapsed"
+            if passed
+            else "SMC-tempering multimodal recovery check failed"
+        ),
     )
 
 
