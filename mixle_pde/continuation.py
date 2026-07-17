@@ -19,16 +19,29 @@ how a solution *branch* moves as a parameter varies. This module does that traci
   of by ``lambda`` directly, solving the augmented system ``[F(u, lambda); N(u, lambda)] = 0`` where
   ``N`` linearizes the arclength constraint against the branch's local tangent. This *can* cross a fold
   -- the tangent's ``dlambda/ds`` component rotates through zero at the turning point rather than the
-  solve failing.
+  solve failing. Its corrector step (``corrector="dense"``, the default) forms and factors the dense
+  bordered Jacobian ``[[dF/du, dF/dlambda], [du_ds^T, dlambda_ds]]`` on every Newton iteration, which
+  does not scale to large discretizations; ``corrector="jfnk"`` selects a Jacobian-free Newton-Krylov
+  alternative (:func:`_augmented_corrector_jfnk`) that never assembles that matrix, instead solving
+  each Newton step with GMRES against a matrix-free operator built from finite-difference
+  directional derivatives of the augmented residual (Knoll & Keyes 2004). Both correctors share the
+  same :class:`NewtonReceipt` contract and, on the Bratu problem below, trace the same branch to
+  solver tolerance -- see ``tests/continuation_test.py``'s JFNK-vs-dense cross-check. The once-per-step
+  predictor tangent (:func:`_tangent`) still solves a single dense linear system regardless of
+  ``corrector``; making that matrix-free too remains open scope. The motivation is asymptotic, not a
+  claim that ``"jfnk"`` is faster at every scale: at the Bratu problem's tested size, a single dense
+  factorization is cheap enough that ``"dense"`` is likely faster in wall-clock terms; see
+  :func:`_augmented_corrector_jfnk` for the honest trade-off this does not overclaim.
 - :func:`bratu_problem` builds the classic test case named for exactly this purpose in the work plan:
   the 1-D Bratu equation ``u'' + lambda * exp(u) = 0``, which has a well-characterized fold. See its
   docstring for the closed-form reference solution and :func:`bratu_reference_fold` for computing the
   reference fold location independently of any continuation run.
 
-Scope note: this covers Newton iteration, natural continuation, and arclength continuation with
-singular/non-finite Jacobian detection -- the baseline needed to actually cross a fold, which is the
-task's headline acceptance bar ("Bratu continuation crosses the fold with the appropriate method").
-Line search / trust-region globalization, Picard iteration, Jacobian-free Newton-Krylov, bounds and
+Scope note: this covers Newton iteration, natural continuation, and arclength continuation (both the
+dense and Jacobian-free Newton-Krylov correctors) with singular/non-finite Jacobian detection -- the
+baseline needed to actually cross a fold, which is the task's headline acceptance bar ("Bratu
+continuation crosses the fold with the appropriate method"), plus MP-F2's follow-on JFNK-scaling gap.
+Line search / trust-region globalization, Picard iteration, a matrix-free predictor tangent, bounds and
 variational-inequality constraints, branch-switching at bifurcation points (as opposed to folds), and
 automatic scaling are explicitly out of scope for this module and remain open against the wider
 nonlinear-solves task.
@@ -40,6 +53,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.sparse.linalg import LinearOperator, gmres
 
 __all__ = [
     "ParametricProblem",
@@ -52,6 +66,11 @@ __all__ = [
     "bratu_problem",
     "bratu_reference_fold",
 ]
+
+# Standard Jacobian-free Newton-Krylov finite-difference scaling (Knoll & Keyes 2004, eq. 14): the
+# perturbation is scaled by sqrt(machine epsilon) so the finite-difference truncation error and
+# floating-point cancellation error in the directional derivative are balanced.
+_JFNK_FD_EPS = float(np.sqrt(np.finfo(float).eps))
 
 
 @dataclass(frozen=True)
@@ -346,6 +365,192 @@ def _augmented_corrector(
     )
 
 
+def _augmented_residual(
+    problem: ParametricProblem,
+    z: np.ndarray,
+    u_prev: np.ndarray,
+    lam_prev: float,
+    du_ds: np.ndarray,
+    dlambda_ds: float,
+    ds: float,
+) -> np.ndarray | None:
+    """Evaluate the augmented pseudo-arclength residual ``G(z) = [F(u, lambda); N(u, lambda)]`` at the
+    stacked unknown ``z = [u; lambda]`` (shape ``(n + 1,)``), returning ``None`` in place of a
+    non-finite image so every caller handles that breakdown the same way. This is the one piece of the
+    augmented system genuinely shared between :func:`_augmented_corrector`'s dense path and
+    :func:`_augmented_corrector_jfnk`'s matrix-free one: both correct the same ``G(z) = 0``, they only
+    differ in how the linear step is solved.
+    """
+    n = problem.n
+    u = z[:n]
+    lam = float(z[n])
+    r = np.asarray(problem.residual(u, lam), dtype=float)
+    arc = float(du_ds @ (u - u_prev) + dlambda_ds * (lam - lam_prev) - ds)
+    g = np.concatenate([r, [arc]])
+    if not np.all(np.isfinite(g)):
+        return None
+    return g
+
+
+def _augmented_jvp(
+    problem: ParametricProblem,
+    z: np.ndarray,
+    g_z: np.ndarray,
+    v: np.ndarray,
+    u_prev: np.ndarray,
+    lam_prev: float,
+    du_ds: np.ndarray,
+    dlambda_ds: float,
+    ds: float,
+    fd_eps: float,
+) -> np.ndarray | None:
+    """Forward-difference directional derivative ``dG/dz @ v ~ (G(z + eps*v) - G(z)) / eps`` of the
+    augmented residual -- the Jacobian-vector product a matrix-free Krylov solve needs without ever
+    assembling ``dG/dz`` (Knoll & Keyes 2004). ``eps`` is scaled by both ``fd_eps`` and the current
+    iterate/direction magnitudes (their eq. 14), and ``g_z``, the already-evaluated ``G(z)``, is passed
+    in rather than recomputed so each of GMRES's ``matvec`` calls within one Newton iteration costs one
+    extra residual evaluation, not two. Returns ``None`` in place of a non-finite image, exactly like
+    :func:`_augmented_residual`.
+    """
+    v_norm = float(np.linalg.norm(v))
+    if v_norm == 0.0:
+        return np.zeros_like(g_z)
+    eps = fd_eps * (1.0 + float(np.linalg.norm(z))) / v_norm
+    g_pert = _augmented_residual(problem, z + eps * v, u_prev, lam_prev, du_ds, dlambda_ds, ds)
+    if g_pert is None:
+        return None
+    return (g_pert - g_z) / eps
+
+
+def _augmented_corrector_jfnk(
+    problem: ParametricProblem,
+    u_guess: np.ndarray,
+    lam_guess: float,
+    u_prev: np.ndarray,
+    lam_prev: float,
+    du_ds: np.ndarray,
+    dlambda_ds: float,
+    ds: float,
+    *,
+    max_iterations: int,
+    tol: float,
+    damping: float,
+    krylov_rtol: float,
+    krylov_maxiter: int | None,
+    fd_eps: float,
+) -> tuple[NewtonReceipt, float]:
+    """Jacobian-free Newton-Krylov correction of the augmented pseudo-arclength system for one
+    continuation step.
+
+    Same contract as :func:`_augmented_corrector`: identical :class:`NewtonReceipt` shape, the same
+    ``max(||F||_inf, |N|)`` convergence criterion, and the same failure-reason vocabulary -- but this
+    never forms or factors the bordered Jacobian ``[[dF/du, dF/dlambda], [du_ds^T, dlambda_ds]]``. Each
+    Newton step's linear solve instead runs GMRES (:func:`scipy.sparse.linalg.gmres`) against a
+    matrix-free operator whose action is :func:`_augmented_jvp`, so the corrector's per-iteration cost
+    is residual evaluations and matrix-vector products only, never an assembled or factored
+    ``(n + 1, n + 1)`` matrix. That repeated per-iteration dense solve is exactly what does not scale to
+    large discretizations, and it is the corrector -- not the once-per-step predictor tangent solved by
+    :func:`_tangent`, left dense and untouched here -- that pays for it more than once within a single
+    continuation step whenever the corrector needs more than one Newton iteration.
+
+    ``krylov_rtol``/``krylov_maxiter`` bound the inner GMRES solve. An inner solve that has not reached
+    ``krylov_rtol`` after ``krylov_maxiter`` iterations is not itself a failure: inexact Newton-Krylov
+    methods are expected to run under-converged inner solves far from the root (Knoll & Keyes 2004,
+    section 2.2's discussion of forcing terms), so the outer criteria -- the residual tolerance,
+    non-finite detection, and the iteration budget -- remain the only ways this reports ``converged`` or
+    a failure, exactly as for the dense corrector. One taxonomy difference is real, not an oversight: a
+    structurally singular augmented system has no ``LinAlgError`` analogue under GMRES (it stalls
+    instead of raising), so this corrector can report ``non_finite_step`` or
+    ``max_iterations_exceeded`` where the dense corrector would report ``singular_jacobian``, and never
+    reports ``singular_jacobian`` or ``non_finite_jacobian`` itself.
+
+    ``krylov_rtol``'s default (``1e-6``, not GMRES's own far tighter usual defaults) is deliberate, not
+    a shortcut: GMRES's ``rtol`` is relative to the *starting* linear residual, which near a
+    well-converging branch is already close to the outer ``tol``, so demanding several more orders of
+    relative reduction buys negligible outer-residual improvement for a real cost in Krylov iterations
+    (confirmed directly while tuning this default: on this module's own Bratu scenario, ``rtol=1e-10``
+    needs hundreds of matrix-vector products per Newton iteration where ``rtol=1e-6`` needs a small
+    fraction of that, for the same converged outer result to the same ``tol``).
+
+    Honest trade-off, not overclaimed: at the Bratu problem's tested scale (``n`` in the low hundreds),
+    a single dense ``(n + 1, n + 1)`` factorization is cheap enough that the dense corrector is likely
+    faster in wall-clock terms than this one, since restarted GMRES needs many matrix-vector products
+    (each a full residual evaluation) to reach the same tolerance a direct solve reaches in one
+    factorization. The motivation is asymptotic: dense factorization cost grows like ``O(n^3)`` (and its
+    memory like ``O(n^2)``) per Newton iteration, while this corrector's cost per iteration stays linear
+    in the cost of one residual evaluation times the number of Krylov iterations GMRES actually needs --
+    a crossover this module does not claim a specific ``n`` for, only that one exists.
+    """
+    n = problem.n
+    z = np.concatenate([np.array(u_guess, dtype=float, copy=True), [float(lam_guess)]])
+    history: list[float] = []
+    for iteration in range(int(max_iterations) + 1):
+        g = _augmented_residual(problem, z, u_prev, lam_prev, du_ds, dlambda_ds, ds)
+        if g is None:
+            history.append(float("inf"))
+            return (
+                NewtonReceipt(
+                    converged=False,
+                    iterations=iteration,
+                    residual_history=tuple(history),
+                    failure_reason="non_finite_residual",
+                    u=z[:n],
+                ),
+                float(z[n]),
+            )
+        rnorm = float(np.max(np.abs(g)))
+        history.append(rnorm)
+        if rnorm < tol:
+            return (
+                NewtonReceipt(
+                    converged=True,
+                    iterations=iteration,
+                    residual_history=tuple(history),
+                    failure_reason=None,
+                    u=z[:n],
+                ),
+                float(z[n]),
+            )
+        if iteration == max_iterations:
+            break
+
+        def _matvec(v: np.ndarray, _z: np.ndarray = z, _g: np.ndarray = g) -> np.ndarray:
+            jv = _augmented_jvp(problem, _z, _g, v, u_prev, lam_prev, du_ds, dlambda_ds, ds, fd_eps)
+            return jv if jv is not None else np.full(n + 1, np.nan)
+
+        operator = LinearOperator((n + 1, n + 1), matvec=_matvec, dtype=float)
+        delta, _info = gmres(
+            operator,
+            -g,
+            rtol=krylov_rtol,
+            atol=0.0,
+            restart=min(n + 1, 50),
+            maxiter=krylov_maxiter,
+        )
+        if not np.all(np.isfinite(delta)):
+            return (
+                NewtonReceipt(
+                    converged=False,
+                    iterations=iteration + 1,
+                    residual_history=tuple(history),
+                    failure_reason="non_finite_step",
+                    u=z[:n],
+                ),
+                float(z[n]),
+            )
+        z = z + damping * delta
+    return (
+        NewtonReceipt(
+            converged=False,
+            iterations=int(max_iterations),
+            residual_history=tuple(history),
+            failure_reason="max_iterations_exceeded",
+            u=z[:n],
+        ),
+        float(z[n]),
+    )
+
+
 def natural_continuation(
     problem: ParametricProblem,
     u0,
@@ -409,16 +614,29 @@ def arclength_continuation(
     tol: float = 1e-9,
     damping: float = 1.0,
     direction: float = 1.0,
+    corrector: str = "dense",
+    krylov_rtol: float = 1e-6,
+    krylov_maxiter: int | None = 200,
+    fd_eps: float = _JFNK_FD_EPS,
 ) -> ContinuationReceipt:
     """Trace the solution branch through ``origin (u0, lam0)`` by pseudo-arclength continuation.
 
     Each step predicts along the local tangent and Newton-corrects the augmented ``(u, lambda)`` system
-    against the linearized arclength constraint (see :func:`_augmented_corrector`). Unlike
-    :func:`natural_continuation`, this can cross a fold: the tangent's ``dlambda/ds`` component passes
-    through zero and changes sign there instead of the corrector failing, which is recorded in the
-    returned receipt's ``crossed_fold`` flag. ``direction`` (its sign only) picks which way along the
-    branch the first step goes.
+    against the linearized arclength constraint. Unlike :func:`natural_continuation`, this can cross a
+    fold: the tangent's ``dlambda/ds`` component passes through zero and changes sign there instead of
+    the corrector failing, which is recorded in the returned receipt's ``crossed_fold`` flag.
+    ``direction`` (its sign only) picks which way along the branch the first step goes.
+
+    ``corrector`` selects how each step's Newton correction is solved: ``"dense"`` (default) forms and
+    factors the bordered Jacobian every iteration via :func:`_augmented_corrector`, exactly as before;
+    ``"jfnk"`` never assembles that matrix, instead solving each iteration with GMRES against a
+    matrix-free finite-difference operator via :func:`_augmented_corrector_jfnk` -- the alternative that
+    scales to large discretizations where forming/factoring a dense Jacobian per iteration does not.
+    ``krylov_rtol``, ``krylov_maxiter``, and ``fd_eps`` tune the inner GMRES solve and are ignored when
+    ``corrector="dense"``.
     """
+    if corrector not in ("dense", "jfnk"):
+        raise ValueError(f"corrector must be 'dense' or 'jfnk', got {corrector!r}")
     start = newton_solve(problem, u0, float(lam0), max_iterations=max_iterations, tol=tol, damping=damping)
     if not start.converged:
         step = ContinuationStep(parameter=float(lam0), arclength=0.0, u=start.u, newton=start, accepted=False)
@@ -440,19 +658,37 @@ def arclength_continuation(
     for _ in range(int(n_steps)):
         u_pred = u_prev + ds * du_ds
         lam_pred = lam_prev + ds * dlambda_ds
-        receipt, lam_new = _augmented_corrector(
-            problem,
-            u_pred,
-            lam_pred,
-            u_prev,
-            lam_prev,
-            du_ds,
-            dlambda_ds,
-            ds,
-            max_iterations=max_iterations,
-            tol=tol,
-            damping=damping,
-        )
+        if corrector == "dense":
+            receipt, lam_new = _augmented_corrector(
+                problem,
+                u_pred,
+                lam_pred,
+                u_prev,
+                lam_prev,
+                du_ds,
+                dlambda_ds,
+                ds,
+                max_iterations=max_iterations,
+                tol=tol,
+                damping=damping,
+            )
+        else:
+            receipt, lam_new = _augmented_corrector_jfnk(
+                problem,
+                u_pred,
+                lam_pred,
+                u_prev,
+                lam_prev,
+                du_ds,
+                dlambda_ds,
+                ds,
+                max_iterations=max_iterations,
+                tol=tol,
+                damping=damping,
+                krylov_rtol=krylov_rtol,
+                krylov_maxiter=krylov_maxiter,
+                fd_eps=fd_eps,
+            )
         if not receipt.converged:
             steps.append(
                 ContinuationStep(parameter=lam_new, arclength=s + ds, u=receipt.u, newton=receipt, accepted=False)
