@@ -464,6 +464,14 @@ def _augmented_corrector_jfnk(
     ``max_iterations_exceeded`` where the dense corrector would report ``singular_jacobian``, and never
     reports ``singular_jacobian`` or ``non_finite_jacobian`` itself.
 
+    ``krylov_rtol``'s default (``1e-6``, not GMRES's own far tighter usual defaults) is deliberate, not
+    a shortcut: GMRES's ``rtol`` is relative to the *starting* linear residual, which near a
+    well-converging branch is already close to the outer ``tol``, so demanding several more orders of
+    relative reduction buys negligible outer-residual improvement for a real cost in Krylov iterations
+    (confirmed directly while tuning this default: on this module's own Bratu scenario, ``rtol=1e-10``
+    needs hundreds of matrix-vector products per Newton iteration where ``rtol=1e-6`` needs a small
+    fraction of that, for the same converged outer result to the same ``tol``).
+
     Honest trade-off, not overclaimed: at the Bratu problem's tested scale (``n`` in the low hundreds),
     a single dense ``(n + 1, n + 1)`` factorization is cheap enough that the dense corrector is likely
     faster in wall-clock terms than this one, since restarted GMRES needs many matrix-vector products
@@ -607,8 +615,8 @@ def arclength_continuation(
     damping: float = 1.0,
     direction: float = 1.0,
     corrector: str = "dense",
-    krylov_rtol: float = 1e-10,
-    krylov_maxiter: int | None = None,
+    krylov_rtol: float = 1e-6,
+    krylov_maxiter: int | None = 200,
     fd_eps: float = _JFNK_FD_EPS,
 ) -> ContinuationReceipt:
     """Trace the solution branch through ``origin (u0, lam0)`` by pseudo-arclength continuation.
