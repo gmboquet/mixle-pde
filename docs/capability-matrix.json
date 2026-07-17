@@ -1009,7 +1009,9 @@
         "field_log_posterior_grad_kernel",
         "pcn_field_invert",
         "mala_field_invert",
-        "hmc_field_invert"
+        "hmc_field_invert",
+        "NUTSReport",
+        "nuts_field_invert"
       ],
       "time_regime": "not_applicable",
       "verification_level": "analytic_reference_checked"

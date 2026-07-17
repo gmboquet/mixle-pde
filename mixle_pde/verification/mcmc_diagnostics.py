@@ -42,8 +42,12 @@ Limitations
 * Mixing/stationarity evidence only. No prior/posterior predictive check, simulation-based
   calibration, coverage/rank diagnostic, multimodality test, or divergence-transition count is
   computed here -- those remain open per MP-I8.
-* This repo's registered samplers (Random-Walk Metropolis, pCN, MALA, HMC) are not NUTS, so there is
-  no divergence-transition count to report even in principle; that diagnostic does not apply.
+* :func:`mixle_pde.field_mcmc.nuts_field_invert` (MP-I5) is now a registered NUTS sampler and reports
+  its own per-run divergence count directly on :class:`~mixle_pde.field_mcmc.NUTSReport` -- a divergent
+  transition is a property of *how a trajectory was built* (an energy-error threshold crossed during
+  leapfrog integration), not something recoverable from stored draws after the fact, so this module
+  (which only ever sees raw chain arrays, never a sampler's internals) still computes no
+  divergence-transition diagnostic of its own for any sampler, NUTS included.
 * ``ess`` is the per-split-chain-summed Geyer estimator described above, not Stan's pooled bulk-ESS
   or tail-ESS. Do not compare the numbers this module reports directly against ArviZ/Stan output and
   expect an exact match; the qualitative conclusion (well-mixed vs. not) will agree.
