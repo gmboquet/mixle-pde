@@ -53,9 +53,9 @@ module still lives in `mixle_pde` today unless a landed commit in the target rep
 
 | Status | Count |
 |---|---:|
-| owned-elsewhere (incl. partial) | 58 |
+| owned-elsewhere (incl. partial) | 60 |
 | superseded | 3 |
-| not-started | 36 |
+| not-started | 34 |
 | unknown | 0 |
 | **Total** | **97** |
 
