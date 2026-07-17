@@ -22,7 +22,10 @@ dependencies = [
 
 [project.optional-dependencies]
 # Dev tooling -- never required to import mixle_pde or to run the problem_adapter-boundary tests.
-test = ["pytest>=8", "pytest-xdist", "torch"]
+# joblib is included here (not just in the `parallel` extra below) so CI installs it by default and
+# tests/mcmc_parallel_test.py actually runs for real; that file still self-skips via
+# unittest.skipUnless when joblib is absent, for a base-plus-test-extras install that omits it.
+test = ["pytest>=8", "pytest-xdist", "torch", "joblib"]
 lint = ["ruff==0.15.17"]
 docs = ["sphinx>=7", "furo"]
 
@@ -63,6 +66,14 @@ data = ["segyio", "lasio", "rasterio", "harmonica", "verde",
 #   - mpi4py is forward-declared for the distributed mesh/solve transport described in the
 #     architecture plan; no mixle_pde module imports it yet, so this extra currently installs a
 #     dependency with no wired call site rather than unlocking new behavior.
+#   - joblib backs mixle_pde.mcmc_parallel's opt-in multi-process chain dispatch (MP-I9). Chosen
+#     over stdlib multiprocessing/concurrent.futures (docs/adr/0001-mp-a4-backend-selection.md's own
+#     stated "zero extra dependency" preference for embarrassingly-parallel workloads) because this
+#     repo's real ForwardOperator registrations (gravity/magnetics/borehole/... in
+#     mixle_pde.observations) are built from closures that plain pickle cannot send to a spawned
+#     worker process at all; joblib's loky backend serializes them via cloudpickle. Already an
+#     indirect dependency the moment scikit-learn is (scikit-learn requires joblib), so this extra
+#     mostly formalizes an existing transitive pin rather than adding a new one.
 # `mixle_mlops` (the commercial task-cascade adapter mixle_pde.surrogate can optionally bind to) is
 # deliberately never listed here or in `all`: it is an internal sibling package, not a public PyPI
 # distribution, and per the architecture's commercial-adapter rule it must never be required to
@@ -74,12 +85,13 @@ fvm = ["torch", "pyamg"]
 coupling = ["torch"]
 inverse = ["torch", "scikit-learn", "pyamg", "scikit-sparse"]
 surrogate = ["torch", "scikit-learn"]
+parallel = ["joblib"]
 
-# The union of the seven capability-family extras directly above -- the batteries-included PDE
+# The union of the eight capability-family extras directly above -- the batteries-included PDE
 # modeling profile the architecture plan names as its release/container deliverable (MP-L4), not a
 # bundle of the separately-versioned geoscience data-format extras above (`raster`/`netcdf`/`grib`/
 # `segy`/`las`/`potfield`/`data`), which a deployment opts into independently by data format.
-all = ["pyamg", "scikit-sparse", "mpi4py", "torch", "scikit-learn"]
+all = ["pyamg", "scikit-sparse", "mpi4py", "torch", "scikit-learn", "joblib"]
 
 [project.urls]
 Homepage = "https://github.com/gmboquet/mixle-pde"

@@ -18,11 +18,15 @@ Methodology and honesty notes
   per-function proof that every symbol in the module is differentiable end to end.
 * ``complex_support`` means the module uses a complex dtype or the literal imaginary unit somewhere in
   its primary compute path (frequency-domain / spectral methods, mostly).
-* ``parallel_status`` is ``"single_process"`` for every entry: a repo-wide sweep found no ``mpi4py``,
-  no ``multiprocessing``, and no ``concurrent.futures``/``joblib`` usage anywhere under ``mixle_pde/``.
-  Vectorized NumPy/Torch operations are the only concurrency mixle-pde has today; distributed/MPI
-  execution is explicitly future (production-backend) work per the mixle-pde work plan's ADR-3, not
-  something this inventory should imply exists.
+* ``parallel_status`` is ``"single_process"`` for every entry except ``mixle_pde.mcmc_parallel``
+  (MP-I9), which reports ``"multi_process"``: a repo-wide sweep otherwise found no ``mpi4py``, no
+  bare ``multiprocessing``, and no ``concurrent.futures`` usage anywhere under ``mixle_pde/``.
+  Vectorized NumPy/Torch operations were, before that module, the only concurrency mixle-pde had;
+  distributed-memory/MPI execution remains explicitly future (production-backend) work per the
+  mixle-pde work plan's ADR-3 and is not claimed by that one exception either -- it dispatches
+  independent single-machine chains across worker processes via ``joblib``, never a distributed
+  solve -- see its own module docstring for the precise (single-machine, multi-process, opt-in)
+  boundary.
 * Non-solver modules (Bayesian posterior utilities, likelihood models, environmental data loaders,
   infrastructure/glue code) are inventoried too -- ``is_solver=False`` and the PDE-specific axes
   (``dimension``, ``grid_type``, ``boundary_conditions``, ``time_regime``) read ``"not_applicable"``
@@ -1425,6 +1429,51 @@ CAPABILITY_INVENTORY: tuple[SolverProfile, ...] = (
             "a bookkeeping fingerprint, not a cryptographic commitment",
             "single-process only: no MPI, multiprocessing, or distributed execution path",
             "covered by unit tests only; no analytic, manufactured-solution, or external reference check is recorded against it",
+        ),
+    ),
+    SolverProfile(
+        module="mixle_pde.mcmc_parallel",
+        category="bayesian_field_inference",
+        is_solver=False,
+        method=(
+            "Opt-in multi-process dispatch of N independent mixle_pde.field_mcmc chains (any of "
+            "metropolis_field_invert/pcn_field_invert/mala_field_invert/hmc_field_invert) via joblib's "
+            "loky backend, one seed (numpy SeedSequence.spawn child) per chain; pools per-chain draws "
+            "into one PosteriorFieldSamples3D and exposes each chain's own posterior in the shape "
+            "mixle_pde.verification.mcmc_diagnostics.chains_from_posterior_samples expects (MP-I9 "
+            "parallel-execution slice)."
+        ),
+        dimension=("not_applicable",),
+        grid_type="not_applicable",
+        boundary_conditions=("not_applicable",),
+        differentiable=False,
+        complex_support=False,
+        time_regime="not_applicable",
+        parallel_status="multi_process",
+        verification_level="unit_tested_only",
+        public_symbols=(
+            "ChainResult",
+            "MultiChainResult",
+            "run_parallel_chains",
+        ),
+        limitations=(
+            "joblib is an optional dependency (extra: parallel); a zero-extras install raises a clear "
+            "ImportError naming the extra rather than falling back silently",
+            "chosen over stdlib multiprocessing/concurrent.futures because this repo's real "
+            "ForwardOperator registrations (mixle_pde.observations) are built from closures that plain "
+            "pickle cannot send to a spawned worker process; joblib's loky backend uses cloudpickle -- "
+            "see the module docstring for the direct empirical check",
+            "does not implement mpi4py or any distributed-memory (multi-node) execution -- "
+            "docs/adr/0001-mp-a4-backend-selection.md explicitly defers standalone mpi4py for this "
+            "exact workload class",
+            "does not compute convergence diagnostics itself (no import from mixle_pde.verification, "
+            "matching the one-way dependency direction every other top-level module already keeps); a "
+            "caller composes with mixle_pde.verification.mcmc_diagnostics separately",
+            "parallelizes chains, not a single chain's own internal solve -- no chain ever sees another "
+            "chain's state, so this does not add distributed-memory parallelism within one PDE solve",
+            "a freshly spawned worker pool pays a one-time cost (this repo's own transitive import "
+            "graph, unrelated to this module) before any speedup is visible; only amortized across a "
+            "long-lived pool, not a single one-shot call",
         ),
     ),
     SolverProfile(
