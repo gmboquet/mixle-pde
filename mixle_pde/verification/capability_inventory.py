@@ -948,6 +948,29 @@ CAPABILITY_INVENTORY: tuple[SolverProfile, ...] = (
         limitations=("single-process only: no MPI, multiprocessing, or distributed execution path",),
     ),
     SolverProfile(
+        module="mixle_pde.field_smc",
+        category="bayesian_field_inference",
+        is_solver=False,
+        method=(
+            "Sequential Monte Carlo with tempering for latent 3D fields: a particle population walked "
+            "from the prior to the posterior through a geometric temperature schedule, with "
+            "effective-sample-size-triggered resampling and tempered-pCN rejuvenation (MP-I5)."
+        ),
+        dimension=("not_applicable",),
+        grid_type="not_applicable",
+        boundary_conditions=("not_applicable",),
+        differentiable=False,
+        complex_support=False,
+        time_regime="not_applicable",
+        parallel_status="single_process",
+        verification_level="analytic_reference_checked",
+        public_symbols=("SMCReport", "smc_tempering_field_invert"),
+        limitations=(
+            "single-process only: no MPI, multiprocessing, or distributed execution path",
+            "rejuvenation kernel is pCN only (no HMC/MALA rejuvenation option)",
+        ),
+    ),
+    SolverProfile(
         module="mixle_pde.field_vi",
         category="bayesian_field_inference",
         is_solver=False,

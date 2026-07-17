@@ -153,6 +153,10 @@ from mixle_pde.field_priors import (
     depth_weights,
     joint_linear_gaussian_invert,
 )
+from mixle_pde.field_smc import (
+    SMCReport,
+    smc_tempering_field_invert,
+)
 from mixle_pde.flow import NavierStokes2D
 from mixle_pde.flow3d import NavierStokes3D
 from mixle_pde.gas_dynamics import (
@@ -459,6 +463,8 @@ __all__ = [
     "assimilate_4d_joint_linear_dynamics",
     "assimilate_4d_linear_dynamics",
     "particle_assimilate_4d",
+    "SMCReport",
+    "smc_tempering_field_invert",
     "CrossPropertyPrior",
     "FaciesMixturePrior",
     "SpatioTemporalGaussianPrior",
