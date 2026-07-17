@@ -74,26 +74,11 @@ def _face_layout(shape):
     return 0, nfx, nfx + nfy, nfx + nfy + nfz, (fx, fy, fz)
 
 
-def _face_grid(s):
-    """Broadcast ``(i, j, k)`` index grids (flat, ``int``) over a ``(a, b, c)`` face/edge block shape."""
-    ii, jj, kk = np.meshgrid(np.arange(s[0]), np.arange(s[1]), np.arange(s[2]), indexing="ij")
-    return ii.ravel(), jj.ravel(), kk.ravel()
-
-
-def _stencil_vals(size, *scales):
-    """Concatenate ``len(scales)`` constant blocks of length ``size`` -- the per-entry stencil weights."""
-    return np.concatenate([np.full(size, s) for s in scales])
-
-
 def _curl_matrix(shape, hx, hy, hz):
     """Discrete curl ``C`` (edges -> faces) as a scipy CSR incidence matrix with the ``1/h`` metric.
 
     ``(curl E)_x = dEz/dy - dEy/dz`` on x-faces, and cyclically. Each face row has four edge entries with weights
     ``+-1/h`` for the transverse spacing, so ``C E`` is the centred face circulation of the Yee cell.
-
-    The COO arrays for each of the three face families come from one vectorized broadcast (`meshgrid` index
-    grids over the face block, flat-index arithmetic for the four incident edges) with no Python loop over
-    the ``O(n**3)`` faces, so this scales to survey-size 3-D grids (see ``c6_scale_test.py``).
     """
     import scipy.sparse as sp
 
@@ -108,59 +93,50 @@ def _curl_matrix(shape, hx, hy, hz):
         a, b, c = s
         return off + (i * b + j) * c + k
 
-    rows_parts, cols_parts, vals_parts = [], [], []
+    rows, cols, vals = [], [], []
 
     # x-faces (nx, ny-1, nz-1): (Ez[j+1]-Ez[j])/hy - (Ey[k+1]-Ey[k])/hz
-    i, j, k = _face_grid(fx)
-    f = fidx(0, fx, i, j, k)
-    rows_parts.append(np.concatenate([f, f, f, f]))
-    cols_parts.append(
-        np.concatenate(
-            [
-                eidx(ezoff, sz, i, j + 1, k),  # +Ez(i,j+1,k) over hy
-                eidx(ezoff, sz, i, j, k),  # -Ez(i,j,k) over hy
-                eidx(eyoff, sy, i, j, k + 1),  # -Ey(i,j,k+1) over hz
-                eidx(eyoff, sy, i, j, k),  # +Ey(i,j,k) over hz
-            ]
-        )
-    )
-    vals_parts.append(_stencil_vals(f.size, 1.0 / hy, -1.0 / hy, -1.0 / hz, 1.0 / hz))
+    for i in range(fx[0]):
+        for j in range(fx[1]):
+            for k in range(fx[2]):
+                f = fidx(0, fx, i, j, k)
+                # Ez edges (nx, ny, nz-1): +Ez(i,j+1,k) - Ez(i,j,k) over hy
+                rows += [f, f]
+                cols += [eidx(ezoff, sz, i, j + 1, k), eidx(ezoff, sz, i, j, k)]
+                vals += [1.0 / hy, -1.0 / hy]
+                # Ey edges (nx, ny-1, nz): -Ey(i,j,k+1) + Ey(i,j,k) over hz
+                rows += [f, f]
+                cols += [eidx(eyoff, sy, i, j, k + 1), eidx(eyoff, sy, i, j, k)]
+                vals += [-1.0 / hz, 1.0 / hz]
 
     # y-faces (nx-1, ny, nz-1): (Ex[k+1]-Ex[k])/hz - (Ez[i+1]-Ez[i])/hx
-    i, j, k = _face_grid(fy)
-    f = fidx(fyoff, fy, i, j, k)
-    rows_parts.append(np.concatenate([f, f, f, f]))
-    cols_parts.append(
-        np.concatenate(
-            [
-                eidx(0, sx, i, j, k + 1),  # +Ex(i,j,k+1) over hz
-                eidx(0, sx, i, j, k),  # -Ex(i,j,k) over hz
-                eidx(ezoff, sz, i + 1, j, k),  # -Ez(i+1,j,k) over hx
-                eidx(ezoff, sz, i, j, k),  # +Ez(i,j,k) over hx
-            ]
-        )
-    )
-    vals_parts.append(_stencil_vals(f.size, 1.0 / hz, -1.0 / hz, -1.0 / hx, 1.0 / hx))
+    for i in range(fy[0]):
+        for j in range(fy[1]):
+            for k in range(fy[2]):
+                f = fidx(fyoff, fy, i, j, k)
+                # Ex edges (nx-1, ny, nz): +Ex(i,j,k+1) - Ex(i,j,k) over hz
+                rows += [f, f]
+                cols += [eidx(0, sx, i, j, k + 1), eidx(0, sx, i, j, k)]
+                vals += [1.0 / hz, -1.0 / hz]
+                # Ez edges (nx, ny, nz-1): -Ez(i+1,j,k) + Ez(i,j,k) over hx
+                rows += [f, f]
+                cols += [eidx(ezoff, sz, i + 1, j, k), eidx(ezoff, sz, i, j, k)]
+                vals += [-1.0 / hx, 1.0 / hx]
 
     # z-faces (nx-1, ny-1, nz): (Ey[i+1]-Ey[i])/hx - (Ex[j+1]-Ex[j])/hy
-    i, j, k = _face_grid(fz)
-    f = fidx(fzoff, fz, i, j, k)
-    rows_parts.append(np.concatenate([f, f, f, f]))
-    cols_parts.append(
-        np.concatenate(
-            [
-                eidx(eyoff, sy, i + 1, j, k),  # +Ey(i+1,j,k) over hx
-                eidx(eyoff, sy, i, j, k),  # -Ey(i,j,k) over hx
-                eidx(0, sx, i, j + 1, k),  # -Ex(i,j+1,k) over hy
-                eidx(0, sx, i, j, k),  # +Ex(i,j,k) over hy
-            ]
-        )
-    )
-    vals_parts.append(_stencil_vals(f.size, 1.0 / hx, -1.0 / hx, -1.0 / hy, 1.0 / hy))
+    for i in range(fz[0]):
+        for j in range(fz[1]):
+            for k in range(fz[2]):
+                f = fidx(fzoff, fz, i, j, k)
+                # Ey edges (nx, ny-1, nz): +Ey(i+1,j,k) - Ey(i,j,k) over hx
+                rows += [f, f]
+                cols += [eidx(eyoff, sy, i + 1, j, k), eidx(eyoff, sy, i, j, k)]
+                vals += [1.0 / hx, -1.0 / hx]
+                # Ex edges (nx-1, ny, nz): -Ex(i,j+1,k) + Ex(i,j,k) over hy
+                rows += [f, f]
+                cols += [eidx(0, sx, i, j + 1, k), eidx(0, sx, i, j, k)]
+                vals += [-1.0 / hy, 1.0 / hy]
 
-    rows = np.concatenate(rows_parts)
-    cols = np.concatenate(cols_parts)
-    vals = np.concatenate(vals_parts)
     return sp.csr_matrix((vals, (rows, cols)), shape=(nface, nedge))
 
 
@@ -169,10 +145,6 @@ def _grad_matrix(shape, hx, hy, hz):
 
     ``(grad phi)`` on an edge is the difference of the two node values it connects over the edge length. Its range
     is exactly the curl null space (``C G = 0``), so ``G`` spans the modes the grad-div stabilizer must control.
-
-    The COO arrays for each of the three edge families come from one vectorized broadcast (`meshgrid` index
-    grids over the edge block, flat-index arithmetic for the two incident nodes) with no Python loop over the
-    ``O(n**3)`` edges, so this scales to survey-size 3-D grids (see ``c6_scale_test.py``).
     """
     import scipy.sparse as sp
 
@@ -187,32 +159,31 @@ def _grad_matrix(shape, hx, hy, hz):
         a, b, c = s
         return off + (i * b + j) * c + k
 
-    rows_parts, cols_parts, vals_parts = [], [], []
-
+    rows, cols, vals = [], [], []
     # x-edges (nx-1, ny, nz): phi(i+1,j,k) - phi(i,j,k) over hx
-    i, j, k = _face_grid(sx)
-    e = eidx(0, sx, i, j, k)
-    rows_parts.append(np.concatenate([e, e]))
-    cols_parts.append(np.concatenate([nidx(i + 1, j, k), nidx(i, j, k)]))
-    vals_parts.append(np.concatenate([np.full(e.size, 1.0 / hx), np.full(e.size, -1.0 / hx)]))
-
+    for i in range(sx[0]):
+        for j in range(sx[1]):
+            for k in range(sx[2]):
+                e = eidx(0, sx, i, j, k)
+                rows += [e, e]
+                cols += [nidx(i + 1, j, k), nidx(i, j, k)]
+                vals += [1.0 / hx, -1.0 / hx]
     # y-edges (nx, ny-1, nz)
-    i, j, k = _face_grid(sy)
-    e = eidx(eyoff, sy, i, j, k)
-    rows_parts.append(np.concatenate([e, e]))
-    cols_parts.append(np.concatenate([nidx(i, j + 1, k), nidx(i, j, k)]))
-    vals_parts.append(np.concatenate([np.full(e.size, 1.0 / hy), np.full(e.size, -1.0 / hy)]))
-
+    for i in range(sy[0]):
+        for j in range(sy[1]):
+            for k in range(sy[2]):
+                e = eidx(eyoff, sy, i, j, k)
+                rows += [e, e]
+                cols += [nidx(i, j + 1, k), nidx(i, j, k)]
+                vals += [1.0 / hy, -1.0 / hy]
     # z-edges (nx, ny, nz-1)
-    i, j, k = _face_grid(sz)
-    e = eidx(ezoff, sz, i, j, k)
-    rows_parts.append(np.concatenate([e, e]))
-    cols_parts.append(np.concatenate([nidx(i, j, k + 1), nidx(i, j, k)]))
-    vals_parts.append(np.concatenate([np.full(e.size, 1.0 / hz), np.full(e.size, -1.0 / hz)]))
-
-    rows = np.concatenate(rows_parts)
-    cols = np.concatenate(cols_parts)
-    vals = np.concatenate(vals_parts)
+    for i in range(sz[0]):
+        for j in range(sz[1]):
+            for k in range(sz[2]):
+                e = eidx(ezoff, sz, i, j, k)
+                rows += [e, e]
+                cols += [nidx(i, j, k + 1), nidx(i, j, k)]
+                vals += [1.0 / hz, -1.0 / hz]
     return sp.csr_matrix((vals, (rows, cols)), shape=(nedge, nnode))
 
 

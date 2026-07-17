@@ -16,7 +16,7 @@ import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 
-__all__ = ["solve_poisson", "CoupledPDESystem", "solve_elasticity", "run_coupled"]
+__all__ = ["solve_poisson", "CoupledPDESystem", "solve_elasticity"]
 
 
 def _diffusion_blocks(shape, kappa, spacing):
@@ -188,32 +188,3 @@ def solve_elasticity(shape, body_force, *, lame_lambda=1.0, lame_mu=1.0, spacing
     b[n:][~interior] = dv[~interior, 1]
     u = spla.spsolve(a, b)
     return np.stack([u[:n], u[n:]], axis=1).reshape(nx, ny, 2)
-
-
-def run_coupled(
-    shape,
-    conductivities: Sequence[Any],
-    coupling: np.ndarray,
-    sources: Sequence[Any],
-    *,
-    dirichlet: Sequence[Any] | float = 0.0,
-    spacing: float = 1.0,
-    provenance: dict | None = None,
-) -> dict[str, np.ndarray]:
-    """Provenance-carrying wrapper over :class:`CoupledPDESystem` for one tightly-coupled ``op="coupled"``
-    scenario step (work-plan workstream P, P2).
-
-    Assembles and solves the ``K``-field node-local-coupled block system in one call --
-    ``CoupledPDESystem(shape, conductivities, coupling, spacing=spacing).solve(sources, dirichlet)`` --
-    and packages the resulting fields as ``{"field_0": u_0, "field_1": u_1, ...}`` so a scenario runner
-    (``mixle_pde.simulation_service``) can hash and persist it as a content-addressed artifact exactly
-    like any other forward's output. ``provenance`` is accepted so a caller can pass through scenario-
-    level provenance (e.g. the step's op/params) for logging or validation; it is not embedded in the
-    returned arrays since the return type is a plain ``dict[str, np.ndarray]`` -- the caller attaches it
-    when writing the result artifact.
-    """
-    if provenance is not None and not isinstance(provenance, dict):
-        raise TypeError(f"provenance must be a dict or None, got {type(provenance)!r}")
-    system = CoupledPDESystem(shape, conductivities, coupling, spacing=spacing)
-    fields = system.solve(sources, dirichlet)
-    return {f"field_{i}": field for i, field in enumerate(fields)}

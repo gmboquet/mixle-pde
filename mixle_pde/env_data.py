@@ -1,10 +1,4 @@
-"""Ocean/atmosphere environmental-medium assembler: real-world profiles/rasters onto the (nz, nr) coefficient
-fields the sonar/radar solvers eat.
-
-This is not a mineral/geoscience field-data ingest path; SEG-Y/LAS/potential-field/assay ingest is workstream B
-(absent today). What lives here is the ocean/atmosphere propagation-medium pipeline: GEBCO bathymetry, WOA/Argo
-sound-speed climatology, DEM terrain, and ERA5 refractivity profiles (via the ``load_*`` functions below),
-assembled onto the solver grids that ``parabolic_equation``/``helmholtz_pml`` consume.
+"""Environmental field assembler: real-world profiles/rasters onto the (nz, nr) coefficient fields solvers eat.
 
 The parabolic-equation and Helmholtz forwards in this package (``parabolic_equation``, ``helmholtz_pml``) run on
 a regular range-depth grid and want a single flat per-node coefficient field: a sound speed ``c(z, r)`` for
@@ -20,11 +14,10 @@ points, so the profile itself is an invertible latent driver behind a sonar/rada
 helper :func:`seabed_mask` marks below-seabed / above-terrain nodes so they can be flagged or filled.
 
 The optional loaders (:func:`load_gebco`, :func:`load_woa_argo`, :func:`load_dem`, :func:`load_era5_profile`)
-are thin interfaces onto real ocean/atmosphere datasets (GEBCO, WOA-Argo, DEM, ERA5). They import their heavy
-backend (xarray / rasterio / cfgrib) *inside* the function and raise a clear ImportError naming the extra to
-install if it is absent, so importing this module and running the core never needs any of them. They read a
-local file plus a lon/lat/time subset and return plain numpy arrays that feed :func:`assemble_field`; they never
-download or vendor data.
+are thin interfaces onto real datasets. They import their heavy backend (xarray / rasterio / cfgrib) *inside*
+the function and raise a clear ImportError naming the extra to install if it is absent, so importing this module
+and running the core never needs any of them. They read a local file plus a lon/lat/time subset and return
+plain numpy arrays that feed :func:`assemble_field`; they never download or vendor data.
 """
 
 from __future__ import annotations

@@ -22,9 +22,6 @@ This module adds the machinery those problems actually need:
   per-problem prior tuning.
 * :func:`cross_gradient` and :func:`joint_inversion` -- structural (cross-gradient) coupling of several
   property models that share boundaries but not a petrophysical law, and the joint inverter that uses it.
-* :func:`gravity_prism_sensitivity` and :func:`magnetic_prism_sensitivity` -- the exact rectangular-prism
-  potential-field kernels (Nagy 1966 / Plouff 1976; Bhattacharyya 1964), for cells near or beneath an
-  observation where the point-mass/point-dipole kernels above are only a coarse-mesh approximation.
 
 Everything is torch-differentiable and uses the package's existing ``divergence_form`` / ``sparse_solve``;
 nothing here patches mixle.
@@ -44,13 +41,9 @@ __all__ = [
     "traveltime_tomography",
     "magnetic_dipole_sensitivity",
     "gravity_point_sensitivity",
-    "gravity_prism_sensitivity",
-    "magnetic_prism_sensitivity",
     "depth_weighting",
-    "depth_weighted_roughness",
     "roughness_operator",
     "regularized_gauss_newton",
-    "invert_potential_field",
     "cross_gradient",
     "joint_inversion",
 ]
@@ -70,17 +63,14 @@ def field_direction(inclination_deg, declination_deg):
 
 
 def magnetic_dipole_sensitivity(obs, cells, volumes, *, inclination, declination, field_nt=50000.0):
-    r"""COARSE-MESH APPROXIMATION -- not field-ready; exact prism kernels are C4. This is the
-    induced-magnetization point-dipole approximation (each cell a point dipole along the ambient field); the
-    exact rectangular-prism formula (Bhattacharyya 1964) is the rigorous alternative.
-
-    Linear sensitivity matrix ``G`` (n_obs x n_cells) of the magnetic **total-field anomaly** to cell
-    susceptibility. With susceptibility ``kappa`` (SI, dimensionless), ``d = G @ kappa`` gives the anomaly in nT.
+    r"""Linear sensitivity matrix ``G`` (n_obs x n_cells) of the magnetic **total-field anomaly** to cell
+    susceptibility, under the induced-magnetization dipole approximation (each cell a point dipole along the
+    ambient field). With susceptibility ``kappa`` (SI, dimensionless), ``d = G @ kappa`` gives the anomaly in nT.
 
     For a cell of volume ``V`` at displacement ``r`` from an observation point, with field unit vector ``b``
     and strength ``T0``: ``dT = (T0 V / 4pi) (3 (b.r_hat)^2 - 1) / |r|^3 * kappa`` -- the standard dipole
     total-field kernel. This is the cheap, robust approximation good for coarse meshes and observations above
-    the cells.
+    the cells; the exact rectangular-prism formula (Bhattacharyya 1964) is the rigorous alternative.
 
     Args:
         obs: (n_obs, 3) observation coordinates (east, north, up), metres.
@@ -103,16 +93,14 @@ def magnetic_dipole_sensitivity(obs, cells, volumes, *, inclination, declination
 
 
 def gravity_point_sensitivity(obs, cells, volumes):
-    r"""COARSE-MESH APPROXIMATION -- not field-ready; exact prism kernels are C4. This is the point-mass
-    approximation (each cell a point mass at its centre); the exact rectangular-prism formula (Nagy 1966 /
-    Plouff 1976) is the rigorous alternative for coarse meshes near observations.
-
-    Linear sensitivity matrix ``G`` (n_obs x n_cells) of the **vertical gravity anomaly** to cell density
-    contrast. With density contrast ``rho`` (kg/m^3), ``d = G @ rho`` gives the anomaly in **mGal**.
+    r"""Linear sensitivity matrix ``G`` (n_obs x n_cells) of the **vertical gravity anomaly** to cell density
+    contrast, under the point-mass approximation (each cell a point mass at its centre). With density contrast
+    ``rho`` (kg/m^3), ``d = G @ rho`` gives the anomaly in **mGal**.
 
     For a cell of volume ``V`` at displacement ``r`` from an observation point (vertical offset ``dz``, with
     ``z`` up so the cell is below): ``g_z = 1e5 * G_grav * V * dz / |r|^3 * rho`` (the ``1e5`` converts
-    m/s^2 to mGal). Linear in ``rho``.
+    m/s^2 to mGal). Linear in ``rho``. The exact rectangular-prism formula (Nagy 1966 / Plouff 1976) is the
+    rigorous alternative for coarse meshes near observations.
 
     Args:
         obs: (n_obs, 3) observation coordinates (east, north, up), metres.
@@ -131,139 +119,11 @@ def gravity_point_sensitivity(obs, cells, volumes):
     return 1.0e5 * G_GRAV * V[None, :] * d[:, :, 2] / r**3
 
 
-_G_GRAV = 6.674e-11
-
-
-def _prism_potential_gradient(obs, cell_mins, cell_maxs, axis):
-    r"""Closed-form ``d/d(obs_axis) [ integral_cell 1/r dV' ]`` for an axis-aligned rectangular prism cell
-    (the Nagy 1966 / Plouff 1976 triple-integrated Newtonian kernel), vectorized over ``(n_obs, n_cells)``.
-
-    This is the shared building block behind both :func:`gravity_prism_sensitivity` (``axis=2``, i.e. the
-    vertical component) and :func:`magnetic_prism_sensitivity` (all three axes, contracted with the field
-    direction). Written as the standard 8-corner alternating sum
-
-    .. math:: g_{axis} = -\sum_{i,j,k \in \{1,2\}} (-1)^{i+j+k}
-        \Big[ u\,\ln(r+v) + v\,\ln(r+u) - s\,\mathrm{atan2}(uv,\, sr) \Big]
-
-    where ``s`` is the coordinate along ``axis`` (observation minus the corresponding cell corner) and
-    ``u, v`` are the other two axes in cyclic order (cell corner minus observation), ``r`` the corner
-    distance. Every corner combination is visited once via the two nested Python loops below (8 total,
-    fixed cost, not a function of mesh resolution), and the whole thing is a plain vectorized numpy
-    expression over the ``(n_obs, n_cells)`` broadcast -- no per-cell Python loop.
-
-    This closed form is validated (see ``c4_prism_test.py``) against direct numerical quadrature of the
-    defining volume integral to ~1e-10 relative accuracy, and against the point-mass limit as the prism
-    shrinks to a point (matching :func:`gravity_point_sensitivity`).
-    """
-    obs = np.asarray(obs, float)
-    cell_mins = np.asarray(cell_mins, float)
-    cell_maxs = np.asarray(cell_maxs, float)
-    u_axis = (axis + 1) % 3
-    v_axis = (axis + 2) % 3
-    o_s = obs[:, None, axis]
-    o_u = obs[:, None, u_axis]
-    o_v = obs[:, None, v_axis]
-    # special (differentiation) axis: observation-minus-corner; in-plane axes: corner-minus-observation.
-    s1 = o_s - cell_maxs[None, :, axis]
-    s2 = o_s - cell_mins[None, :, axis]
-    u1 = cell_mins[None, :, u_axis] - o_u
-    u2 = cell_maxs[None, :, u_axis] - o_u
-    v1 = cell_mins[None, :, v_axis] - o_v
-    v2 = cell_maxs[None, :, v_axis] - o_v
-    n_obs, n_cells = obs.shape[0], cell_mins.shape[0]
-    total = np.zeros((n_obs, n_cells))
-    eps = 1e-10
-    for i, s in enumerate((s1, s2), start=1):
-        for j, u in enumerate((u1, u2), start=1):
-            for k, v in enumerate((v1, v2), start=1):
-                r = np.maximum(np.sqrt(s**2 + u**2 + v**2), eps)
-                sign = (-1) ** (i + j + k)
-                term = (
-                    u * np.log(np.maximum(r + v, eps))
-                    + v * np.log(np.maximum(r + u, eps))
-                    - s * np.arctan2(u * v, s * r)
-                )
-                total += sign * term
-    return -total
-
-
-def gravity_prism_sensitivity(obs, cell_mins, cell_maxs, *, units="mGal"):
-    r"""EXACT rectangular-prism vertical gravity sensitivity (Nagy 1966 / Plouff 1976), replacing the
-    point-mass approximation (:func:`gravity_point_sensitivity`) with the closed-form triple integral of
-    ``(z0 - z') / r^3`` over each cell's true volume -- accurate arbitrarily close to a cell, where the
-    point-mass kernel is only a coarse-mesh approximation.
-
-    Linear sensitivity matrix ``G`` (n_obs x n_cells) of the vertical gravity anomaly to cell density
-    contrast; ``d = G @ rho`` gives the anomaly in the requested ``units`` (default mGal), matching
-    :func:`gravity_point_sensitivity`'s convention exactly (same sign, same units) so the two are drop-in
-    alternatives -- point kernel for a coarse/far mesh, this one near the observations or wherever the
-    cell size is not small relative to the observation distance.
-
-    Args:
-        obs: (n_obs, 3) observation coordinates (east, north, up), metres.
-        cell_mins: (n_cells, 3) lower corner of each axis-aligned rectangular cell, metres.
-        cell_maxs: (n_cells, 3) upper corner of each axis-aligned rectangular cell, metres.
-        units: ``"mGal"`` (default; ``1e5`` x SI) or ``"si"`` (m/s^2 per kg/m^3).
-
-    Returns:
-        ``G`` (n_obs, n_cells) such that ``G @ rho`` is the vertical gravity anomaly.
-    """
-    if units not in ("mGal", "si"):
-        raise ValueError(f"unknown units {units!r}; use 'mGal' or 'si'.")
-    g_si = _G_GRAV * _prism_potential_gradient(obs, cell_mins, cell_maxs, axis=2)
-    return 1.0e5 * g_si if units == "mGal" else g_si
-
-
-def magnetic_prism_sensitivity(obs, cell_mins, cell_maxs, *, inclination, declination, field_nt=50000.0):
-    r"""EXACT rectangular-prism total-field magnetic sensitivity under induced magnetization
-    (Bhattacharyya 1964), replacing the point-dipole approximation
-    (:func:`magnetic_dipole_sensitivity`) with the true volume integral of the induced-dipole TMI kernel
-    ``(3(b.r_hat)^2 - 1)/r^3`` over each cell.
-
-    By the same Poisson relation that ties a uniformly-magnetized body's potential to the directional
-    derivative of its equivalent-density gravity potential, the total-field anomaly is the *second*
-    directional derivative (along the field direction ``b``) of the prism's Newtonian potential
-    ``Phi(cell) = integral_cell 1/r dV'``. The *first* directional derivative is exact/closed-form (three
-    calls to :func:`_prism_potential_gradient`, one per axis, contracted with ``b``); the second is taken
-    as a central difference of that closed-form scalar along ``b`` at a step size tied to the survey's own
-    length scale, so the only non-exact piece is a well-conditioned O(h^2) finite difference of an already
-    exact function -- not a re-approximation of the cell geometry. Validated against direct quadrature of
-    the defining volume integral to ~1e-6 relative accuracy (see ``c4_prism_test.py``).
-
-    Args:
-        obs: (n_obs, 3) observation coordinates (east, north, up), metres.
-        cell_mins: (n_cells, 3) lower corner of each axis-aligned rectangular cell, metres.
-        cell_maxs: (n_cells, 3) upper corner of each axis-aligned rectangular cell, metres.
-        inclination, declination: geomagnetic field inclination/declination, degrees.
-        field_nt: ambient field strength T0, nT.
-
-    Returns:
-        ``G`` (n_obs, n_cells) such that ``G @ kappa`` is the total-field anomaly (nT).
-    """
-    b = field_direction(inclination, declination)
-    obs = np.asarray(obs, float)
-    cell_mins = np.asarray(cell_mins, float)
-    cell_maxs = np.asarray(cell_maxs, float)
-    scale = max(1.0, float(np.ptp(np.vstack([obs, cell_mins, cell_maxs]))))
-    h = 1.0e-4 * scale
-
-    def _directional_derivative(o):
-        gx = _prism_potential_gradient(o, cell_mins, cell_maxs, axis=0)
-        gy = _prism_potential_gradient(o, cell_mins, cell_maxs, axis=1)
-        gz = _prism_potential_gradient(o, cell_mins, cell_maxs, axis=2)
-        return b[0] * gx + b[1] * gy + b[2] * gz
-
-    shift = h * b[None, :]
-    second_directional = (_directional_derivative(obs + shift) - _directional_derivative(obs - shift)) / (2.0 * h)
-    return -(field_nt / (4.0 * np.pi)) * second_directional
-
-
 def depth_weighting(cell_z, z0, *, nu=3.0, eps=None):
     r"""Li & Oldenburg (1996, 1998) depth weighting ``w(z) = (|z - z0| + eps)^{-nu/2}``, normalized by its
     maximum. Potential-field kernels decay with depth, so an unweighted inversion piles all structure at the
-    surface; multiplying ``w`` into each cell's *column* of the model regularization compensates -- see
-    :func:`depth_weighted_roughness`. Use ``nu=3`` for magnetics, ``nu=2`` for gravity (the Li & Oldenburg /
-    SimPEG values).
+    surface; folding ``w`` into the model regularization compensates. Use ``nu=3`` for magnetics, ``nu=2`` for
+    gravity (the Li & Oldenburg / SimPEG values).
 
     Args:
         cell_z: (n_cells,) vertical coordinate of each cell centre (same sign convention as ``z0``).
@@ -272,14 +132,7 @@ def depth_weighting(cell_z, z0, *, nu=3.0, eps=None):
         eps: offset preventing a singularity at ``z = z0``; defaults to half the smallest cell spacing.
 
     Returns:
-        (n_cells,) weights in (0, 1], **largest near the surface/observation height and decaying with
-        depth** -- mirroring how the potential-field kernel's own sensitivity decays with depth, so that
-        :func:`depth_weighted_roughness` penalizes shallow structure more than deep structure of the same
-        magnitude (a smaller ``w`` at depth means a deep cell contributes less to the weighted roughness
-        norm for the same density value, letting it absorb more of the fit without being fought by the
-        regularizer). Earlier revisions of this docstring said the opposite ("largest at depth") -- that
-        was a documentation error, not a change in the formula; verified numerically (``w`` is
-        monotonically decreasing in ``|z - z0|`` by construction).
+        (n_cells,) weights in (0, 1], largest at depth.
     """
     z = np.asarray(cell_z, float)
     if eps is None:
@@ -287,31 +140,6 @@ def depth_weighting(cell_z, z0, *, nu=3.0, eps=None):
         eps = 0.5 * (dz.min() if len(dz) else 1.0)
     w = (np.abs(z - z0) + eps) ** (-nu / 2.0)
     return w / w.max()
-
-
-def depth_weighted_roughness(roughness, cell_z, z0, *, nu=3.0, eps=None):
-    """Scale a :func:`roughness_operator`'s columns by :func:`depth_weighting`, so the resulting operator
-    is ready to pass straight into :func:`regularized_gauss_newton`'s ``roughness=`` argument.
-
-    This is the piece that was missing before: :func:`depth_weighting` existed but nothing in this module
-    (or any caller) actually wired it into an inversion, so every potential-field inversion here
-    regularized shallow and deep structure identically -- and, because shallow cells have far larger
-    sensitivity, recovered density/susceptibility systematically piled up near the surface regardless of
-    the true source depth. Passing ``depth_weighted_roughness(...)`` instead of the plain
-    :func:`roughness_operator` output fixes that at the source.
-
-    Args:
-        roughness: a ``(k, n_cells)`` scipy-sparse operator, e.g. :func:`roughness_operator`'s output.
-        cell_z: (n_cells,) vertical coordinate of each cell centre (same convention as :func:`depth_weighting`).
-        z0: reference level (e.g. the observation height).
-        nu: exponent (3 magnetics, 2 gravity) -- forwarded to :func:`depth_weighting`.
-        eps: forwarded to :func:`depth_weighting`.
-
-    Returns:
-        A ``(k, n_cells)`` scipy-sparse matrix: ``roughness`` with column ``j`` scaled by ``w[j]``.
-    """
-    w = depth_weighting(cell_z, z0, nu=nu, eps=eps)
-    return roughness.multiply(w[None, :]).tocsr()
 
 
 # --------------------------------------------------------------------------------------------------
@@ -668,7 +496,6 @@ def regularized_gauss_newton(
     line_search: int = 25,
     rtol: float = 1e-4,
     verbose: bool = False,
-    reweight: Callable[[np.ndarray], np.ndarray] | None = None,
 ):
     r"""Occam-style regularized Gauss-Newton for any differentiable forward ``forward(x) -> data``.
 
@@ -692,14 +519,6 @@ def regularized_gauss_newton(
         line_search: max backtracking halvings per iteration.
         rtol: stop when the relative objective decrease falls below this.
         verbose: print per-iteration objective.
-        reweight: optional ``x -> weights`` callable (one weight per row of ``roughness``) for an
-            Iteratively Reweighted Least Squares (IRLS) surrogate of a non-quadratic model penalty --
-            e.g. :func:`mixle_pde.blocky_priors.total_variation_weights` (blocky/edge-preserving) or
-            :func:`mixle_pde.blocky_priors.minimum_support_weights` (compact-support). When given, the
-            effective smoothness operator ``R_eff = diag(sqrt(reweight(x))) @ R`` is recomputed from the
-            current iterate at the top of every Gauss-Newton iteration, and both the line-search
-            objective and the Gauss-Newton system use that iteration's ``R_eff``. ``None`` (default)
-            reproduces today's plain-quadratic behaviour exactly.
 
     Returns:
         ``(x, std)`` -- the inverted model (numpy) and a linearized posterior standard deviation per cell
@@ -714,36 +533,18 @@ def regularized_gauss_newton(
     w_t = torch.as_tensor(w)
     ref_np = np.zeros(n) if ref is None else np.asarray(ref, float)
     R = sp.eye(n, format="csr") if roughness is None else roughness.tocsr()
-
-    def _weighted_R(xv_np):
-        if reweight is None:
-            return R
-        rw = np.sqrt(np.asarray(reweight(xv_np), dtype=float))
-        if rw.shape != (R.shape[0],):
-            raise ValueError("reweight(x) must return one weight per row of `roughness`.")
-        return sp.diags(rw) @ R
-
-    R_eff = _weighted_R(np.asarray(x0, float))
-    RtR = (R_eff.T @ R_eff).tocsc()
+    RtR = (R.T @ R).tocsc()
     RtR_dense = np.asarray(RtR.todense())
 
     def objective(xv):
         r = ((forward(xv) - data_t) * w_t).detach().cpu().numpy()
-        rr = R_eff @ (xv.detach().cpu().numpy() - ref_np)
+        rr = R @ (xv.detach().cpu().numpy() - ref_np)
         return 0.5 * float(r @ r) + 0.5 * beta * float(rr @ rr)
 
     f_prev = objective(x)
     Jw = H = None
     for it in range(n_iter):
         x0d = x.detach()
-        xnp = x0d.cpu().numpy()
-        if reweight is not None:
-            # IRLS: refresh the reweighted roughness at the current iterate, and re-baseline the
-            # objective the line search below compares against so the decrease test stays meaningful.
-            R_eff = _weighted_R(xnp)
-            RtR = (R_eff.T @ R_eff).tocsc()
-            RtR_dense = np.asarray(RtR.todense())
-            f_prev = objective(x)
         pred = forward(x0d)
         # Gauss-Newton; reuse the Jacobian for `jac_every` iterations (quasi-Newton) -- the forward is
         # mildly nonlinear, so recomputing the expensive sensitivity every step is wasteful.
@@ -751,10 +552,8 @@ def regularized_gauss_newton(
             J = torch.autograd.functional.jacobian(forward, x0d, vectorize=False).detach().cpu().numpy()
             Jw = J * w[:, None]
             H = Jw.T @ Jw + beta * RtR_dense
-        elif reweight is not None:
-            H = Jw.T @ Jw + beta * RtR_dense
         rw = ((pred - data_t) * w_t).detach().cpu().numpy()
-        g = Jw.T @ rw + beta * (RtR @ (xnp - ref_np))
+        g = Jw.T @ rw + beta * (RtR @ (x0d.cpu().numpy() - ref_np))
         try:
             dx = np.linalg.solve(H, -g)
         except np.linalg.LinAlgError:
@@ -782,10 +581,6 @@ def regularized_gauss_newton(
         f_prev = f_now
     # linearized posterior std from the final Gauss-Newton Hessian
     x0d = x.detach()
-    if reweight is not None:
-        R_eff = _weighted_R(x0d.cpu().numpy())
-        RtR = (R_eff.T @ R_eff).tocsc()
-        RtR_dense = np.asarray(RtR.todense())
     J = torch.autograd.functional.jacobian(forward, x0d, vectorize=False).detach().cpu().numpy()
     Jw = J * w[:, None]
     H = Jw.T @ Jw + beta * RtR_dense
@@ -794,91 +589,6 @@ def regularized_gauss_newton(
     except np.linalg.LinAlgError:
         std = np.full(n, np.nan)
     return x.detach().cpu().numpy(), std
-
-
-def invert_potential_field(
-    sensitivity,
-    data,
-    cell_mins,
-    cell_maxs,
-    *,
-    noise=1.0,
-    beta=1.0,
-    z0=0.0,
-    nu=2.0,
-    lower=None,
-    upper=None,
-    n_iter=8,
-    jac_every=3,
-    **gn_kwargs,
-):
-    """Regularized potential-field inversion with depth weighting applied by default.
-
-    A thin composition of :func:`roughness_operator`, :func:`depth_weighted_roughness`, and
-    :func:`regularized_gauss_newton` -- the exact combination every gravity/magnetic inversion in this
-    codebase needs, previously left for each caller to assemble by hand (and, in practice, several
-    callers omitted the depth-weighting step entirely, which is what let recovered density/susceptibility
-    systematically pile up near the surface regardless of the true source depth -- see the module-level
-    finding this function exists to fix at the source rather than leave to be rediscovered per caller).
-
-    Args:
-        sensitivity: ``(n_obs, n_cells)`` linear sensitivity matrix (e.g. :func:`gravity_prism_sensitivity`
-            or :func:`magnetic_prism_sensitivity` output). Since this forward is exactly linear,
-            ``forward(m) = sensitivity @ m`` is built internally -- no separate forward callable needed.
-        data: ``(n_obs,)`` observed data.
-        cell_mins, cell_maxs: ``(n_cells, 3)`` cell corners, the same arrays passed to the sensitivity
-            function -- used to derive each cell's centre depth for :func:`depth_weighting`.
-        noise: data standard deviation (scalar or per-datum array).
-        beta: regularization weight (forwarded to :func:`regularized_gauss_newton`).
-        z0: reference level for depth weighting (default the coordinate origin; pass the true
-            observation height if it differs).
-        nu: depth-weighting exponent (2.0 gravity, 3.0 magnetics -- the Li & Oldenburg / SimPEG values).
-        lower, upper: optional box bounds on the model.
-        n_iter, jac_every: forwarded to :func:`regularized_gauss_newton`.
-        **gn_kwargs: any other :func:`regularized_gauss_newton` keyword (``ref``, ``line_search``,
-            ``rtol``, ``verbose``, ``reweight``).
-
-    Returns:
-        ``(model, std)`` -- same shape/meaning as :func:`regularized_gauss_newton`'s return.
-    """
-    import torch
-
-    cell_mins = np.asarray(cell_mins, dtype=float)
-    cell_maxs = np.asarray(cell_maxs, dtype=float)
-    cell_z = 0.5 * (cell_mins[:, 2] + cell_maxs[:, 2])
-    n_cells = sensitivity.shape[1]
-
-    # roughness_operator needs a structured (nx, ny, nz) shape; potential-field callers here always
-    # build cell_mins/cell_maxs from such a grid, so recover it from the unique per-axis coordinates
-    # rather than require callers to pass the shape redundantly.
-    def _axis_count(col):
-        return len(np.unique(np.round(col, 6)))
-
-    shape = (_axis_count(cell_mins[:, 0]), _axis_count(cell_mins[:, 1]), _axis_count(cell_mins[:, 2]))
-    if int(np.prod(shape)) != n_cells:
-        raise ValueError(
-            f"invert_potential_field could not recover a structured grid shape from cell_mins/cell_maxs "
-            f"(got {shape} = {int(np.prod(shape))} cells, sensitivity has {n_cells}); pass a pre-built "
-            f"depth-weighted roughness operator to regularized_gauss_newton directly for irregular grids."
-        )
-    spacing = tuple(float(np.unique(np.round(cell_maxs[:, ax] - cell_mins[:, ax], 6))[0]) for ax in range(3))
-
-    roughness = depth_weighted_roughness(roughness_operator(shape, spacing=spacing), cell_z, z0, nu=nu)
-    g = torch.as_tensor(np.asarray(sensitivity, dtype=float))
-
-    return regularized_gauss_newton(
-        lambda m: g @ m,
-        data,
-        np.zeros(n_cells),
-        noise=noise,
-        beta=beta,
-        roughness=roughness,
-        lower=lower,
-        upper=upper,
-        n_iter=n_iter,
-        jac_every=jac_every,
-        **gn_kwargs,
-    )
 
 
 # --------------------------------------------------------------------------------------------------
@@ -908,46 +618,6 @@ def cross_gradient(m1, m2, shape, *, spacing=1.0):
     return torch.cat(comps)
 
 
-class JointInversionResult(list):
-    """Return type of :func:`joint_inversion`: a list of the inverted per-model arrays, unpacked/indexed
-    exactly like the historical bare-``list`` return (``m1, m2 = joint_inversion(...)`` is unaffected), plus
-    ``objective_history`` -- the total objective after each accepted outer iteration (index 0 is the initial,
-    pre-iteration objective) -- so a caller can compare how many iterations two configurations needed to reach
-    a given objective value (C7: ``coupling_in_hessian`` convergence-speed check)."""
-
-    objective_history: list
-
-
-def _cross_gradient_gn_blocks(xs_detached: Sequence, shape, spacing: float, n: int) -> list:
-    """Gauss-Newton curvature blocks for the cross-gradient penalty (DR-ALG C7, step 1).
-
-    For every pair ``(i, j)`` linearizes ``t = cross_gradient(x_i, x_j)`` about the current ``xs_detached``:
-    ``B_i = dt/dx_i`` holding ``x_j`` fixed, ``B_j = dt/dx_j`` holding ``x_i`` fixed. Returns, per model, the
-    accumulated ``B^T B`` curvature (unscaled by ``lam`` -- the caller applies the penalty weight), so adding
-    ``lam * blocks[i]`` into ``Hcache[i]`` is the second-order term the RHS-only path only pushes into the
-    gradient.
-    """
-    import torch
-
-    P = len(xs_detached)
-    blocks = [np.zeros((n, n)) for _ in range(P)]
-    for i in range(P):
-        for j in range(i + 1, P):
-            xi_d, xj_d = xs_detached[i], xs_detached[j]
-
-            def f_i(a, _xj=xj_d):
-                return cross_gradient(a, _xj, shape, spacing=spacing)
-
-            def f_j(b, _xi=xi_d):
-                return cross_gradient(_xi, b, shape, spacing=spacing)
-
-            Bi = torch.autograd.functional.jacobian(f_i, xi_d, vectorize=False).detach().cpu().numpy()
-            Bj = torch.autograd.functional.jacobian(f_j, xj_d, vectorize=False).detach().cpu().numpy()
-            blocks[i] += Bi.T @ Bi
-            blocks[j] += Bj.T @ Bj
-    return blocks
-
-
 def joint_inversion(
     forwards: Sequence[Callable],
     datas: Sequence,
@@ -964,7 +634,6 @@ def joint_inversion(
     jac_every: int = 1,
     line_search: int = 25,
     verbose: bool = False,
-    coupling_in_hessian: bool = True,
 ):
     r"""Joint inversion of several property models, optionally coupled by the cross-gradient.
 
@@ -974,19 +643,12 @@ def joint_inversion(
     models are driven to share boundaries while each keeps its own value scale (no petrophysical law assumed).
     A block Gauss-Newton step over the stacked model updates all of them together.
 
-    ``coupling_in_hessian`` (C7): when ``True`` (the default), the Gauss-Newton curvature of the
-    cross-gradient penalty (:func:`_cross_gradient_gn_blocks`) is added into each model's Hessian block,
-    on top of the existing gradient-only coupling -- second-order structural coupling, which converges in
-    fewer outer iterations than pushing the coupling through the gradient alone. Passing ``False`` reproduces
-    the previous (gradient-only / ``lam * eye(n) * 1e-6`` Hessian jitter) behaviour bit-for-bit.
-
     ``bounds`` is ``None``, a single ``(lo, hi)`` applied to every model, or a length-P sequence of per-model
     ``(lo, hi)`` tuples -- use the per-model form when the models live on different scales (e.g. ERT
     log-conductivity vs seismic slowness), so each is clamped to its own physical range.
 
     Returns:
-        `JointInversionResult` -- a list of inverted models (numpy arrays), one per forward, plus an
-        `objective_history` attribute.
+        list of inverted models (numpy arrays), one per forward.
     """
     import torch
 
@@ -1028,10 +690,8 @@ def joint_inversion(
         return tot + xg_pen(xlist)
 
     f_prev = objective(xs)
-    history = [f_prev]
     Hcache = [None] * P
     Jwcache = [None] * P
-    xg_hess_blocks = None
     for it in range(n_iter):
         # per-model Gauss-Newton block (data + smoothness), with the cross-gradient handled by a gradient step
         new = []
@@ -1046,10 +706,6 @@ def joint_inversion(
                     pen = pen + 0.5 * lam * (t * t).sum()
             pen.backward()
             xg_grads = [xv[i].grad.detach().cpu().numpy() for i in range(P)]
-        # cross-gradient GN curvature (C7): recomputed on the same cadence as the per-model Jacobian cache
-        refresh_jac = (it % jac_every == 0) or any(J is None for J in Jwcache)
-        if coupling_in_hessian and lam > 0 and refresh_jac:
-            xg_hess_blocks = _cross_gradient_gn_blocks([x.detach() for x in xs], shape, spacing, n)
         for i in range(P):
             x0d = xs[i].detach()
             pred = forwards[i](x0d)
@@ -1057,8 +713,6 @@ def joint_inversion(
                 J = torch.autograd.functional.jacobian(forwards[i], x0d, vectorize=False).detach().cpu().numpy()
                 Jwcache[i] = J * ws[i][:, None]
                 Hcache[i] = Jwcache[i].T @ Jwcache[i] + betas[i] * RtR + lam * np.eye(n) * 1e-6
-                if coupling_in_hessian and lam > 0 and xg_hess_blocks is not None:
-                    Hcache[i] = Hcache[i] + lam * xg_hess_blocks[i]
             Jw, H = Jwcache[i], Hcache[i]
             rw = ((pred - datas_t[i]) * torch.as_tensor(ws[i])).detach().cpu().numpy()
             g = Jw.T @ rw + betas[i] * (RtR @ x0d.cpu().numpy()) + xg_grads[i]
@@ -1087,7 +741,4 @@ def joint_inversion(
         if not improved:
             break
         f_prev = objective(xs)
-        history.append(f_prev)
-    result = JointInversionResult(x.detach().cpu().numpy() for x in xs)
-    result.objective_history = history
-    return result
+    return [x.detach().cpu().numpy() for x in xs]

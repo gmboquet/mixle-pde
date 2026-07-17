@@ -13,7 +13,6 @@ dist/
 .mypy_cache/
 .coverage
 htmlcov/
-docs/_build/
 
 # Environments
 .venv/

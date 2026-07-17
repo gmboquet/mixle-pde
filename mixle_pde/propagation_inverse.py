@@ -81,22 +81,39 @@ def refractivity_from_clutter(
     received field so that fitting recovers the duct height. The profile is the smooth surface duct of
     :func:`_soft_surface_duct` (trapping below ``h_d``, standard gradient above), differentiable in ``h_d``.
 
-    Arguments:
+    Parameters
+    ----------
+    y : array
+        Observed (complex) received field. Either the full ``(n_range, nz)`` field or, with a custom
+        ``observe``, whatever that returns (e.g. the last-range depth column, a surface strip).
+    duct_height : free handle
+        ``free(1, name="h_d", support="real")`` -- the latent duct height (m) to recover. Use ``"real"``
+        (metre-scale Gauss-Newton steps) rather than a positive/log reparam, which can overshoot.
+    pe : ParabolicEquation2D
+        A configured propagator (radar: ``surface="free"``, ``k0`` from the carrier). Reused every solve.
+    source_depth : float
+        Antenna height (m) for the PE self-starter.
+    m0 : float
+        Surface modified-refractivity level (M-units) the profile starts from.
+    base_gradient : float
+        Standard-atmosphere M-gradient above the duct (~0.118 M-units/m).
+    strength : float
+        Trapping slope magnitude below the duct (M-units/m); the sub-duct gradient is ``-strength`` (< 0).
+    h0 : float
+        Prior duct-height centre (m). The ``duct_height`` driver is fit as an OFFSET from ``h0``, so the
+        Gauss-Newton start (offset 0 -> height ``h0``) lands in the convex basin near the truth. Seed it from a
+        coarse grid search or climatology; the recovered height is ``h0 + posterior mean``. Default 0.
+    starter_width, n_range :
+        PE starter width and number of range steps (defaults: ``pe`` starter default, full ``y`` length).
+    observe : callable, optional
+        ``observe(field, p, ops) -> predicted`` mapping the marched ``(n_range, nz)`` complex field to the
+        observed quantity. Default: the whole field.
+    scale, family :
+        Passed through to :func:`Differential` (noise level, ``'gaussian'``).
 
-    * ``y`` - Observed complex received field. Either the full ``(n_range, nz)`` field or, with a custom
-      ``observe``, whatever that returns.
-    * ``duct_height`` - ``free(1, name="h_d", support="real")``; the latent duct height in metres.
-    * ``pe`` - Configured radar propagator, reused every solve.
-    * ``source_depth`` - Antenna height in metres for the PE self-starter.
-    * ``m0``, ``base_gradient``, ``strength`` - Modified-refractivity profile controls.
-    * ``h0`` - Prior duct-height centre; the driver is fit as an offset from this value.
-    * ``starter_width`` and ``n_range`` - PE starter width and number of range steps.
-    * ``observe`` - Optional ``observe(field, p, ops) -> predicted`` mapping.
-    * ``scale`` and ``family`` - Noise scale and observation family passed through to :func:`Differential`.
-
-    Returns:
-        The ``(field, proxy)`` pair for :func:`joint`. Multi-parameter extensions add another free driver,
-        such as ``strength`` or ``m0``, and reference it in a wrapping forward.
+    Returns the ``(field, proxy)`` pair for :func:`joint`. Multi-parameter extension: add a second free
+    driver for ``strength`` (or ``m0``) and reference ``p.strength`` in a wrapping forward; the machinery is
+    unchanged.
     """
     z = pe.depths()
     psi0 = pe.starter(float(source_depth), width=starter_width)
@@ -146,21 +163,31 @@ def ocean_sound_speed_inversion(
     the field magnitude, so a uniform offset is unobservable in ``|field|``. A localized anomaly reshapes the
     field and is recoverable. The same pattern with a seabed-keyed shape recovers a geoacoustic sound speed.
 
-    Arguments:
+    Parameters
+    ----------
+    y : array
+        Observed (complex) received field (full field or whatever ``observe`` returns).
+    sound_speed_offset : free handle
+        ``free(1, name="dc", support="real")`` -- the latent anomaly amplitude (m/s) to recover.
+    pe : ParabolicEquation2D
+        A configured propagator (index reference ``pe.c0``). Reused every solve.
+    source_depth : float
+        Source depth (m) for the PE self-starter.
+    c_profile : array or tensor
+        Background sound-speed column ``c0(z)`` (length ``nz``, m/s).
+    anomaly_depth : float, optional
+        Centre depth (m) of the default Gaussian anomaly (default: mid water column).
+    anomaly_width : float
+        Half-width (m) of the default Gaussian anomaly ``exp(-((z - z0)/w)^2)``.
+    anomaly_shape : array or tensor, optional
+        A custom (length ``nz``) anomaly profile; overrides the Gaussian. Use a seabed mask for geoacoustic
+        inversion, a mixed-layer step for a thermocline, etc.
+    starter_width, n_range, observe, scale, family :
+        As in :func:`refractivity_from_clutter`.
 
-    * ``y`` - Observed complex received field.
-    * ``sound_speed_offset`` - ``free(1, name="dc", support="real")``; the anomaly amplitude in metres per
-      second.
-    * ``pe`` - Configured PE propagator, reused every solve.
-    * ``source_depth`` - Source depth in metres for the PE self-starter.
-    * ``c_profile`` - Background sound-speed column ``c0(z)`` of length ``nz``.
-    * ``anomaly_depth``, ``anomaly_width``, ``anomaly_shape`` - Controls for the localized anomaly profile.
-    * ``starter_width``, ``n_range``, ``observe``, ``scale``, ``family`` - Same meanings as in
-      :func:`refractivity_from_clutter`.
-
-    Returns:
-        The ``(field, proxy)`` pair for :func:`joint`. Multi-parameter extensions add another free driver,
-        such as anomaly depth or seabed sound speed, and reference it in the forward.
+    Returns the ``(field, proxy)`` pair for :func:`joint`. Multi-parameter extension: add a second free
+    driver for the anomaly depth (or a seabed sound speed on a depth mask) and reference it in the forward;
+    the inverse machinery is unchanged.
     """
     import torch
 

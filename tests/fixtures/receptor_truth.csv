@@ -1,2 +1,0 @@
-receptor_id,x,y,z,concentration_g_m3,units,pathway,note
-community-1,620.0,15.0,0.0,6.2739942448e-04,g/m3,air,"Pasquill-Gifford class-D ground-level plume reference (Q=8.0 g/s, u=3.0 m/s, H=0); stands in for G3 gaussian_plume pending its landing"
