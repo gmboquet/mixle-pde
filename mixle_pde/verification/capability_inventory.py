@@ -18,11 +18,13 @@ Methodology and honesty notes
   per-function proof that every symbol in the module is differentiable end to end.
 * ``complex_support`` means the module uses a complex dtype or the literal imaginary unit somewhere in
   its primary compute path (frequency-domain / spectral methods, mostly).
-* ``parallel_status`` is ``"single_process"`` for every entry: a repo-wide sweep found no ``mpi4py``,
-  no ``multiprocessing``, and no ``concurrent.futures``/``joblib`` usage anywhere under ``mixle_pde/``.
-  Vectorized NumPy/Torch operations are the only concurrency mixle-pde has today; distributed/MPI
-  execution is explicitly future (production-backend) work per the mixle-pde work plan's ADR-3, not
-  something this inventory should imply exists.
+* ``parallel_status`` is ``"single_process"`` for every entry except
+  ``mixle_pde.parallel_bayesian_execution`` (MP-I9), which reports ``"multi_process"``: a repo-wide
+  sweep otherwise found no ``mpi4py``, no ``multiprocessing``, and no ``concurrent.futures``/``joblib``
+  usage anywhere under ``mixle_pde/``. Vectorized NumPy/Torch operations are the only other concurrency
+  mixle-pde has; true multi-node/MPI execution remains explicitly future (production-backend) work per
+  the mixle-pde work plan's ADR-3 and is not claimed by that one exception either -- see its own module
+  docstring for the precise (single-machine, multi-process) boundary.
 * Non-solver modules (Bayesian posterior utilities, likelihood models, environmental data loaders,
   infrastructure/glue code) are inventoried too -- ``is_solver=False`` and the PDE-specific axes
   (``dimension``, ``grid_type``, ``boundary_conditions``, ``time_regime``) read ``"not_applicable"``
@@ -1807,6 +1809,43 @@ CAPABILITY_INVENTORY: tuple[SolverProfile, ...] = (
         verification_level="analytic_reference_checked",
         public_symbols=("ParabolicEquation2D", "modified_refractivity_index", "lloyd_mirror_pressure"),
         limitations=("single-process only: no MPI, multiprocessing, or distributed execution path",),
+    ),
+    SolverProfile(
+        module="mixle_pde.parallel_bayesian_execution",
+        category="bayesian_field_inference",
+        is_solver=False,
+        method=(
+            "Schedules independent metropolis_field_invert chains across OS processes via "
+            "concurrent.futures.ProcessPoolExecutor, each from its own counter-based (Philox) random "
+            "stream; failure-aware retry and wall-clock budget/cancellation via job_governance; "
+            "checkpoint/resume via mcmc_checkpoint (MP-I9 baseline)."
+        ),
+        dimension=("not_applicable",),
+        grid_type="not_applicable",
+        boundary_conditions=("not_applicable",),
+        differentiable=False,
+        complex_support=False,
+        time_regime="not_applicable",
+        parallel_status="multi_process",
+        verification_level="analytic_reference_checked",
+        public_symbols=(
+            "ChainOutcome",
+            "ParallelChainRun",
+            "ProblemFactory",
+            "spawn_counter_streams",
+            "run_parallel_chains",
+            "resume_parallel_chains",
+        ),
+        limitations=(
+            "multi-chain MCMC only: particle/SMC/ensemble-Kalman scheduling and adjoint-checkpoint "
+            "scheduling are not covered, a genuinely separate remainder of MP-I9's full scope",
+            "multi-process on one machine, not multi-node/MPI or GPU/device scheduling",
+            "cancellation is cooperative and pre-dispatch only: a chain already running when the "
+            "wall-clock budget is exceeded is never preempted mid-call",
+            "attribution is chain/segment-level (which worker process ran which chain, how many "
+            "attempts, wall-clock time), not per-individual-proposal -- metropolis_field_invert is "
+            "treated as a black box and is never instrumented internally",
+        ),
     ),
     SolverProfile(
         module="mixle_pde.pde",

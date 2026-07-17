@@ -2153,6 +2153,38 @@
     },
     {
       "boundary_conditions": [
+        "not_applicable"
+      ],
+      "category": "bayesian_field_inference",
+      "complex_support": false,
+      "differentiable": false,
+      "dimension": [
+        "not_applicable"
+      ],
+      "grid_type": "not_applicable",
+      "is_solver": false,
+      "limitations": [
+        "multi-chain MCMC only: particle/SMC/ensemble-Kalman scheduling and adjoint-checkpoint scheduling are not covered, a genuinely separate remainder of MP-I9's full scope",
+        "multi-process on one machine, not multi-node/MPI or GPU/device scheduling",
+        "cancellation is cooperative and pre-dispatch only: a chain already running when the wall-clock budget is exceeded is never preempted mid-call",
+        "attribution is chain/segment-level (which worker process ran which chain, how many attempts, wall-clock time), not per-individual-proposal -- metropolis_field_invert is treated as a black box and is never instrumented internally"
+      ],
+      "method": "Schedules independent metropolis_field_invert chains across OS processes via concurrent.futures.ProcessPoolExecutor, each from its own counter-based (Philox) random stream; failure-aware retry and wall-clock budget/cancellation via job_governance; checkpoint/resume via mcmc_checkpoint (MP-I9 baseline).",
+      "module": "mixle_pde.parallel_bayesian_execution",
+      "parallel_status": "multi_process",
+      "public_symbols": [
+        "ChainOutcome",
+        "ParallelChainRun",
+        "ProblemFactory",
+        "spawn_counter_streams",
+        "run_parallel_chains",
+        "resume_parallel_chains"
+      ],
+      "time_regime": "not_applicable",
+      "verification_level": "analytic_reference_checked"
+    },
+    {
+      "boundary_conditions": [
         "neumann"
       ],
       "category": "fem_pde_core",

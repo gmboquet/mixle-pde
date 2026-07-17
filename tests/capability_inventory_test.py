@@ -113,8 +113,16 @@ def test_solver_axes_are_never_empty_or_none():
 
 
 def test_parallel_status_is_reported_for_every_module():
-    """Repo-wide finding: no MPI/multiprocessing anywhere in mixle_pde today; must say so, not omit it."""
-    assert all(p.parallel_status == "single_process" for p in CAPABILITY_INVENTORY)
+    """Repo-wide finding: no MPI/multiprocessing anywhere in mixle_pde -- with one named exception.
+
+    mixle_pde.parallel_bayesian_execution (MP-I9) genuinely dispatches chains across OS processes via
+    concurrent.futures.ProcessPoolExecutor, so it correctly reports "multi_process" rather than
+    "single_process" -- carved out by name, not by weakening this invariant for every other module.
+    """
+    multi_process_modules = {"mixle_pde.parallel_bayesian_execution"}
+    for profile in CAPABILITY_INVENTORY:
+        expected = "multi_process" if profile.module in multi_process_modules else "single_process"
+        assert profile.parallel_status == expected, profile.module
 
 
 def test_get_profile_round_trips_and_rejects_unknown_module():
