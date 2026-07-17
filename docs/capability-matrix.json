@@ -1050,6 +1050,34 @@
     },
     {
       "boundary_conditions": [
+        "not_applicable"
+      ],
+      "category": "bayesian_field_inference",
+      "complex_support": false,
+      "differentiable": false,
+      "dimension": [
+        "not_applicable"
+      ],
+      "grid_type": "not_applicable",
+      "is_solver": false,
+      "limitations": [
+        "single-process only: no MPI, multiprocessing, or distributed execution path",
+        "mean-field (diagonal-covariance) approximation only: exact for the posterior mean of a Gaussian target but systematically underestimates marginal variance in correlated directions -- never a full-rank/correlated covariance -- quantified in tests/field_vi_test.py rather than only asserted",
+        "requires a Jacobian-bearing (has_adjoint) observation operator for every observation, exactly like mala_field_invert/hmc_field_invert"
+      ],
+      "method": "Mean-field (diagonal-covariance) Gaussian variational inference for latent 3D fields, fit by reparameterization-trick stochastic ELBO ascent against the same log-posterior/gradient kernels field_mcmc's gradient-based samplers use (MP-I5).",
+      "module": "mixle_pde.field_vi",
+      "parallel_status": "single_process",
+      "public_symbols": [
+        "VIReport",
+        "mean_field_vi_invert",
+        "elbo_estimate"
+      ],
+      "time_regime": "not_applicable",
+      "verification_level": "analytic_reference_checked"
+    },
+    {
+      "boundary_conditions": [
         "dirichlet_no_slip_walls"
       ],
       "category": "fluid_flow",

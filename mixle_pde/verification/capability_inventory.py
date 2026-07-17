@@ -948,6 +948,38 @@ CAPABILITY_INVENTORY: tuple[SolverProfile, ...] = (
         limitations=("single-process only: no MPI, multiprocessing, or distributed execution path",),
     ),
     SolverProfile(
+        module="mixle_pde.field_vi",
+        category="bayesian_field_inference",
+        is_solver=False,
+        method=(
+            "Mean-field (diagonal-covariance) Gaussian variational inference for latent 3D fields, fit by "
+            "reparameterization-trick stochastic ELBO ascent against the same log-posterior/gradient "
+            "kernels field_mcmc's gradient-based samplers use (MP-I5)."
+        ),
+        dimension=("not_applicable",),
+        grid_type="not_applicable",
+        boundary_conditions=("not_applicable",),
+        differentiable=False,
+        complex_support=False,
+        time_regime="not_applicable",
+        parallel_status="single_process",
+        verification_level="analytic_reference_checked",
+        public_symbols=(
+            "VIReport",
+            "mean_field_vi_invert",
+            "elbo_estimate",
+        ),
+        limitations=(
+            "single-process only: no MPI, multiprocessing, or distributed execution path",
+            "mean-field (diagonal-covariance) approximation only: exact for the posterior mean of a "
+            "Gaussian target but systematically underestimates marginal variance in correlated "
+            "directions -- never a full-rank/correlated covariance -- quantified in tests/field_vi_test.py "
+            "rather than only asserted",
+            "requires a Jacobian-bearing (has_adjoint) observation operator for every observation, "
+            "exactly like mala_field_invert/hmc_field_invert",
+        ),
+    ),
+    SolverProfile(
         module="mixle_pde.flow",
         category="fluid_flow",
         is_solver=True,
