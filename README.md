@@ -2,7 +2,7 @@
 
 PDE and ODE-constrained Bayesian inverse problems for [mixle](https://github.com/gmboquet/mixle).
 
-For `0.8.0`, this repository is also the integrated compatibility profile for Mixle Physics, Simulation, and
+For `0.8.3` (pre-release `0.8.3rc1`), this repository is also the integrated compatibility profile for Mixle Physics, Simulation, and
 Discrete artifacts. Existing solvers remain available; new canonical adapters expose explicit capability,
 conversion, residual, parity, and migration receipts rather than turning this package into a second semantic owner.
 

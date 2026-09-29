@@ -2,7 +2,7 @@ name: tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, release/0.8.3]
   pull_request:
   workflow_dispatch:
 
@@ -43,7 +43,7 @@ jobs:
       # If gmboquet/mixle is private, add a MIXLE_TOKEN secret and prefix the URL with
       # x-access-token:${{ secrets.MIXLE_TOKEN }}@ before github.com.
       - name: Install mixle (core dependency)
-        run: pip install "mixle @ git+https://github.com/gmboquet/mixle.git@release/0.8.0"
+        run: pip install "mixle @ git+https://github.com/gmboquet/mixle.git@release/0.8.3"
       - name: Install mixle-pde
         run: pip install -e ".[test,data]"
       - name: Run tests
@@ -58,3 +58,13 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install build
       - run: python -m build
+
+  attribution:
+    name: Refuse authorship this project does not claim
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/release/0.8.3' || github.base_ref == 'release/0.8.3'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: python3 scripts/check_commit_attribution.py --base 19797870

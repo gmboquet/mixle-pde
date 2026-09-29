@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.3rc1 (pre-release)
+
+- Version and branch aligned with the mixle 0.8.3 pre-release cycle: this line is `release/0.8.3`,
+  cut from `release/0.8.0` at `1979787`, carries the pre-release version `0.8.3rc1` until the family's
+  final cut sets `0.8.3`, and its tests install mixle from `release/0.8.3`. No functional change.
+
 ## 0.8.0 (development)
 
 - Added exhaustive legacy-module disposition and final-owner inventory.
