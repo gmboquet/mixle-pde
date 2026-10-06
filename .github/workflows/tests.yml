@@ -67,4 +67,4 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - run: python3 scripts/check_commit_attribution.py --base 19797870
+      - run: python3 scripts/check_commit_attribution.py --base 1979787f

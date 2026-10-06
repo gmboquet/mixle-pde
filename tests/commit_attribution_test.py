@@ -14,7 +14,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-RELEASE_BASE = "19797870"
+RELEASE_BASE = "1979787f"
 
 
 def _module():
