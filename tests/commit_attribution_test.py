@@ -28,7 +28,11 @@ def _module():
 
 def _has_range() -> bool:
     try:
-        subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--verify", RELEASE_BASE + "^{commit}"], capture_output=True, check=True)
+        subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "--verify", RELEASE_BASE + "^{commit}"],
+            capture_output=True,
+            check=True,
+        )
     except (subprocess.CalledProcessError, FileNotFoundError):
         return False
     return True
@@ -73,14 +77,25 @@ class DetectionTest(unittest.TestCase):
         tool trailer and a vendor name, and check the range trips."""
         module = _module()
         with tempfile.TemporaryDirectory() as tmp:
-            env = {"GIT_AUTHOR_NAME": "Grant Boquet", "GIT_AUTHOR_EMAIL": "grant.boquet@gmail.com",
-                   "GIT_COMMITTER_NAME": "Grant Boquet", "GIT_COMMITTER_EMAIL": "grant.boquet@gmail.com",
-                   "HOME": tmp, "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"}
-            run = lambda *a: subprocess.run(["git", "-C", tmp, *a], check=True, capture_output=True, env=env)
+            env = {
+                "GIT_AUTHOR_NAME": "Grant Boquet",
+                "GIT_AUTHOR_EMAIL": "grant.boquet@gmail.com",
+                "GIT_COMMITTER_NAME": "Grant Boquet",
+                "GIT_COMMITTER_EMAIL": "grant.boquet@gmail.com",
+                "HOME": tmp,
+                "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
+            }
+
+            def run(*a):
+                return subprocess.run(["git", "-C", tmp, *a], check=True, capture_output=True, env=env)
+
             run("init", "-q", "-b", "main")
             Path(tmp, "a").write_text("a")
-            run("add", "a"); run("commit", "-q", "-m", "clean start")
-            base = subprocess.run(["git", "-C", tmp, "rev-parse", "HEAD"], capture_output=True, text=True, env=env).stdout.strip()
+            run("add", "a")
+            run("commit", "-q", "-m", "clean start")
+            base = subprocess.run(
+                ["git", "-C", tmp, "rev-parse", "HEAD"], capture_output=True, text=True, env=env
+            ).stdout.strip()
             Path(tmp, "b").write_text("b")
             run("add", "b")
             run("commit", "-q", "-m", "add b\n\nCo-Authored-By: Claude <noreply@anthropic.com>")
